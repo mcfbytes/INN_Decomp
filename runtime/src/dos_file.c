@@ -168,12 +168,14 @@ CallbackResult dos_read(Machine *m)
     if (!buf)
         fatal("out of memory");
     uint16_t got = 0;
+    off_t file_pos = -1;
     if (f->dev == DEV_CON) {
         if (!dos_con_read(m, buf, CX, &got)) {
             free(buf);
             return CB_RETRY;
         }
     } else if (f->dev == DEV_NONE) {
+        file_pos = lseek(f->fd, 0, SEEK_CUR);
         ssize_t n = read(f->fd, buf, CX);
         if (n < 0) {
             free(buf);
@@ -183,6 +185,8 @@ CallbackResult dos_read(Machine *m)
     }
     mem_write_block(m, real_addr(DS, DX), buf, got);
     free(buf);
+    if (file_pos >= 0)
+        dos_note_module_read(m, f, file_pos, DS, DX, got);
     AX = got;
     return dos_ok(m);
 }

@@ -6,6 +6,8 @@
 #include <stdint.h>
 #include <time.h>
 
+#include <sys/types.h>
+
 #include "dos.h"
 #include "machine.h"
 
@@ -271,5 +273,9 @@ CallbackResult dos_dbcs(Machine *m);
 CallbackResult dos_ext_country(Machine *m);
 CallbackResult dos_code_page(Machine *m);
 CallbackResult dos_get_dpb(Machine *m);
+
+/* A program read part of a file into memory; announces driver and DLL images to the lift registry. */
+void dos_note_module_read(Machine *m, const DosFile *f, off_t file_pos, uint16_t seg, uint16_t off,
+                          uint16_t bytes);
 
 #endif

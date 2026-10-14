@@ -116,6 +116,8 @@ void lift_module_loaded(Machine *m, const char *module, uint16_t load_seg, uint3
     if (!s)
         return;
     remember_module(s, module, load_seg);
+    if (m->trace)
+        log_msg("lift: module %s at %04X (%u bytes)", module, load_seg, image_bytes);
     lift_module_unloaded(m, load_seg, (image_bytes + 15) / 16);
     for (int t = 0; t < s->table_count; t++)
         for (int i = 0; i < s->tables[t].count; i++)

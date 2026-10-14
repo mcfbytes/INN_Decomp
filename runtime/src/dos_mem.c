@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "dos_int.h"
+#include "lift.h"
 
 enum { MCB_MID = 'M', MCB_LAST = 'Z', OWNER_FREE = 0 };
 enum { FIT_FIRST = 0, FIT_BEST = 1, FIT_LAST = 2, FIT_MASK = 3 };
@@ -114,6 +115,7 @@ int dos_mem_alloc(Machine *m, uint16_t paras, uint16_t owner, uint16_t *seg, uin
 
 int dos_mem_free(Machine *m, uint16_t seg)
 {
+    lift_module_unloaded(m, seg, mcb_size(m, (uint16_t)(seg - 1)));
     uint16_t mcb = (uint16_t)(seg - 1);
     if (!mcb_valid(m, mcb))
         return DE_INVALID_BLOCK;

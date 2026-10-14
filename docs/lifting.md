@@ -26,9 +26,11 @@ never pushed to the public repo; see `docs/PLAN.md` section 3). Only the mechani
 
 Each lifted source file contributes rows to a static `LiftedEntry` table: module name, entry
 `seg:off` relative to the load segment, function, name, and the first 12 original bytes.
-`lift_module_loaded` arms a table when a loader announces the module (DOS EXEC does this for
-programs; drivers and DLLs loaded by the programs themselves need their loader hooked as well,
-still to do). On first execution the bytes at the entry are compared with the signature; a
+`lift_module_loaded` arms a table when a loader announces the module. DOS EXEC announces programs
+at their load segment. Drivers (`*.DRV`, raw images) and LSCI DLLs (`*.DLL`, image after the
+relocation list) are announced when a file read lands their image start on a paragraph
+boundary (`runtime/src/dos_modules.c`); their `seg:off` are relative to the image start. Freeing
+a DOS memory block disarms every hook inside it. On first execution the bytes at the entry are compared with the signature; a
 mismatch (another build, or code not yet unpacked) logs once and runs the original instead.
 
 ## Workflow per function
