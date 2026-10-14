@@ -8,7 +8,7 @@
 typedef struct Insn {
     uint32_t start_eip;
     int seg; /* override, or S_NONE */
-    bool op32, addr32;
+    bool op32, addr32, lock;
     uint8_t rep; /* 0, 0xF2 or 0xF3 */
 } Insn;
 
@@ -29,6 +29,8 @@ static const uint8_t parity_table[256] = {
 #undef P4
 #undef P6
 };
+
+enum { CR0_REAL_MODE = 0x7FFEFFF0 }; /* as the 386EX reports it after reset: PE and PG clear */
 
 static inline uint32_t size_mask(int size) { return size == 1 ? 0xFF : size == 2 ? 0xFFFF : 0xFFFFFFFFu; }
 static inline uint32_t sign_bit(int size) { return 1u << (size * 8 - 1); }
@@ -158,8 +160,11 @@ static uint32_t decode_sib(Machine *m, int mod, int *default_seg)
         if (base == R_SP || base == R_BP)
             *default_seg = S_SS;
     }
+    /* With no index the 386 scales the base instead (an undefined encoding; hardware-verified). */
     if (index != R_SP)
         addr += c->r[index].e << scale;
+    else if (!(base == R_BP && mod == 0))
+        addr <<= scale;
     return addr;
 }
 
@@ -211,6 +216,13 @@ static Operand decode_modrm(Machine *m, const Insn *in)
     op.off = off;
     op.addr = seg_base_for(m, in, default_seg) + off;
     return op;
+}
+
+/* Linear address delta bytes into a memory operand; 16-bit offsets wrap within the segment. */
+static uint32_t operand_part(const Insn *in, const Operand *op, uint32_t delta)
+{
+    uint32_t off = op->off + delta;
+    return op->addr - op->off + (in->addr32 ? off : off & 0xFFFF);
 }
 
 static uint32_t read_mem(Machine *m, int size, uint32_t addr)
@@ -350,16 +362,17 @@ static uint32_t shift_rotate(Machine *m, int op, int size, uint32_t v, unsigned 
             cf = out;
         }
         break;
+    /* Past the operand width only a multiple of the width keeps the edge bit (hardware-verified). */
     case 4: /* shl */
     case 6:
-        cf = count <= bits ? (v >> (bits - count)) & 1 : 0;
+        cf = count <= bits ? (v >> (bits - count)) & 1 : count % bits == 0 && (v & 1);
         res = count < bits ? (v << count) & mask : 0;
         set_flag(c, F_OF, ((res & sb) != 0) != cf);
         set_szp(c, size, res);
         set_flag(c, F_AF, false);
         break;
     case 5: /* shr */
-        cf = count <= bits ? (v >> (count - 1)) & 1 : 0;
+        cf = count <= bits ? (v >> (count - 1)) & 1 : count % bits == 0 && (v & sb);
         res = count < bits ? v >> count : 0;
         set_flag(c, F_OF, (v & sb) != 0);
         set_szp(c, size, res);
@@ -413,14 +426,16 @@ static void far_jump(Machine *m, uint16_t seg, uint32_t off)
     m->cpu.eip = off & 0xFFFF;
 }
 
+/* The vector is read before the frame is pushed, which matters when the stack overlaps the IVT. */
 void cpu_interrupt(Machine *m, uint8_t vector)
 {
     Cpu *c = &m->cpu;
+    uint16_t off = mem_rd16(m, vector * 4u), seg = mem_rd16(m, vector * 4u + 2);
     cpu_push16(m, (uint16_t)c->flags);
     cpu_push16(m, c->seg[S_CS]);
     cpu_push16(m, (uint16_t)c->eip);
     c->flags &= ~(F_IF | F_TF);
-    far_jump(m, mem_rd16(m, vector * 4u + 2), mem_rd16(m, vector * 4u));
+    far_jump(m, seg, off);
     c->halted = false;
 }
 
@@ -653,7 +668,7 @@ static void bcd_adjust(Machine *m, uint8_t opcode)
             if (opcode == 0x37) {
                 c->r[R_AX].w += 0x106;
             } else {
-                c->r[R_AX].b.l -= 6;
+                c->r[R_AX].w -= 6;
                 c->r[R_AX].b.h -= 1;
             }
             af = cf = true;
@@ -676,12 +691,9 @@ static uint32_t bit_test(Machine *m, const Insn *in, int size, int sub, const Op
     uint32_t addr = op->addr;
     if (!op->is_reg && bit_from_reg) {
         int32_t sbit = size == 2 ? (int16_t)bit : (int32_t)bit;
-        addr += (uint32_t)((sbit >> (size == 2 ? 4 : 5)) * size);
-        bit &= size * 8 - 1;
-    } else {
-        bit &= size * 8 - 1;
+        addr = operand_part(in, op, (uint32_t)((sbit >> (size == 2 ? 4 : 5)) * size));
     }
-    (void)in;
+    bit &= size * 8 - 1;
     uint32_t v = op->is_reg ? get_reg(m, size, op->index) : read_mem(m, size, addr);
     set_flag(c, F_CF, (v >> bit) & 1);
     switch (sub) {
@@ -700,20 +712,21 @@ static uint32_t bit_test(Machine *m, const Insn *in, int size, int sub, const Op
 static uint32_t double_shift(Machine *m, int size, uint32_t dst, uint32_t src, unsigned count, bool left)
 {
     Cpu *c = &m->cpu;
-    unsigned bits = (unsigned)size * 8;
+    unsigned bits = (unsigned)size * 8, top = size == 2 ? 48 : 64;
     count &= 0x1F;
-    if (count == 0 || count > bits)
+    if (count == 0)
         return dst;
-    uint64_t combined;
+    /* A 16-bit shift by more than 16 keeps shifting in copies of src (hardware-verified). */
+    uint64_t wide = size == 2 ? (left ? (uint64_t)dst << 32 | (uint64_t)src << 16 | src
+                                      : (uint64_t)src << 32 | (uint64_t)src << 16 | dst)
+                              : (left ? (uint64_t)dst << 32 | src : (uint64_t)src << 32 | dst);
     uint32_t res;
     if (left) {
-        combined = ((uint64_t)dst << bits) | src;
-        res = (uint32_t)((combined << count) >> bits) & size_mask(size);
-        set_flag(c, F_CF, (dst >> (bits - count)) & 1);
+        res = (uint32_t)(wide >> (top - bits - count)) & size_mask(size);
+        set_flag(c, F_CF, (wide >> (top - count)) & 1);
     } else {
-        combined = ((uint64_t)src << bits) | dst;
-        res = (uint32_t)(combined >> count) & size_mask(size);
-        set_flag(c, F_CF, (dst >> (count - 1)) & 1);
+        res = (uint32_t)(wide >> count) & size_mask(size);
+        set_flag(c, F_CF, (wide >> (count - 1)) & 1);
     }
     set_flag(c, F_OF, ((res ^ dst) & sign_bit(size)) != 0);
     set_szp(c, size, res);
@@ -729,7 +742,7 @@ static void load_far_pointer(Machine *m, const Insn *in, int sreg)
         return;
     }
     uint32_t off = read_mem(m, size, op.addr);
-    uint16_t seg = mem_rd16(m, op.addr + (uint32_t)size);
+    uint16_t seg = mem_rd16(m, operand_part(in, &op, (uint32_t)size));
     set_reg(m, size, op.reg_field, off);
     cpu_set_seg(&m->cpu, sreg, seg);
     if (sreg == S_SS)
@@ -758,10 +771,24 @@ static void exec_0f(Machine *m, Insn *in)
     case 0x01: /* group 7: only SMSW is meaningful in real mode */
         op = decode_modrm(m, in);
         if (op.reg_field == 4)
-            write_rm(m, 2, &op, 0xFFF0);
+            write_rm(m, 2, &op, (uint16_t)CR0_REAL_MODE);
         else if (op.reg_field != 6)
             log_msg("cpu: 0F 01 /%d ignored at %04X:%04X", op.reg_field, c->seg[S_CS], in->start_eip);
         return;
+    case 0x06: /* clts: CR0 is not modelled */
+        return;
+    case 0x20: case 0x21: case 0x22: case 0x23: {
+        /* MOV to/from CRn/DRn ignores mod; reads give reset values and writes are dropped. */
+        uint8_t modrm = fetch8(m);
+        int n = modrm >> 3 & 7;
+        if (op2 == 0x20)
+            c->r[modrm & 7].e = n == 0 ? CR0_REAL_MODE : 0;
+        else if (op2 == 0x21)
+            c->r[modrm & 7].e = n == 6 ? 0xFFFF0FF0u : 0;
+        else if (op2 == 0x22 && n == 0 && (c->r[modrm & 7].e & 1))
+            log_msg("cpu: protected mode not supported at %04X:%04X", c->seg[S_CS], in->start_eip);
+        return;
+    }
     case 0xA0: push_op(m, in, c->seg[S_FS]); return;
     case 0xA1: cpu_set_seg(c, S_FS, (uint16_t)pop_op(m, in)); return;
     case 0xA8: push_op(m, in, c->seg[S_GS]); return;
@@ -870,14 +897,14 @@ static void group_ff(Machine *m, Insn *in, int size)
         v = read_mem(m, size, op.addr);
         push_op(m, in, c->seg[S_CS]);
         push_op(m, in, c->eip);
-        far_jump(m, mem_rd16(m, op.addr + (uint32_t)size), v);
+        far_jump(m, mem_rd16(m, operand_part(in, &op, (uint32_t)size)), v);
         break;
     case 4:
         c->eip = read_rm(m, size, &op) & 0xFFFF;
         break;
     case 5:
         if (op.is_reg) { invalid_opcode(m, in, 0xFF); return; }
-        far_jump(m, mem_rd16(m, op.addr + (uint32_t)size), read_mem(m, size, op.addr));
+        far_jump(m, mem_rd16(m, operand_part(in, &op, (uint32_t)size)), read_mem(m, size, op.addr));
         break;
     case 6:
         push_op(m, in, read_rm(m, size, &op));
@@ -911,6 +938,25 @@ static void group_fe(Machine *m, Insn *in)
 
 /* ---- main decode ---- */
 
+/* LOCK is only legal on read-modify-write instructions with a memory destination. */
+static bool lock_allowed(Machine *m, uint8_t opcode)
+{
+    Cpu *c = &m->cpu;
+    uint8_t b1 = mem_rd8(m, c->seg_base[S_CS] + (c->eip & 0xFFFF));
+    uint8_t modrm = opcode == 0x0F ? mem_rd8(m, c->seg_base[S_CS] + ((c->eip + 1) & 0xFFFF)) : b1;
+    int reg = modrm >> 3 & 7;
+    if (modrm >> 6 == 3)
+        return false;
+    switch (opcode) {
+    case 0x0F: return b1 == 0xAB || b1 == 0xB3 || b1 == 0xBB || (b1 == 0xBA && reg >= 5);
+    case 0x80: case 0x81: case 0x82: case 0x83: return reg != ALU_CMP;
+    case 0x86: case 0x87: return true;
+    case 0xF6: case 0xF7: return reg == 2 || reg == 3;
+    case 0xFE: case 0xFF: return reg < 2;
+    }
+    return opcode < 0x40 && (opcode & 6) == 0 && (opcode >> 3) != ALU_CMP;
+}
+
 static int op_size(const Insn *in) { return in->op32 ? 4 : 2; }
 
 static void exec_one(Machine *m)
@@ -933,10 +979,15 @@ static void exec_one(Machine *m)
         case 0x65: in.seg = S_GS; continue;
         case 0x66: in.op32 = true; continue;
         case 0x67: in.addr32 = true; continue;
-        case 0xF0: continue;
+        case 0xF0: in.lock = true; continue;
         case 0xF2: case 0xF3: in.rep = opcode; continue;
         }
         break;
+    }
+
+    if (in.lock && !lock_allowed(m, opcode)) {
+        invalid_opcode(m, &in, 0xF0);
+        return;
     }
 
     if (opcode < 0x40 && (opcode & 7) < 6) {
@@ -992,18 +1043,29 @@ static void exec_one(Machine *m)
         return;
     }
     case 0x61: /* popa */
+        w = 0;
         for (int r = 7; r >= 0; r--) {
             v = pop_op(m, &in);
             if (r != R_SP)
                 set_reg(m, op_size(&in), r, v);
+            else
+                w = v;
         }
+        /* POPAD on a 16-bit stack loads ESP's high word from the popped image (hardware-verified). */
+        if (in.op32)
+            c->r[R_SP].e = (w & 0xFFFF0000u) | c->r[R_SP].w;
         return;
     case 0x62: { /* bound */
         size = op_size(&in);
         op = decode_modrm(m, &in);
+        if (op.is_reg) {
+            invalid_opcode(m, &in, opcode);
+            return;
+        }
         int32_t idx = size == 2 ? (int16_t)get_reg(m, 2, op.reg_field) : (int32_t)get_reg(m, 4, op.reg_field);
         int32_t lo = size == 2 ? (int16_t)read_mem(m, 2, op.addr) : (int32_t)read_mem(m, 4, op.addr);
-        int32_t hi = size == 2 ? (int16_t)read_mem(m, 2, op.addr + 2) : (int32_t)read_mem(m, 4, op.addr + 4);
+        uint32_t hi_addr = operand_part(&in, &op, (uint32_t)size);
+        int32_t hi = size == 2 ? (int16_t)read_mem(m, 2, hi_addr) : (int32_t)read_mem(m, 4, hi_addr);
         if (idx < lo || idx > hi)
             raise_fault(m, &in, 5);
         return;
@@ -1062,10 +1124,18 @@ static void exec_one(Machine *m)
         return;
     case 0x8C:
         op = decode_modrm(m, &in);
+        if (op.reg_field > S_GS) {
+            invalid_opcode(m, &in, opcode);
+            return;
+        }
         write_rm(m, op.is_reg ? op_size(&in) : 2, &op, c->seg[op.reg_field & 7]);
         return;
     case 0x8D:
         op = decode_modrm(m, &in);
+        if (op.is_reg) {
+            invalid_opcode(m, &in, opcode);
+            return;
+        }
         set_reg(m, op_size(&in), op.reg_field, op.off);
         return;
     case 0x8E:
@@ -1078,11 +1148,19 @@ static void exec_one(Machine *m)
         if (op.reg_field == S_SS)
             c->irq_inhibit = true;
         return;
-    case 0x8F:
-        op = decode_modrm(m, &in);
+    case 0x8F: {
+        /* The destination address is computed after the pop increments SP. */
+        uint32_t old_sp = c->r[R_SP].e;
         v = pop_op(m, &in);
+        op = decode_modrm(m, &in);
+        if (op.reg_field != 0) {
+            c->r[R_SP].e = old_sp;
+            invalid_opcode(m, &in, opcode);
+            return;
+        }
         write_rm(m, op_size(&in), &op, v);
         return;
+    }
     case 0x90:
         return;
     case 0x91: case 0x92: case 0x93: case 0x94: case 0x95: case 0x96: case 0x97:
@@ -1153,6 +1231,10 @@ static void exec_one(Machine *m)
     case 0xC6: case 0xC7:
         size = (opcode & 1) ? op_size(&in) : 1;
         op = decode_modrm(m, &in);
+        if (op.reg_field != 0) {
+            invalid_opcode(m, &in, opcode);
+            return;
+        }
         write_rm(m, size, &op, fetch_imm(m, size));
         return;
     case 0xC8: { /* enter */
@@ -1167,7 +1249,7 @@ static void exec_one(Machine *m)
         }
         if (level > 0)
             push_op(m, &in, frame_ptr);
-        set_reg(m, 2, R_BP, frame_ptr);
+        set_reg(m, size, R_BP, frame_ptr);
         c->r[R_SP].w -= frame;
         return;
     }
@@ -1213,8 +1295,8 @@ static void exec_one(Machine *m)
     }
     case 0xD6: c->r[R_AX].b.l = (c->flags & F_CF) ? 0xFF : 0; return;
     case 0xD7:
-        c->r[R_AX].b.l = mem_rd8(m, seg_base_for(m, &in, S_DS) +
-                                        ((in.addr32 ? c->r[R_BX].e : c->r[R_BX].w) + c->r[R_AX].b.l));
+        v = in.addr32 ? c->r[R_BX].e + c->r[R_AX].b.l : (uint16_t)(c->r[R_BX].w + c->r[R_AX].b.l);
+        c->r[R_AX].b.l = mem_rd8(m, seg_base_for(m, &in, S_DS) + v);
         return;
     case 0xD8: case 0xD9: case 0xDA: case 0xDB: case 0xDC: case 0xDD: case 0xDE: case 0xDF:
         decode_modrm(m, &in);
@@ -1272,6 +1354,9 @@ static void exec_one(Machine *m)
     case 0xEE: case 0xEF:
         size = (opcode & 1) ? op_size(&in) : 1;
         port_out(m, c->r[R_DX].w, get_reg(m, size, R_AX), size);
+        return;
+    case 0xF1: /* icebp */
+        cpu_interrupt(m, 1);
         return;
     case 0xF4:
         c->halted = true;
