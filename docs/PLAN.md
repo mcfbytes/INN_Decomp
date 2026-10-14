@@ -66,6 +66,9 @@ produces the game.
 - [x] **M4** Lifting infrastructure: entry hooks, nested guest calls, shadow verification, generated
       registration tables, Ghidra export (`tools/ghidra/`). First lifted function verified live.
 - [ ] **M5** Lift LSCITV: VM, memory manager, resources, kernels, graphics, sound, TSN kernel.
+      Status 2026-10-14: VM (207 functions plus the bytecode interpreter), memory/resources/files (144),
+      events/input/time/sound sequencer (86 hooked) and TSNEXEC's C code (110) lifted and verified;
+      graphics in progress. Open: TSNEXEC INT 14h handler and driver glue, the drivers and DLLs.
 - [ ] **M6** Sound: OPL2 (AdLib), then Sound Blaster digital audio. OPL2, PC speaker, mixer,
       SDL2 output and `--wav` done (2026-10-14), browser audio confirmed in Edge; Sound Blaster DSP open.
 - [ ] **M7** Yserbius and Twinion (lift the shared engine; overlays need per-overlay module registration).
