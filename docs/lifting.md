@@ -49,9 +49,45 @@ translation unit and cannot see file-local definitions. Each lifted source file 
 `lift_module_loaded` arms a table when a loader announces the module. DOS EXEC announces programs
 at their load segment. Drivers (`*.DRV`, raw images) and LSCI DLLs (`*.DLL`, image after the
 relocation list) are announced when a file read lands their image start on a paragraph
-boundary (`runtime/src/dos_modules.c`); their `seg:off` are relative to the image start. Freeing
+boundary (`runtime/src/dos_modules.c`); their `seg:off` are relative to the image start. Borland
+overlays are announced per overlay (section "Overlays"). Freeing
 a DOS memory block disarms every hook inside it. On first execution the bytes at the entry are compared with the signature; a
 mismatch (another build, or code not yet unpacked) logs once and runs the original instead.
+
+## Overlays
+
+Borland's overlay manager (VROOMM, in `DARKSTRT.EXE` and `FATES.EXE`) keeps overlay code out of the load
+image and reads it from the program's own EXE into a buffer when an INT 3Fh thunk in the overlay's stub
+segment is called; it later reuses the buffer for other overlays. An overlay is named by its stub
+segment, as Borland's map files and the far calls in the resident code name it.
+
+- **Format** (observed, `runtime/src/borland_overlay.c`): right after the MZ load module, a 16-byte
+  trailer `"FBOV"`, u32 overlay data bytes, u32 file offset of the segment table, u32 table rows; the
+  overlay data follows. Table rows are 8 bytes (u16 segment, u16 max offset, u16 flags, u16 min
+  offset); flags 3 marks an overlay stub. A stub starts with INT 3Fh, then u16, u32 code offset in the
+  overlay data, u16 code bytes, u16 fixup bytes, u16 entry count; one 5-byte INT 3Fh thunk per entry
+  follows at +20h. The fixup table follows the code: word offsets that get the program's load segment
+  added. The buffer only keeps the code; the next overlay may be read over the fixups.
+- **Markers.** An overlay function is marked with its stub segment and its offset in the overlay's code,
+  `LIFTED(0x1E3E, 0x0042, ...)` in a directory whose `module.txt` names the EXE. `tools/gen_lift_table.py`
+  sees that the segment is a stub, registers the entry under `DARKSTRT.EXE#1E3E`, takes the signature
+  from the overlay's code, its relocations from the overlay's fixup table, and leaves bytes past the end
+  of the code uncompared (`LiftedEntry.unknown_mask`).
+- **Announcing.** A DOS read from a file whose name is a loaded program with overlays announces each
+  overlay whose code the read holds whole and that lands on a paragraph (`dos_modules.c`):
+  `lift_overlay_loaded(name#stub, segment, code bytes, program load segment)`. That disarms the same
+  overlay's hooks wherever they were armed and any hook inside the new code's range (the overlay it
+  replaced), then arms the overlay's entries.
+- **Checked on every call.** Overlay entries compare their bytes, with the fixups applied, each time
+  they are reached, not only the first time: a buffer may be reused without a read we see. A mismatch
+  runs the original and is logged once per arming.
+- **Verification.** Counts are kept per entry across loads, and the summary lists every entry that was
+  ever armed. An overlay load during a shadow run re-arms hooks for the new code; restoring the
+  snapshot does not undo that, which at worst leaves an overlay function running its original until
+  the next load of it.
+
+The manager may read several consecutive overlays in one read (`DARKSTRT` reads its first two
+together); each is announced.
 
 ## Workflow per function
 

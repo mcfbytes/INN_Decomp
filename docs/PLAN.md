@@ -75,6 +75,9 @@ produces the game.
       sound's digital track. LSCITV never asks the driver for digital tracks, so in INN only Golf's
       `SOUND.SFX` remains to hear (needs the M8 game launch); browser check of SB output open.
 - [ ] **M7** Yserbius and Twinion (lift the shared engine; overlays need per-overlay module registration).
+      Status 2026-10-14: from the INN map, `CGENN` and `DARKSTRT` run under the interpreter to the town and
+      the dungeon with music, `TWGENN` and `FATES` to the town, given three host additions ([yserbius.md](yserbius.md)). Per-overlay
+      registration done ([lifting.md](lifting.md), "Overlays").
 - [ ] **M8** Golf, Red Baron (x87), Shoppers Advantage.
 
 ## 5. Verification
