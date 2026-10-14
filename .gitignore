@@ -1,0 +1,11 @@
+# Original media and everything derived from it stay local (bring your own disks).
+/media/
+/work/
+/build*/
+/private/
+*.EXE
+*.exe
+*.DRV
+*.DLL
+RESOURCE.*
+__pycache__/
