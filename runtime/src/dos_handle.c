@@ -81,7 +81,7 @@ void dos_sft_release(Machine *m, int idx)
 {
     DosFile *f = &dos_state(m)->sft[idx];
     if (f->refs > 0 && --f->refs == 0 && f->fd >= 0) {
-        close(f->fd);
+        dos_host_close(f->fd);
         f->fd = -1;
     }
 }

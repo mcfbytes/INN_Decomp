@@ -133,6 +133,8 @@ static inline DosState *dos_state(Machine *m) { return (DosState *)m->dos; }
 /* unlink and rename on the host, journaled during shadow verification (dos_snapshot.c). */
 int dos_host_unlink(const char *path);
 int dos_host_rename(const char *from, const char *to);
+/* close(2) for DOS handles; deferred during a shadow run for descriptors open when it began. */
+void dos_host_close(int fd);
 /* open(2) for DOS open/create; exists says whether the path existed before. */
 int dos_host_open(const char *path, int flags, bool exists);
 

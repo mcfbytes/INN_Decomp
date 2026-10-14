@@ -52,7 +52,13 @@ typedef struct JournalEntry {
 } JournalEntry;
 
 /* Shadow runs are nested in one machine's step, so one journal serves the process. */
-static struct { bool active; int count, serial; JournalEntry e[JOURNAL_MAX]; } journal;
+static struct {
+    bool active;
+    int count, serial;
+    JournalEntry e[JOURNAL_MAX];
+    int begin_fds[DOS_SFT_MAX], begin_count;     /* open when the journal began */
+    int deferred_fds[DOS_SFT_MAX], deferred_count; /* of those, closed by a run */
+} journal;
 
 static JournalEntry *journal_add(JournalKind kind, const char *path)
 {
@@ -68,7 +74,7 @@ static JournalEntry *journal_add(JournalKind kind, const char *path)
 void dos_journal_begin(Machine *m)
 {
     journal.active = true;
-    journal.count = 0;
+    journal.count = journal.begin_count = journal.deferred_count = 0;
     if (!m || !m->dos)
         return;
     const DosState *d = dos_state(m);
@@ -76,6 +82,7 @@ void dos_journal_begin(Machine *m)
         struct stat st;
         if (!d->sft[i].refs || d->sft[i].fd < 0 || fstat(d->sft[i].fd, &st) != 0)
             continue;
+        journal.begin_fds[journal.begin_count++] = d->sft[i].fd;
         JournalEntry *e = journal_add(J_SIZED_FD, NULL);
         if (e) {
             e->fd = d->sft[i].fd;
@@ -102,9 +109,36 @@ void dos_journal_undo(Machine *m)
     }
 }
 
+static bool fd_listed(const int *fds, int count, int fd)
+{
+    for (int i = 0; i < count; i++)
+        if (fds[i] == fd)
+            return true;
+    return false;
+}
+
+/* A run must not free a descriptor the restored state still names: the next open would reuse its
+ * number for another file. Closing waits for the end, when only the final state counts. */
+void dos_host_close(int fd)
+{
+    if (!journal.active || !fd_listed(journal.begin_fds, journal.begin_count, fd)) {
+        close(fd);
+        return;
+    }
+    if (!fd_listed(journal.deferred_fds, journal.deferred_count, fd))
+        journal.deferred_fds[journal.deferred_count++] = fd;
+}
+
 void dos_journal_end(Machine *m)
 {
-    (void)m;
+    for (int i = 0; i < journal.deferred_count; i++) {
+        bool used = false;
+        for (int k = 0; m && m->dos && k < DOS_SFT_MAX; k++)
+            used |= dos_state(m)->sft[k].refs && dos_state(m)->sft[k].fd == journal.deferred_fds[i];
+        if (!used)
+            close(journal.deferred_fds[i]);
+    }
+    journal.deferred_count = journal.begin_count = 0;
     for (int i = 0; i < journal.count; i++)
         if (journal.e[i].kind == J_DELETED)
             unlink(journal.e[i].other);
