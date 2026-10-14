@@ -70,7 +70,10 @@ produces the game.
       events/input/time/sound sequencer (86 hooked) and TSNEXEC's C code (110) lifted and verified;
       graphics in progress. Open: TSNEXEC INT 14h handler and driver glue, the drivers and DLLs.
 - [ ] **M6** Sound: OPL2 (AdLib), then Sound Blaster digital audio. OPL2, PC speaker, mixer,
-      SDL2 output and `--wav` done (2026-10-14), browser audio confirmed in Edge; Sound Blaster DSP open.
+      SDL2 output and `--wav` done (2026-10-14), browser audio confirmed in Edge. Sound Blaster 2.0 DSP
+      and 8237 DMA done (2026-10-14): `SNDBLAST.DRV` initialises, plays FM and, called directly, plays a
+      sound's digital track. LSCITV never asks the driver for digital tracks, so in INN only Golf's
+      `SOUND.SFX` remains to hear (needs the M8 game launch); browser check of SB output open.
 - [ ] **M7** Yserbius and Twinion (lift the shared engine; overlays need per-overlay module registration).
 - [ ] **M8** Golf, Red Baron (x87), Shoppers Advantage.
 

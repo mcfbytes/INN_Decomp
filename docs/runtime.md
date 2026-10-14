@@ -63,13 +63,23 @@ status about 100 times, all inside one 100 us slice.
 `audio.c` mixes every source into a ring of 16-bit stereo frames at one output rate (48 kHz unless
 the sink asks for another). Output frame n belongs to emulated time `base + n / rate`, so sound
 follows the emulated clock. Sources render lazily: `audio_sync` runs before any register write that
-changes a sound (OPL data, PIT channel 2, port 61h), before a sink reads, and from a ticker once
+changes a sound (OPL data, PIT channel 2, port 61h, DSP ports), before a sink reads, and from a ticker once
 5 ms are pending. With no sink the mixer only advances its clock and costs nothing.
 
 | Source | Ports | Notes |
 |---|---|---|
-| OPL2 (`opl.c`) | 388h/389h, mirror 228h/229h | Nuked-OPL3 core (docs/third_party.md) at 49716 Hz, linear resampling; status reads `06h` in the low bits (OPL2, not OPL3); timers evaluated lazily from `machine_now_ns`; no IRQ, as on an AdLib |
+| OPL2 (`opl.c`) | 388h/389h, mirrors 228h/229h and 220h-223h | Nuked-OPL3 core (docs/third_party.md) at 49716 Hz, linear resampling; status reads `06h` in the low bits (OPL2, not OPL3); timers evaluated lazily from `machine_now_ns`; no IRQ, as on an AdLib |
 | PC speaker (`speaker.c`) | 42h, 43h, 61h | square wave at PIT channel 2's rate; held high while the gate is off, so bit-1 toggling is heard; DC-blocked |
+| Sound Blaster DSP (`sb.c`) | 226h, 22Ah, 22Ch, 22Eh; DMA 1, IRQ 7 | DSP 2.01: 8-bit mono single-cycle (14h, 91h) and auto-init (1Ch, 90h, DAh) DMA, direct DAC (10h), time constant, block size, pause/continue, speaker on/off, E0h/E1h/E4h/E8h/F2h; output ramps linearly between samples and is AC-coupled like the line out, so a held DAC level fades. ADPCM, recording and the SB Pro mixer are not emulated (their commands are parsed and ignored) |
+
+The DSP keeps its own clock: byte k of a block is fetched from the DMA controller at block start +
+(k + 1) sample periods of emulated time, whether or not a sink is rendering. Rendering calls the same
+fetch for each frame's time (`audio_frame_ns`), so samples and block ends agree; with no sink a ticker
+fetches the rest of a block when it is due, so the block-end IRQ and the DMA counters keep their real
+timing. Port access to the DSP or to channel 1's DMA registers first brings the DSP up to now. A masked
+DMA channel stalls the DSP, as the DREQ would. The DOS environment carries `BLASTER=A220 I7 D1 T3`.
+`SNDBLAST.DRV` ignores it (fixed base 220h from the interpreter, DMA 1, IRQ found by probing 2/3/5/7
+with a one-byte transfer); `GOLF.EXE` names the variable (probably reads it).
 
 Sinks, in `runtime/frontend/audio_sdl.c`:
 
@@ -112,3 +122,13 @@ expects. The frontend starts each program in its own directory.
   IRQ12 enters a ROM trampoline that saves registers, far-calls the handler with the event in
   AX/BX/CX/DX/SI/DI, restores, EOIs and IRETs. One queued event per call.
 - **VGA.** B8000h is the text buffer; the A0000h window is routed through `vga_mem_read/write`.
+- **8237 DMA (`dma.c`).** Channels 0-3: address/count with the flip-flop, mode, single and all-channel
+  masks, status (TC bits, cleared on read), master clear, page registers 87h/83h/81h/82h. Devices pull
+  memory-to-device bytes with `dma_read`; terminal count reloads in auto-init mode and masks the channel
+  otherwise. Reads never touch the VGA window (they would latch planes). Before the guest reads or
+  reprograms a channel, the owning device's sync hook runs.
+- **Shadow verification and sound devices.** SB and DMA ports follow the `io_mode` rules like every
+  non-VGA device: the original run drives the devices and records, the lifted run replays. DMA only
+  reads guest memory, so it cannot disturb the snapshots, and emulated time running backwards when the
+  CPU is restored is ignored (fetches only move forward). IRQs raised meanwhile wait in the PIC until
+  `irq_hold` clears.
