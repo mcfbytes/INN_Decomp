@@ -44,12 +44,13 @@ mismatch (another build, or code not yet unpacked) logs once and runs the origin
 
 ## Shadow verification
 
-With `--verify-lifted`, each call to a lifted function snapshots the machine, runs the lifted C,
-records the resulting state, restores the snapshot, runs the original under the interpreter until
-it returns (interrupts held), and compares the two end states: memory, the registers the
-convention preserves or returns, and the port I/O log. Port reads made by the original are
-replayed to the lifted run so device timing cannot cause false differences. The first difference
-is reported with the function, the call count and a byte-level diff.
+Each verified call snapshots the machine, runs the original under the interpreter until it
+returns (interrupts held, port I/O recorded and performed), saves that end state, restores the
+snapshot, runs the lifted C with the recorded port reads replayed (its writes are compared, not
+performed), and compares the two end states: memory except the dead stack below the entry SP,
+the registers outside the entry's scratch set, flags unless scratch, and the port I/O sequence.
+The game then continues from the original's end state, so a wrong lift cannot derail a run. The
+first difference is reported with the function, the call number and the differing value.
 
 Enable it with `INN_VERIFY_LIFTED=<calls per function>`; `tools/verify_lifted.sh` runs the logon
 scenario against a local server and prints the per-function summary. Snapshots cover guest
