@@ -11,6 +11,8 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 SERVER=${INNKEEPERD:-$ROOT/../TSN-INN-Decomp/target/debug/innkeeperd}
 OUT=$ROOT/work/verify/$PORT
 mkdir -p "$OUT"
+exec 9> "$OUT/.lock"
+flock -n 9 || { echo "port $PORT is in use by another verify run" >&2; exit 2; }
 if [ -n "${5:-}" ]; then
     sed "s#@OUT@#$OUT#g" "$5" > "$OUT/play.txt"
 else
