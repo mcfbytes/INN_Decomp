@@ -26,19 +26,22 @@ Recon (2026-10-14) found code that a one-shot static decompile cannot cover:
           |
  dosrt: the machine               memory, CPU state, PIC/PIT, VGA, OPL, UART,
           |                       DOS/BIOS/EMS/XMS services in C
-   +------+--------------------+
-   | interp | recompiled | lifted |   per-address dispatch, chosen at run time
-   +--------+------------+--------+
+   +------+------------+
+   | interp | lifted C  |   lifted entries are hooked; everything else is interpreted
+   +--------+-----------+
 ```
 
-1. **Interpreter.** A 386 real-mode + x87 interpreter. Runs anything on day one, including
-   overlays, drivers and self-modifying code. It is the reference semantics.
-2. **Recompiled.** `recomp/` translates each binary's discovered functions to C that calls the same
-   instruction-semantics helpers as the interpreter. Unknown jump targets fall back to the
-   interpreter and are logged, so coverage grows run by run.
-3. **Lifted.** Hand-decompiled readable C, replacing recompiled functions one at a time. Each lift
-   is checked by a differential test: same machine snapshot in, same memory and registers out.
-   Borland/Microsoft runtime functions are identified and replaced by the runtime's libc.
+1. **Interpreter.** A 386 real-mode interpreter, validated against the SingleStepTests suites.
+   Runs anything on day one, including overlays, drivers and self-modifying code. It is the
+   reference semantics.
+2. **Lifted.** Hand-decompiled readable C that replaces one original function at its entry
+   (`docs/lifting.md`). Shadow verification runs the original and the lifted C from one snapshot
+   and compares memory, video state, registers and port I/O. Runtime-library functions found by
+   signature map to the runtime's libc.
+
+A mechanical recompiler tier was planned and dropped (2026-10-14): the interpreter runs the
+client at 2-4x real speed even in the browser, and lifted C replaces functions directly, so a
+recompiled middle step would add work without removing any.
 
 The end state is "lifted everywhere", with the interpreter kept only as a debugging oracle.
 
@@ -47,7 +50,7 @@ Serial is the network seam: the browser build tunnels UART bytes over a WebSocke
 
 ## 3. Copyright boundary
 
-Committed to this repo: the runtime, recompiler, tools and docs. Never committed: media, extracted
+Committed to this repo: the runtime, tools and docs. Never committed: media, extracted
 data, generated C, and lifted sources (they are derived from Sierra's code). Lifted sources live in
 `private/`, its own git repository, which is ignored here. A build takes the user's own media and
 produces the game.
@@ -60,15 +63,17 @@ produces the game.
 - [x] **M2** UART over TCP to `innkeeperd`; the client logs on and reaches the map (2026-10-14).
 - [x] **M3** Emscripten build; the same in a browser over WebSocket (adds WS ingress to `innkeeperd`);
       headless Chromium reaches the town map (2026-10-14, [web.md](web.md)).
-- [ ] **M4** Recompiler for LSCITV and TSNEXEC; interpreter fallback rate reported per run.
+- [x] **M4** Lifting infrastructure: entry hooks, nested guest calls, shadow verification, generated
+      registration tables, Ghidra export (`tools/ghidra/`). First lifted function verified live.
 - [ ] **M5** Lift LSCITV: VM, memory manager, resources, kernels, graphics, sound, TSN kernel.
 - [ ] **M6** Sound: OPL2 (AdLib), then Sound Blaster digital audio. OPL2, PC speaker, mixer,
       SDL2 output and `--wav` done (2026-10-14); Sound Blaster DSP open.
-- [ ] **M7** Yserbius and Twinion (overlay-aware recompile, then lift the shared engine).
+- [ ] **M7** Yserbius and Twinion (lift the shared engine; overlays need per-overlay module registration).
 - [ ] **M8** Golf, Red Baron (x87), Shoppers Advantage.
 
 ## 5. Verification
 
 - Boot traces: interpreter vs DOSBox-X (`../TSN-INN-Decomp/tools/dosbox/`) on the same inputs.
-- Differential tests per recompiled and lifted function against the interpreter.
+- Shadow verification of every lifted function against the original during scripted runs
+  (`tools/verify_lifted.sh`).
 - Screenshots of key screens compared against DOSBox-X captures.
