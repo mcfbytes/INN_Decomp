@@ -4,6 +4,9 @@
 Each public symbol becomes a byte signature running from its offset to the next public symbol
 (or segment end), with fixup bytes as wildcards. Usage:
     omf_sigs.py --lib CL.LIB [--lib MATHL.LIB ...] [--min-fixed 12] TARGET.EXE [...]
+--names OUT writes the unambiguous matches of one MZ target as seg:off names for
+tools/ghidra/export_module.sh; the segment is the nearest relocated segment value at or below
+the match.
 """
 import argparse
 import struct
@@ -203,6 +206,46 @@ def load_image(path):
     return data
 
 
+def mz_segments(path):
+    """Segment values the MZ relocations hold: the program's segment bases."""
+    data = open(path, 'rb').read()
+    count, header, table = (struct.unpack_from('<H', data, o)[0] for o in (6, 8, 0x18))
+    image = data[header * 16:]
+    segs = set()
+    for i in range(count):
+        off, seg = struct.unpack_from('<HH', data, table + 4 * i)
+        site = seg * 16 + off
+        if site + 2 <= len(image):
+            segs.add(struct.unpack_from('<H', image, site)[0])
+    return sorted(segs)
+
+
+def seg_off(segs, linear):
+    base = max((s for s in segs if s * 16 <= linear and linear - s * 16 < 0x10000), default=None)
+    return None if base is None else (base, linear - base * 16)
+
+
+def write_names(path, target, matches):
+    """matches: [(offset, hit count, module, symbol)]; keeps offsets one module claims once."""
+    by_offset = {}
+    for offset, hits, module, symbol in matches:
+        by_offset.setdefault(offset, []).append((hits, module, symbol))
+    segs = mz_segments(target)
+    lines, used = [], set()
+    for offset, claims in sorted(by_offset.items()):
+        if len({m for _, m, _ in claims}) != 1 or any(h != 1 for h, _, _ in claims):
+            continue
+        so = seg_off(segs, offset)
+        name = claims[0][2].lstrip('_') or claims[0][2]
+        if so is None or name in used:
+            continue
+        used.add(name)
+        lines.append(f'{so[0]:04X}:{so[1]:04X}\t{name}')
+    with open(path, 'w') as f:
+        f.write('# Borland C++ 3.1 runtime library, matched by tools/omf_sigs.py\n' + '\n'.join(lines) + '\n')
+    return len(lines)
+
+
 def find_matches(image, sig):
     """Image offsets where sig matches, anchored on its longest fixed run."""
     best_start, best_len, i = 0, 0, 0
@@ -234,6 +277,7 @@ def main():
     ap.add_argument('--lib', action='append', required=True)
     ap.add_argument('--min-fixed', type=int, default=12)
     ap.add_argument('--list', action='store_true', help='print every match')
+    ap.add_argument('--names', help='write seg:off names of one MZ target here')
     ap.add_argument('targets', nargs='+')
     args = ap.parse_args()
     sigs = []
@@ -243,16 +287,19 @@ def main():
     print(f'{len(sigs)} signatures', file=sys.stderr)
     for target in args.targets:
         image = load_image(target)
-        modules_hit, total_bytes = set(), 0
+        modules_hit, total_bytes, matches = set(), 0, []
         for sig in sigs:
             hits = find_matches(image, sig)
             if hits:
+                matches.append((hits[0], len(hits), sig.module, sig.symbol))
                 modules_hit.add(sig.module)
                 total_bytes += len(sig.data)
                 if args.list:
                     print(f'{target}\t{hits[0]:06X}\t{len(hits)}\t{sig.module}\t{sig.symbol}')
         print(f'{target}: {len(modules_hit)} library modules matched, ~{total_bytes} bytes '
               f'of {len(image)}', file=sys.stderr)
+        if args.names:
+            print(f'{args.names}: {write_names(args.names, target, matches)} names', file=sys.stderr)
 
 
 if __name__ == '__main__':

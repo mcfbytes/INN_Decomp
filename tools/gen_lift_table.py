@@ -19,6 +19,9 @@ import re
 import struct
 import sys
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import borland_overlay  # noqa: E402
+
 MARKER = re.compile(
     r'^LIFTED\(\s*(0x[0-9A-Fa-f]+)\s*,\s*(0x[0-9A-Fa-f]+)\s*,\s*(\w+)\s*,\s*(LIFT_FAR_NOSHADOW|LIFT_NEAR_NOSHADOW|LIFT_FAR|LIFT_NEAR|LIFT_REGION)\s*,'
     r'\s*([\w|\s]+?)\s*\)', re.M)
@@ -27,28 +30,8 @@ SPLIT_HEAD = 1 << 15  # byte 0 is the high half of a relocated word that starts 
 
 
 def borland_overlays(data):
-    """{stub segment: (code, fixup offsets)} from an MZ file's FBOV trailer (runtime/src/borland_overlay.c)."""
-    last, pages = struct.unpack_from('<HH', data, 2)
-    end = pages * 512 - (512 - last if last else 0)
-    if data[end:end + 4] != b'FBOV':
-        return {}
-    data_start = end + 16
-    _, table, rows = struct.unpack_from('<III', data, end + 4)
-    header = struct.unpack_from('<H', data, 8)[0] * 16
-    overlays = {}
-    for i in range(rows):
-        seg, _, flags, _ = struct.unpack_from('<HHHH', data, table + 8 * i)
-        if flags != 3:
-            continue
-        stub = header + seg * 16
-        if data[stub:stub + 2] != b'\xcd\x3f':
-            sys.exit(f'overlay stub {seg:04X} does not start with INT 3Fh')
-        code_off, code_bytes, fixup_bytes = struct.unpack_from('<IHH', data, stub + 4)
-        start = data_start + code_off
-        code = data[start:start + code_bytes]
-        fixups = set(struct.unpack_from(f'<{fixup_bytes // 2}H', data, start + code_bytes))
-        overlays[seg] = (code, fixups)
-    return overlays
+    """{stub segment: (code, fixup offsets)} from an MZ file's FBOV trailer."""
+    return {seg: (o.code, set(o.fixups)) for seg, o in borland_overlay.overlays(data).items()}
 
 
 def mz_image(data):

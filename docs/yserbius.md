@@ -56,6 +56,9 @@ lifted overlay code is armed per overlay as it is read ([lifting.md](lifting.md)
 
 ## Host requirements found on the way
 
+`innkeeperd` meets all of these since 2026-10-14 (sibling repo, `docs/protocol/yserbius.md`); a stock
+build runs the whole path above.
+
 | Step | Host must | Without it |
 |---|---|---|
 | 2 | set bit 3 (Yserbius) / bit 7 (Twinion) of the logon Ack word at byte 8 | "no access rights" |
