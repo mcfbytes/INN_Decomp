@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Runs the client with every lifted function shadow-verified: boot, Play, log on, reach the map.
-# usage: verify_lifted.sh <build_dir> <server_port> [run_ms] [calls_per_function]
+# usage: verify_lifted.sh <build_dir> <server_port> [run_ms] [calls_per_function] [script]
+# The script (input_script format) replaces the logon one; @OUT@ in it becomes the output directory.
 set -euo pipefail
 BUILD=$1
 PORT=$2
@@ -10,10 +11,14 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 SERVER=${INNKEEPERD:-$ROOT/../TSN-INN-Decomp/target/debug/innkeeperd}
 OUT=$ROOT/work/verify/$PORT
 mkdir -p "$OUT"
-cat > "$OUT/play.txt" <<SCRIPT
+if [ -n "${5:-}" ]; then
+    sed "s#@OUT@#$OUT#g" "$5" > "$OUT/play.txt"
+else
+    cat > "$OUT/play.txt" <<SCRIPT
 11000 click 285 59
 60000 shot $OUT/map.ppm
 SCRIPT
+fi
 "$SERVER" --bind 127.0.0.1:"$PORT" --no-int14h --no-capture > "$OUT/server.log" 2>&1 &
 SERVER_PID=$!
 trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
