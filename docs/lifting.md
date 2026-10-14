@@ -85,7 +85,9 @@ shadow runs, so the VGA status register toggles vertical retrace by read count i
 waits for a timer tick still spins there; a shadow
 run still going after 200 million instructions is logged with the hook's name and CS:IP.
 `INN_LIFT_ONLY=name,name,...` hooks only the named functions, which checks functions that are
-otherwise only reached from other lifted code.
+otherwise only reached from other lifted code. `INN_VERIFY_SKIP=name,...` keeps the named functions
+hooked but never shadows them, for a call that only works with interrupts flowing (a driver init
+that finds its IRQ by waiting for one).
 
 Enable it with `INN_VERIFY_LIFTED=<calls per function>`; `tools/verify_lifted.sh` runs the logon
 scenario against a local server and prints the per-function summary. Snapshots cover guest

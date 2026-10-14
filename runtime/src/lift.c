@@ -35,6 +35,7 @@ void lift_init(Machine *m)
     lift_state(m)->return_callback = callback_register(m, "lift far return", far_return_reached, -1);
     lifted_register_all(m);
     lift_state(m)->only = getenv("INN_LIFT_ONLY");
+    lift_state(m)->verify_skip = getenv("INN_VERIFY_SKIP");
     const char *verify_calls = getenv("INN_VERIFY_LIFTED");
     if (verify_calls && atoi(verify_calls) > 0)
         lift_verify_enable(m, atoi(verify_calls));
@@ -85,7 +86,7 @@ static int by_linear(const void *a, const void *b)
 }
 
 /* Whether name is one of the comma-separated names in list. */
-static bool listed(const char *list, const char *name)
+bool lift_listed(const char *list, const char *name)
 {
     size_t len = strlen(name);
     for (const char *p = list; (p = strstr(p, name)); p += len)
@@ -97,7 +98,7 @@ static bool listed(const char *list, const char *name)
 static void arm(Machine *m, const LiftedEntry *e, uint16_t load_seg)
 {
     LiftState *s = lift_state(m);
-    if (s->only && !listed(s->only, e->name))
+    if (s->only && !lift_listed(s->only, e->name))
         return;
     if (s->active_count >= MAX_ACTIVE)
         fatal("too many active lifted functions");

@@ -304,6 +304,8 @@ bool lift_verify_call(Machine *m, ActiveHook *h)
     VerifyState *v = s->verify;
     if (!v || s->in_shadow || h->entry->no_shadow || h->shadow_calls >= v->calls_per_entry)
         return false;
+    if (s->verify_skip && lift_listed(s->verify_skip, h->entry->name))
+        return false;
     h->shadow_calls++;
     s->in_shadow = true;
     s->shadow_of = h;
