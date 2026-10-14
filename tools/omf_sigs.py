@@ -5,7 +5,7 @@ Each public symbol becomes a byte signature running from its offset to the next 
 (or segment end), with fixup bytes as wildcards. Usage:
     omf_sigs.py --lib CL.LIB [--lib MATHL.LIB ...] [--min-fixed 12] TARGET.EXE [...]
 --names OUT writes the unambiguous matches of one MZ target as seg:off names for
-tools/ghidra/export_module.sh; the segment is the nearest relocated segment value at or below
+tools/ghidra/export_module.sh; the segment is the nearest far-call target segment at or below
 the match.
 """
 import argparse
@@ -44,6 +44,7 @@ class Signature:
     symbol: str
     data: bytes
     mask: bytes
+    segment: str = ''
 
     @property
     def fixed(self):
@@ -195,7 +196,7 @@ def signatures(module, max_len=96):
         for i, (off, sym) in enumerate(entries):
             end = entries[i + 1][0] if i + 1 < len(entries) else s.length
             end = min(end, off + max_len)
-            yield Signature(module.name, sym, bytes(s.data[off:end]), bytes(s.known[off:end]))
+            yield Signature(module.name, sym, bytes(s.data[off:end]), bytes(s.known[off:end]), s.name)
 
 
 def load_image(path):
@@ -207,7 +208,7 @@ def load_image(path):
 
 
 def mz_segments(path):
-    """Segment values the MZ relocations hold: the program's segment bases."""
+    """Code segment bases: relocated segment words of far calls and far jumps."""
     data = open(path, 'rb').read()
     count, header, table = (struct.unpack_from('<H', data, o)[0] for o in (6, 8, 0x18))
     image = data[header * 16:]
@@ -215,7 +216,7 @@ def mz_segments(path):
     for i in range(count):
         off, seg = struct.unpack_from('<HH', data, table + 4 * i)
         site = seg * 16 + off
-        if site + 2 <= len(image):
+        if 3 <= site and site + 2 <= len(image) and image[site - 3] in (0x9A, 0xEA):
             segs.add(struct.unpack_from('<H', image, site)[0])
     return sorted(segs)
 
@@ -291,7 +292,8 @@ def main():
         for sig in sigs:
             hits = find_matches(image, sig)
             if hits:
-                matches.append((hits[0], len(hits), sig.module, sig.symbol))
+                if sig.segment.endswith('TEXT'):  # names are for code; data symbols match too
+                    matches.append((hits[0], len(hits), sig.module, sig.symbol))
                 modules_hit.add(sig.module)
                 total_bytes += len(sig.data)
                 if args.list:
