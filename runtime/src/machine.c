@@ -82,6 +82,12 @@ void port_register(Machine *m, uint16_t first, uint16_t last, PortInFn in, PortO
     }
 }
 
+/* VGA registers, whose state shadow verification snapshots and compares. */
+static bool vga_port(uint16_t port)
+{
+    return port >= 0x3B0 && port <= 0x3DF;
+}
+
 /* Drivers time out on fixed poll counts, which only works if port I/O costs real bus time. */
 static void charge_io(Machine *m)
 {
@@ -122,8 +128,11 @@ static void device_out(Machine *m, uint16_t port, uint32_t value, int size)
 uint32_t port_in(Machine *m, uint16_t port, int size)
 {
     charge_io(m);
-    if (m->io_mode == IO_REPLAY)
+    if (m->io_mode == IO_REPLAY) {
+        if (vga_port(port)) /* VGA state is part of the snapshot, so the lifted run drives it too */
+            device_in(m, port, size);
         return lift_io_replay_in(m, port, size);
+    }
     uint32_t v = device_in(m, port, size);
     if (m->io_mode == IO_RECORD)
         lift_io_record(m, port, size, v, false);
@@ -135,6 +144,8 @@ void port_out(Machine *m, uint16_t port, uint32_t value, int size)
     charge_io(m);
     if (m->io_mode == IO_REPLAY) {
         lift_io_replay_out(m, port, value, size);
+        if (vga_port(port))
+            device_out(m, port, value, size);
         return;
     }
     if (m->io_mode == IO_RECORD)

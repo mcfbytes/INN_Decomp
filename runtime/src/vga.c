@@ -192,6 +192,8 @@ static uint8_t status1_read(Machine *m)
     v->attr_data_next = false;
     bool retrace = m->virtual_us % FRAME_US >= FRAME_US - VRETRACE_US;
     uint8_t s = (++v->status_reads & 1) ? STATUS_DISPLAY_OFF : 0;
+    if (m->irq_hold) /* emulated time stands still in a shadow run; retrace waits must still end */
+        retrace = (v->status_reads >> 3) & 1;
     return retrace ? (uint8_t)(s | STATUS_DISPLAY_OFF | STATUS_VRETRACE) : s;
 }
 

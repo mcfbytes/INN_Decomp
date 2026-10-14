@@ -79,7 +79,10 @@ first difference is reported with the function, the call number and the differin
 Functions whose original would repeat device I/O during a shadow run (dialling, UART handshakes
 through a modem driver) or end the process are marked `LIFT_FAR_NOSHADOW` / `LIFT_NEAR_NOSHADOW`:
 they are hooked but only ever checked functionally, and the summary lists them as not shadowed.
-Interrupts are held during shadow runs, so code that waits for a timer tick spins there; a shadow
+During the lifted run, VGA port accesses also reach the device (its state is snapshotted), so mode
+sets and palette writes are compared. Interrupts are held and emulated time stands still during
+shadow runs, so the VGA status register toggles vertical retrace by read count instead; code that
+waits for a timer tick still spins there; a shadow
 run still going after 200 million instructions is logged with the hook's name and CS:IP.
 `INN_LIFT_ONLY=name,name,...` hooks only the named functions, which checks functions that are
 otherwise only reached from other lifted code.
