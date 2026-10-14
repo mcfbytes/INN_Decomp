@@ -25,8 +25,12 @@ typedef struct LiftedEntry {
     const char *name;
     bool near_return;       /* returns with RET rather than RETF */
     uint16_t scratch_regs;  /* LIFT_REG_* bits the calling convention lets differ on return */
-    uint8_t signature[LIFT_SIGNATURE_LEN]; /* original bytes at the entry */
+    uint8_t signature[LIFT_SIGNATURE_LEN]; /* original bytes at the entry, as in the file */
+    uint16_t reloc_mask; /* bit i: a load-segment-relocated word starts at signature byte i */
 } LiftedEntry;
+
+/* reloc_mask bit 15: byte 0 is the high half of a relocated word starting before the entry. */
+enum { LIFT_RELOC_SPLIT_HEAD = 1 << 15 };
 
 /* Marks a lifted function in a lifted source file; tools/gen_lift_table.py builds the
  * registration table from these markers and the original binary. */

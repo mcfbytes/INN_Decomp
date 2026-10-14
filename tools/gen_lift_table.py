@@ -17,13 +17,35 @@ MARKER = re.compile(
     r'^LIFTED\(\s*(0x[0-9A-Fa-f]+)\s*,\s*(0x[0-9A-Fa-f]+)\s*,\s*(\w+)\s*,\s*(LIFT_FAR|LIFT_NEAR)\s*,'
     r'\s*([\w|\s]+?)\s*\)', re.M)
 SIGNATURE_LEN = 12
+SPLIT_HEAD = 1 << 15  # byte 0 is the high half of a relocated word that starts before the entry
+
+
+def mz_image(data):
+    """Load image and the image offsets of its relocated words."""
+    count = struct.unpack_from('<H', data, 6)[0]
+    table = struct.unpack_from('<H', data, 0x18)[0]
+    header = struct.unpack_from('<H', data, 8)[0] * 16
+    relocs = set()
+    for i in range(count):
+        off, seg = struct.unpack_from('<HH', data, table + 4 * i)
+        relocs.add(seg * 16 + off)
+    return data[header:], relocs
+
+
+def lsci_dll_image(data):
+    """LSCI DLL: u16 paragraphs, u16 relocation count, u16 relocation offsets, image."""
+    count = struct.unpack_from('<H', data, 2)[0]
+    relocs = set(struct.unpack_from(f'<{count}H', data, 4))
+    return data[4 + 2 * count:], relocs
 
 
 def image_of(exe_path):
     data = exe_path.read_bytes()
-    if data[:2] not in (b'MZ', b'ZM'):
-        return data
-    return data[struct.unpack_from('<H', data, 8)[0] * 16:]
+    if data[:2] in (b'MZ', b'ZM'):
+        return mz_image(data)
+    if exe_path.suffix.upper() == '.DLL':
+        return lsci_dll_image(data)
+    return data, set()
 
 
 def read_module(module_dir):
@@ -32,10 +54,18 @@ def read_module(module_dir):
     exe_path = pathlib.Path(exe)
     if not exe_path.is_absolute():
         exe_path = module_dir / exe_path
-    return name, image_of(exe_path)
+    return (name, *image_of(exe_path))
 
 
-def entries_of(module_dir, image):
+def reloc_mask(start, relocs):
+    mask = SPLIT_HEAD if start - 1 in relocs else 0
+    for i in range(SIGNATURE_LEN):
+        if start + i in relocs:
+            mask |= 1 << i
+    return mask
+
+
+def entries_of(module_dir, image, relocs):
     for source in sorted(module_dir.glob('*.c')):
         for match in MARKER.finditer(source.read_text()):
             seg, off = int(match[1], 16), int(match[2], 16)
@@ -43,17 +73,17 @@ def entries_of(module_dir, image):
             signature = image[start:start + SIGNATURE_LEN]
             if len(signature) != SIGNATURE_LEN:
                 sys.exit(f'{source}: {match[3]} lies outside the image')
-            yield seg, off, match[3], match[4] == 'LIFT_NEAR', match[5], signature
+            yield seg, off, match[3], match[4] == 'LIFT_NEAR', match[5], signature, reloc_mask(start, relocs)
 
 
 def emit_module(out, index, name, entries):
-    for _, _, fn, _, _, _ in entries:
+    for _, _, fn, _, _, _, _ in entries:
         out.append(f'void {fn}(Machine *m);')
     out.append(f'static const LiftedEntry module_{index}[] = {{')
-    for seg, off, fn, near, scratch, signature in entries:
+    for seg, off, fn, near, scratch, signature, mask in entries:
         sig = ', '.join(f'0x{b:02X}' for b in signature)
         out.append(f'    {{ "{name}", 0x{seg:04X}, 0x{off:04X}, {fn}, "{fn}", {str(near).lower()}, '
-                   f'{scratch}, {{ {sig} }} }},')
+                   f'{scratch}, {{ {sig} }}, 0x{mask:04X} }},')
     out.append('};')
 
 
@@ -63,8 +93,8 @@ def main():
            '#include "lift.h"', '#include "lifted_conventions.h"', '']
     modules = []
     for module_dir in sorted(p for p in lifted_dir.iterdir() if (p / 'module.txt').exists()):
-        name, image = read_module(module_dir)
-        entries = list(entries_of(module_dir, image))
+        name, image, relocs = read_module(module_dir)
+        entries = list(entries_of(module_dir, image, relocs))
         if entries:
             emit_module(out, len(modules), name, entries)
             modules.append(len(entries))

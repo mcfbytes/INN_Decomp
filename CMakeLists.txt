@@ -19,8 +19,8 @@ target_include_directories(dosrt PUBLIC runtime/src)
 # Lifted (hand-decompiled) sources live in the private tree; the public build runs without them.
 set(INN_LIFTED_DIR "${CMAKE_SOURCE_DIR}/private/lifted" CACHE PATH "Lifted sources (private tree)")
 if(EXISTS "${INN_LIFTED_DIR}")
-  file(GLOB_RECURSE INN_LIFTED_SOURCES CONFIGURE_DEPENDS "${INN_LIFTED_DIR}/*.c")
-  file(GLOB_RECURSE INN_LIFTED_MODULES CONFIGURE_DEPENDS "${INN_LIFTED_DIR}/*/module.txt")
+  file(GLOB_RECURSE INN_LIFTED_SOURCES FOLLOW_SYMLINKS CONFIGURE_DEPENDS "${INN_LIFTED_DIR}/*.c")
+  file(GLOB_RECURSE INN_LIFTED_MODULES FOLLOW_SYMLINKS CONFIGURE_DEPENDS "${INN_LIFTED_DIR}/*/module.txt")
   set(INN_LIFTED_TABLE "${CMAKE_BINARY_DIR}/lifted_table.c")
   add_custom_command(OUTPUT "${INN_LIFTED_TABLE}"
     COMMAND python3 -I "${CMAKE_SOURCE_DIR}/tools/gen_lift_table.py" "${INN_LIFTED_DIR}" "${INN_LIFTED_TABLE}"

@@ -83,7 +83,7 @@ static void arm(Machine *m, const LiftedEntry *e, uint16_t load_seg)
     if (s->active_count >= MAX_ACTIVE)
         fatal("too many active lifted functions");
     uint32_t linear = real_addr((uint16_t)(load_seg + e->seg), e->off);
-    s->active[s->active_count++] = (ActiveHook){ .linear = linear, .entry = e };
+    s->active[s->active_count++] = (ActiveHook){ .linear = linear, .load_seg = load_seg, .entry = e };
     lift_set_hook_bit(m, linear, true);
 }
 
@@ -149,12 +149,33 @@ static ActiveHook *find_hook(LiftState *s, uint32_t linear)
     return bsearch(&key, s->active, (size_t)s->active_count, sizeof s->active[0], by_linear);
 }
 
+/* The signature as it sits in memory once the loader added the load segment to relocated words. */
+static void expected_bytes(const ActiveHook *h, uint8_t out[LIFT_SIGNATURE_LEN], bool skip[LIFT_SIGNATURE_LEN])
+{
+    const LiftedEntry *e = h->entry;
+    memcpy(out, e->signature, LIFT_SIGNATURE_LEN);
+    memset(skip, 0, LIFT_SIGNATURE_LEN);
+    skip[0] = (e->reloc_mask & LIFT_RELOC_SPLIT_HEAD) != 0;
+    for (int i = 0; i < LIFT_SIGNATURE_LEN; i++) {
+        if (!(e->reloc_mask >> i & 1))
+            continue;
+        uint16_t word = (uint16_t)(e->signature[i] | (i + 1 < LIFT_SIGNATURE_LEN ? e->signature[i + 1] << 8 : 0));
+        word = (uint16_t)(word + h->load_seg);
+        out[i] = (uint8_t)word;
+        if (i + 1 < LIFT_SIGNATURE_LEN)
+            out[i + 1] = (uint8_t)(word >> 8);
+    }
+}
+
 static bool signature_matches(Machine *m, ActiveHook *h)
 {
     if (!h->verified) {
         h->verified = true;
+        uint8_t expected[LIFT_SIGNATURE_LEN];
+        bool skip[LIFT_SIGNATURE_LEN];
+        expected_bytes(h, expected, skip);
         for (int i = 0; i < LIFT_SIGNATURE_LEN; i++)
-            if (mem_rd8(m, h->linear + (uint32_t)i) != h->entry->signature[i])
+            if (!skip[i] && mem_rd8(m, h->linear + (uint32_t)i) != expected[i])
                 h->rejected = true;
         if (h->rejected)
             log_msg("lift: %s %s bytes differ at the entry; running the original", h->entry->module,

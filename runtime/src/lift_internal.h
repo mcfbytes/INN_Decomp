@@ -8,6 +8,7 @@ enum { MAX_TABLES = 64, MAX_ACTIVE = 8192, MAX_NESTING = 64, HOOK_BITMAP_BYTES =
 
 typedef struct ActiveHook {
     uint32_t linear;
+    uint16_t load_seg; /* relocated words in the signature hold load_seg + file value */
     const LiftedEntry *entry;
     bool verified, rejected; /* entry bytes compared on first use */
     int shadow_calls, shadow_mismatches;
