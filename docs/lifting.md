@@ -22,9 +22,23 @@ never pushed to the public repo; see `docs/PLAN.md` section 3). Only the mechani
   in zero emulated time. Programs that time themselves with busy loops still work because those
   loops read the PIT or BIOS tick count, not instruction counts.
 
+## Region lifts
+
+Some original code never returns in the C sense: LSCITV's bytecode interpreter runs the script
+main loop for the whole session. A `LIFT_REGION` entry may run any amount of original behaviour in
+C and hand control back at an instruction of its choosing (for the VM: every kernel call, and any
+return address it does not model). Nothing nests, so the frontend keeps its frame loop and the
+browser never blocks.
+
+Region verification inverts the order: the lifted run goes first (I/O recorded), which fixes the
+exit CS:IP and SP; the original then runs from the same snapshot, with recorded reads replayed,
+until it first reaches that CS:IP with that SP. Memory below the exit SP is dead stack. The game
+continues from the lifted end state.
+
 ## Registration
 
-Each lifted source file contributes rows to a static `LiftedEntry` table: module name, entry
+Scratch sets must use macros from shared headers (`include/`): the generated table is a separate
+translation unit and cannot see file-local definitions. Each lifted source file contributes rows to a static `LiftedEntry` table: module name, entry
 `seg:off` relative to the load segment, function, name, and the first 12 original bytes.
 `lift_module_loaded` arms a table when a loader announces the module. DOS EXEC announces programs
 at their load segment. Drivers (`*.DRV`, raw images) and LSCI DLLs (`*.DLL`, image after the
@@ -51,7 +65,9 @@ returns (interrupts held, port I/O recorded and performed), saves that end state
 snapshot, runs the lifted C with the recorded port reads replayed (its writes are compared, not
 performed), and compares the two end states: memory except the dead stack below the entry SP,
 the registers outside the entry's scratch set, flags unless scratch, and the port I/O sequence.
-The game then continues from the original's end state, so a wrong lift cannot derail a run. The
+The game then continues from the original's end state, so a wrong lift cannot derail a run. All
+lifted hooks are off during the original's shadow run, so lifted callees inside it run original
+code and the whole call tree is compared. The
 first difference is reported with the function, the call number and the differing value.
 
 Enable it with `INN_VERIFY_LIFTED=<calls per function>`; `tools/verify_lifted.sh` runs the logon

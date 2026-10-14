@@ -33,20 +33,22 @@ void lift_init(Machine *m)
     if (!m->lift || !m->exec_hooks)
         fatal("out of memory");
     lift_state(m)->return_callback = callback_register(m, "lift far return", far_return_reached, -1);
-    lift_state(m)->bypass_linear = UINT32_MAX;
     lifted_register_all(m);
     const char *verify_calls = getenv("INN_VERIFY_LIFTED");
     if (verify_calls && atoi(verify_calls) > 0)
         lift_verify_enable(m, atoi(verify_calls));
 }
 
+static void log_verify_line(const ActiveHook *h)
+{
+    log_msg("verify: %s %s: %d calls checked, %d mismatches", h->entry->module, h->entry->name,
+            h->shadow_calls, h->shadow_mismatches);
+}
+
 static void log_verify_summary(LiftState *s)
 {
-    for (int i = 0; i < s->active_count; i++) {
-        const ActiveHook *h = &s->active[i];
-        log_msg("verify: %s %s: %d calls checked, %d mismatches", h->entry->module, h->entry->name,
-                h->shadow_calls, h->shadow_mismatches);
-    }
+    for (int i = 0; i < s->active_count; i++)
+        log_verify_line(&s->active[i]);
 }
 
 void lift_shutdown(Machine *m)
@@ -203,10 +205,8 @@ bool lift_dispatch(Machine *m, uint32_t linear)
     LiftState *s = lift_state(m);
     if (nested_return_reached(m, s, linear))
         return true;
-    if (s->bypass_linear == linear) {
-        s->bypass_linear = UINT32_MAX;
+    if (s->hooks_off)
         return false;
-    }
     ActiveHook *h = find_hook(s, linear);
     if (!h || !signature_matches(m, h))
         return false;

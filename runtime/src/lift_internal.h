@@ -30,8 +30,8 @@ typedef struct LiftState {
     NestedCall nested[MAX_NESTING];
     int nesting;
     int return_callback;
-    uint32_t bypass_linear; /* the next dispatch here runs the original (shadow run) */
     bool in_shadow;
+    bool hooks_off; /* shadow runs of the original run with every lifted hook off */
     struct VerifyState *verify;
     struct { char name[16]; uint16_t load_seg; } modules[16];
     int module_count;

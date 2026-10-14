@@ -22,7 +22,8 @@ typedef struct VerifyState {
     uint8_t *mem_before, *mem_original;
     uint8_t *vga_before, *vga_original; /* video memory lives in the VGA device, not m->mem */
     uint8_t *dos_before, *dos_original, *dos_lifted; /* open files and positions live host-side */
-    Cpu cpu_before, cpu_original;
+    Cpu cpu_before, cpu_original, cpu_lifted;
+    uint8_t *mem_lifted, *vga_lifted, *dos_lifted_end; /* region mode: the lifted run comes first */
     IoEvent log[IO_LOG_MAX];
     int log_len, replay_pos;
     bool io_diverged;
@@ -44,6 +45,9 @@ void lift_verify_enable(Machine *m, int calls_per_entry)
         s->verify->dos_before = malloc(dos_snapshot_size());
         s->verify->dos_original = malloc(dos_snapshot_size());
         s->verify->dos_lifted = malloc(dos_snapshot_size());
+        s->verify->mem_lifted = malloc(SNAPSHOT_BYTES);
+        s->verify->vga_lifted = malloc(vga_snapshot_size());
+        s->verify->dos_lifted_end = malloc(dos_snapshot_size());
         if (!s->verify->mem_before || !s->verify->mem_original || !s->verify->vga_before ||
             !s->verify->vga_original || !s->verify->dos_before || !s->verify->dos_original ||
             !s->verify->dos_lifted)
@@ -111,10 +115,11 @@ static void run_original(Machine *m, ActiveHook *h)
     uint32_t ret = return_linear(m, h->entry);
     bool was_hooked = lift_hooked(m, ret);
     lift_set_hook_bit(m, ret, true);
-    s->bypass_linear = h->linear;
+    s->hooks_off = true; /* lifted callees run original too, so the whole call tree is compared */
     m->io_mode = IO_RECORD;
     lift_run_nested(m, ret, m->cpu.r[R_SP].w, true);
     m->io_mode = IO_LIVE;
+    s->hooks_off = false;
     if (!was_hooked)
         lift_set_hook_bit(m, ret, false);
 }
@@ -173,7 +178,8 @@ static void report(Machine *m, ActiveHook *h, const char *why)
     log_msg("verify: %s %s call %d: %s", h->entry->module, h->entry->name, h->shadow_calls, why);
 }
 
-static void compare(Machine *m, ActiveHook *h, uint16_t entry_sp)
+/* Memory below hi_sp, down to 0x2000 below lo_sp, is dead stack. */
+static void compare(Machine *m, ActiveHook *h, uint16_t lo_sp, uint16_t hi_sp)
 {
     VerifyState *v = verify(m);
     char why[160];
@@ -185,8 +191,8 @@ static void compare(Machine *m, ActiveHook *h, uint16_t entry_sp)
         report(m, h, why);
         return;
     }
-    uint32_t stack_top = v->cpu_before.seg_base[S_SS] + entry_sp;
-    uint32_t dead_lo = stack_top > DEAD_STACK_BYTES ? stack_top - DEAD_STACK_BYTES : 0;
+    uint32_t stack_top = v->cpu_before.seg_base[S_SS] + hi_sp, stack_low = v->cpu_before.seg_base[S_SS] + lo_sp;
+    uint32_t dead_lo = stack_low > DEAD_STACK_BYTES ? stack_low - DEAD_STACK_BYTES : 0;
     long at = first_memory_difference(m->mem, v->mem_original, dead_lo, stack_top);
     if (at >= 0) {
         snprintf(why, sizeof why, "memory %05lX lifted %02X original %02X", (unsigned long)at,
@@ -214,6 +220,81 @@ static void restore(Machine *m, const Cpu *cpu, const uint8_t *mem, const uint8_
     dos_snapshot_load(m, dos);
 }
 
+/* ---- region mode ----
+ * A LIFT_REGION entry hands control back at an instruction of its choosing instead of returning.
+ * The lifted run goes first (I/O recorded) and fixes the exit CS:IP and SP; the original then runs
+ * from the same snapshot with every hook off until it first reaches that CS:IP with that SP. */
+
+enum { REGION_BUDGET_INSNS = 400000000 };
+
+static bool run_original_to(Machine *m, const Cpu *exit)
+{
+    LiftState *s = lift_state(m);
+    VerifyState *v = verify(m);
+    uint32_t at = exit->seg_base[S_CS] + (exit->eip & 0xFFFF);
+    bool was_hooked = lift_hooked(m, at);
+    lift_set_hook_bit(m, at, true);
+    s->hooks_off = true;
+    v->replay_pos = 0;
+    m->io_mode = IO_REPLAY;
+    NestedCall *n = &s->nested[s->nesting++];
+    *n = (NestedCall){ .return_linear = at, .return_sp = exit->r[R_SP].w };
+    uint64_t start = m->cpu.instructions;
+    while (!n->returned && !m->exit_requested && m->cpu.instructions - start < REGION_BUDGET_INSNS)
+        machine_step(m);
+    bool reached = n->returned;
+    s->nesting--;
+    m->io_mode = IO_LIVE;
+    s->hooks_off = false;
+    if (!was_hooked)
+        lift_set_hook_bit(m, at, false);
+    if (v->replay_pos != v->log_len)
+        v->io_diverged = true;
+    return reached;
+}
+
+static void save(Machine *m, Cpu *cpu, uint8_t *mem, uint8_t *vga, uint8_t *dos)
+{
+    *cpu = m->cpu;
+    memcpy(mem, m->mem, SNAPSHOT_BYTES);
+    vga_snapshot_save(m, vga);
+    dos_snapshot_save(m, dos);
+}
+
+static void restore(Machine *m, const Cpu *cpu, const uint8_t *mem, const uint8_t *vga, const uint8_t *dos);
+static void compare(Machine *m, ActiveHook *h, uint16_t lo_sp, uint16_t hi_sp);
+
+static void verify_region(Machine *m, ActiveHook *h)
+{
+    VerifyState *v = verify(m);
+    uint16_t entry_sp = m->cpu.r[R_SP].w;
+    m->io_mode = IO_RECORD;
+    h->entry->fn(m);
+    m->io_mode = IO_LIVE;
+    save(m, &v->cpu_lifted, v->mem_lifted, v->vga_lifted, v->dos_lifted_end);
+    if (m->exit_requested)
+        return;
+    restore(m, &v->cpu_before, v->mem_before, v->vga_before, v->dos_before);
+    bool reached = run_original_to(m, &v->cpu_lifted);
+    save(m, &v->cpu_original, v->mem_original, v->vga_original, v->dos_original);
+    restore(m, &v->cpu_lifted, v->mem_lifted, v->vga_lifted, v->dos_lifted_end);
+    m->cpu.stop = false;
+    if (!reached) {
+        char why[160];
+        snprintf(why, sizeof why, "original never reached the lifted exit %04X:%04X SP %04X",
+                 v->cpu_lifted.seg[S_CS], v->cpu_lifted.eip & 0xFFFF, v->cpu_lifted.r[R_SP].w);
+        report(m, h, why);
+        return;
+    }
+    uint16_t exit_sp = v->cpu_lifted.r[R_SP].w;
+    int before = v->mismatches;
+    compare(m, h, exit_sp < entry_sp ? exit_sp : entry_sp, exit_sp);
+    if (v->mismatches != before)
+        log_msg("verify:   region entry %04X:%04X SP %04X -> exit %04X:%04X SP %04X",
+                v->cpu_before.seg[S_CS], v->cpu_before.eip & 0xFFFF, entry_sp,
+                v->cpu_lifted.seg[S_CS], v->cpu_lifted.eip & 0xFFFF, exit_sp);
+}
+
 bool lift_verify_call(Machine *m, ActiveHook *h)
 {
     LiftState *s = lift_state(m);
@@ -231,6 +312,13 @@ bool lift_verify_call(Machine *m, ActiveHook *h)
     v->log_len = 0;
     v->io_diverged = false;
 
+    if (h->entry->region) {
+        verify_region(m, h);
+        m->cpu.stop = false;
+        m->irq_hold = false;
+        s->in_shadow = false;
+        return true;
+    }
     run_original(m, h);
     v->cpu_original = m->cpu;
     memcpy(v->mem_original, m->mem, SNAPSHOT_BYTES);
@@ -239,7 +327,7 @@ bool lift_verify_call(Machine *m, ActiveHook *h)
 
     restore(m, &v->cpu_before, v->mem_before, v->vga_before, v->dos_before);
     run_lifted(m, h);
-    compare(m, h, entry_sp);
+    compare(m, h, entry_sp, entry_sp);
 
     restore(m, &v->cpu_original, v->mem_original, v->vga_original, v->dos_original);
     m->cpu.stop = false;

@@ -14,6 +14,7 @@ enum { LIFT_SIGNATURE_LEN = 12 };
 /* Register bits for LiftedEntry.scratch_regs: general registers by index, then segments. */
 enum {
     LIFT_REG_AX = 1 << R_AX, LIFT_REG_CX = 1 << R_CX, LIFT_REG_DX = 1 << R_DX, LIFT_REG_BX = 1 << R_BX,
+    LIFT_REG_SI = 1 << R_SI, LIFT_REG_DI = 1 << R_DI,
     LIFT_REG_ES = 1 << (8 + S_ES), LIFT_REG_FLAGS = 1 << 15,
 };
 
@@ -26,7 +27,8 @@ typedef struct LiftedEntry {
     bool near_return;       /* returns with RET rather than RETF */
     uint16_t scratch_regs;  /* LIFT_REG_* bits the calling convention lets differ on return */
     uint8_t signature[LIFT_SIGNATURE_LEN]; /* original bytes at the entry, as in the file */
-    uint16_t reloc_mask; /* bit i: a load-segment-relocated word starts at signature byte i */
+    uint16_t reloc_mask;
+    bool region; /* LIFT_REGION: may leave at any instruction; see lift_verify.c */ /* bit i: a load-segment-relocated word starts at signature byte i */
 } LiftedEntry;
 
 /* reloc_mask bit 15: byte 0 is the high half of a relocated word starting before the entry. */
@@ -34,7 +36,7 @@ enum { LIFT_RELOC_SPLIT_HEAD = 1 << 15 };
 
 /* Marks a lifted function in a lifted source file; tools/gen_lift_table.py builds the
  * registration table from these markers and the original binary. */
-enum { LIFT_FAR = 0, LIFT_NEAR = 1 };
+enum { LIFT_FAR = 0, LIFT_NEAR = 1, LIFT_REGION = 2 };
 #define LIFTED(seg, off, fn, kind, scratch) void fn(Machine *m);
 
 /* Registers every lifted table built into this binary; a no-op without the private tree. */
