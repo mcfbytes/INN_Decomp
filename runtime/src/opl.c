@@ -1,5 +1,5 @@
-/* YM3812 (OPL2) as on an AdLib card at 388h/389h, mirrored at 228h/229h. Synthesis is Nuked-OPL3
- * in OPL2-compatible mode; timers, status and the waveform-select enable are emulated here. */
+/* YM3812 (OPL2) as on an AdLib at 388h/389h, mirrored at 228h/229h and 220h-223h (SB Pro left/right).
+ * Synthesis is Nuked-OPL3 in OPL2 mode; timers, status and the waveform-select enable are ours. */
 #include <stdlib.h>
 #include <string.h>
 
@@ -8,7 +8,7 @@
 
 enum {
     OPL_PORT_ADDR = 0x388, OPL_PORT_DATA = 0x389,
-    SB_OPL_PORT_ADDR = 0x228, SB_OPL_PORT_DATA = 0x229,
+    SB_OPL_PORT_ADDR = 0x228, SB_OPL_PORT_DATA = 0x229, SBPRO_OPL_FIRST = 0x220, SBPRO_OPL_LAST = 0x223,
     OPL_NATIVE_RATE = 49716, /* 14.31818 MHz / 4 / 72 */
     REG_TEST = 0x01, REG_TIMER1 = 0x02, REG_TIMER2 = 0x03, REG_TIMER_CTRL = 0x04,
     REG_WAVE_FIRST = 0xE0, REG_WAVE_LAST = 0xF5, WAVE_REGS = REG_WAVE_LAST - REG_WAVE_FIRST + 1,
@@ -125,13 +125,13 @@ static void write_data(Machine *m, uint8_t v)
 
 static uint32_t opl_in(Machine *m, uint16_t port, int size)
 {
-    bool status = port == OPL_PORT_ADDR || port == SB_OPL_PORT_ADDR;
+    bool status = !(port & 1);
     return status ? read_status(m) : 0xFF;
 }
 
 static void opl_out(Machine *m, uint16_t port, uint32_t value, int size)
 {
-    if (port == OPL_PORT_ADDR || port == SB_OPL_PORT_ADDR)
+    if (!(port & 1))
         opl_state(m)->addr = (uint8_t)value;
     else
         write_data(m, (uint8_t)value);
@@ -165,6 +165,7 @@ void opl_init(Machine *m)
     o->t2.tick_ns = (uint64_t)T2_SAMPLES * 1000000000u / OPL_NATIVE_RATE;
     port_register(m, OPL_PORT_ADDR, OPL_PORT_DATA, opl_in, opl_out);
     port_register(m, SB_OPL_PORT_ADDR, SB_OPL_PORT_DATA, opl_in, opl_out);
+    port_register(m, SBPRO_OPL_FIRST, SBPRO_OPL_LAST, opl_in, opl_out);
     audio_add_source(m, opl_render);
 }
 

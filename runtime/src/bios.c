@@ -270,6 +270,7 @@ void bios_init(Machine *m)
     pit_init(m);
     vga_init(m);
     kbd_init(m);
+    dma_init(m);
     install_timer(m);
     callback_register(m, "int11", int11_equipment, VEC_EQUIPMENT);
     callback_register(m, "int12", int12_memory, VEC_MEMORY);
@@ -283,6 +284,7 @@ void bios_init(Machine *m)
     uart_init(m);
     audio_init(m);
     opl_init(m);
+    sb_init(m);
     speaker_init(m);
 }
 
@@ -290,7 +292,9 @@ void bios_shutdown(Machine *m)
 {
     void **parts[] = { &m->bios, &m->pic, &m->pit, &m->vga, &m->kbd, &m->mouse };
     speaker_shutdown(m);
+    sb_shutdown(m);
     opl_shutdown(m);
+    dma_shutdown(m);
     audio_shutdown(m);
     if (m->uart)
         uart_attach(m, UART_COM1, (SerialLink){ 0 }), uart_attach(m, UART_COM2, (SerialLink){ 0 });

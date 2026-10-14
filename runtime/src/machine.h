@@ -92,7 +92,7 @@ struct Machine {
     void *lift;
 
     void *dos, *bios, *pic, *pit, *vga, *kbd, *mouse, *uart, *ems, *xms, *frontend;
-    void *audio, *opl, *speaker;
+    void *audio, *opl, *speaker, *dma, *sb;
     bool exit_requested;
     int exit_code;
     int trace; /* 0 off, 1 interrupts and DOS calls, 2 every instruction */

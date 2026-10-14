@@ -1,5 +1,5 @@
-/* dosrt sound: a mixer that renders every sound device in step with emulated time, the OPL2
- * (AdLib) at 388h/389h, the PC speaker, and a WAV writer. Design notes: docs/runtime.md. */
+/* dosrt sound: a mixer rendering every device in step with emulated time (OPL2, Sound Blaster DSP,
+ * PC speaker) and a WAV writer. Design notes: docs/runtime.md. */
 #ifndef DOSRT_AUDIO_H
 #define DOSRT_AUDIO_H
 
@@ -17,6 +17,8 @@ enum {
 
 /* Adds frames of interleaved stereo to mix, using the source's state as it is now. */
 typedef void (*AudioRenderFn)(Machine *m, int32_t *mix, int frames);
+/* Inside a render callback: the emulated time of frame i of the chunk being rendered. */
+uint64_t audio_frame_ns(Machine *m, int i);
 
 /* ---- mixer ---- */
 
@@ -43,9 +45,13 @@ int audio_read_paced(Machine *m, int16_t *out, int cap, int queued);
 
 /* ---- devices ---- */
 
-/* OPL2 at 388h/389h and the Sound Blaster mirror 228h/229h, timers included. */
+/* OPL2 at 388h/389h and the Sound Blaster mirrors 220h-223h and 228h/229h, timers included. */
 void opl_init(Machine *m);
 void opl_shutdown(Machine *m);
+/* Sound Blaster 2.0 DSP at 220h (IRQ 7, DMA 1): 8-bit mono DMA playback and the direct DAC. */
+enum { SB_BASE = 0x220, SB_DMA_CHANNEL = 1, SB_DSP_VERSION = 0x0201 };
+void sb_init(Machine *m);
+void sb_shutdown(Machine *m);
 /* Square wave from PIT channel 2 gated by port 61h. */
 void speaker_init(Machine *m);
 void speaker_shutdown(Machine *m);

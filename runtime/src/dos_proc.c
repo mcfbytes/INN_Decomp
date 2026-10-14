@@ -12,7 +12,7 @@ enum { PSP_BYTES = 0x100, FCB_BLANK_LEN = 11, DOS_VERSION_WORD = 0x0005 };
 /* CP/M-style far call at PSP:05 into the classic wrap-around entry. */
 enum { CALL5_OFF = 0xFEF0, CALL5_SEG = 0xF01D, OP_CALL_FAR = 0x9A };
 
-static const char shell_env[] = "COMSPEC=C:\\COMMAND.COM\0PATH=C:\\\0PROMPT=$P$G\0";
+static const char shell_env[] = "COMSPEC=C:\\COMMAND.COM\0PATH=C:\\\0PROMPT=$P$G\0BLASTER=A220 I7 D1 T3\0";
 static const char shell_path[] = "C:\\COMMAND.COM";
 enum { SHELL_PSP_PARAS = 0x20, OWNER_DOS = 8 };
 

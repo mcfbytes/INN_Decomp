@@ -73,8 +73,16 @@ static void render(Machine *m, Audio *a, uint64_t frames)
         for (int s = 0; s < a->source_count; s++)
             a->sources[s](m, mix, n);
         ring_push(a, mix, n);
+        a->frames_done += (uint64_t)n;
         frames -= (uint64_t)n;
     }
+}
+
+uint64_t audio_frame_ns(Machine *m, int i)
+{
+    const Audio *a = audio_state(m);
+    uint64_t f = a->frames_done + (uint64_t)i, rate = (uint64_t)a->rate;
+    return a->base_ns + f / rate * NS_PER_S + f % rate * NS_PER_S / rate;
 }
 
 void audio_sync(Machine *m)
@@ -87,7 +95,8 @@ void audio_sync(Machine *m)
         return;
     if (a->enabled)
         render(m, a, due - a->frames_done);
-    a->frames_done = due;
+    else
+        a->frames_done = due;
 }
 
 static void audio_tick(Machine *m)

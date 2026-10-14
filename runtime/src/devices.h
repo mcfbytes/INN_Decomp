@@ -1,5 +1,5 @@
 /* dosrt devices: BIOS services and the emulated PC hardware (PIC, PIT, VGA, 8042 keyboard,
- * INT 33h mouse, 8250/16550 UARTs). bios_init wires them all into a Machine. */
+ * INT 33h mouse, 8250/16550 UARTs, 8237 DMA). bios_init wires them all into a Machine. */
 #ifndef DOSRT_DEVICES_H
 #define DOSRT_DEVICES_H
 
@@ -25,7 +25,7 @@ bool bios_kbd_push(Machine *m, uint16_t key);
 /* ---- 8259 PIC pair (ports 20h/21h, A0h/A1h) ---- */
 
 enum { PIC_IRQ_TIMER = 0, PIC_IRQ_KEYBOARD = 1, PIC_IRQ_CASCADE = 2, PIC_IRQ_COM2 = 3,
-       PIC_IRQ_COM1 = 4, PIC_IRQ_MOUSE = 12 };
+       PIC_IRQ_COM1 = 4, PIC_IRQ_SB = 7, PIC_IRQ_MOUSE = 12 };
 
 void pic_init(Machine *m);
 /* pic_raise_irq / pic_lower_irq / pic_acknowledge are declared in machine.h. Lines are
@@ -42,6 +42,20 @@ double pit_timer_hz(Machine *m);
 bool pit_speaker(Machine *m, double *hz);
 /* True while port 61h enables the speaker but channel 2 is not counting (its output stays high). */
 bool pit_speaker_held(Machine *m);
+
+/* ---- 8237 DMA controller, channels 0-3 (ports 00h-0Fh, pages 87h/83h/81h/82h) ---- */
+
+enum { DMA_CHANNELS = 4 };
+
+typedef void (*DmaSyncFn)(Machine *m);
+
+void dma_init(Machine *m);
+void dma_shutdown(Machine *m);
+/* Moves up to len bytes from memory for ch's device and returns the count; stops while masked and at
+ * terminal count (*tc set), where auto-init reloads and other modes mask the channel. */
+int dma_read(Machine *m, int ch, uint8_t *dst, int len, bool *tc);
+/* fn runs before the guest reads or reprograms ch, so a device can first move what is due. */
+void dma_set_sync(Machine *m, int ch, DmaSyncFn fn);
 
 /* ---- VGA ---- */
 
