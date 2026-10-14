@@ -1,10 +1,28 @@
 #!/usr/bin/env bash
 # usage: export_module.sh <exe> <MODULE_NAME> <out_dir> [names.tsv]
-# The project goes to <repo>/work/ghidra/<MODULE_NAME>/; GHIDRA_HOME selects the install.
+#        export_module.sh --raw <image_file_offset> <file> <MODULE_NAME> <out_dir> [names.tsv]
 set -euo pipefail
 
-if [[ $# -lt 3 || $# -gt 4 ]]; then
+usage() {
     echo "usage: export_module.sh <exe> <MODULE_NAME> <out_dir> [names.tsv]" >&2
+    echo "       export_module.sh --raw <image_file_offset> <file> <MODULE_NAME> <out_dir> [names.tsv]" >&2
+}
+
+RAW=0
+OFFSET=
+if [[ "${1:-}" == "--raw" ]]; then
+    RAW=1
+    shift
+    if [[ $# -lt 4 || $# -gt 5 ]]; then
+        usage
+        exit 2
+    fi
+    OFFSET=$1
+    shift
+fi
+
+if [[ $# -lt 3 || $# -gt 4 ]]; then
+    usage
     exit 2
 fi
 
@@ -20,11 +38,14 @@ fi
 
 GHIDRA_HOME=${GHIDRA_HOME:-/mnt/source/tools/ghidra/ghidra_12.1.4_PUBLIC}
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+# Project directory is <repo>/work/ghidra/<MODULE_NAME>/. GHIDRA_HOME selects the install.
 PROJ_DIR=$SCRIPT_DIR/../../work/ghidra/"$MODULE"
 
 EXE=$(readlink -f "$EXE")
 mkdir -p "$OUT_DIR" "$PROJ_DIR"
+# Ghidra rejects project paths that still contain "..".
 OUT_DIR=$(cd "$OUT_DIR" && pwd)
+PROJ_DIR=$(cd "$PROJ_DIR" && pwd)
 if [[ -n "$NAMES" ]]; then
     NAMES=$(readlink -f "$NAMES")
     if [[ ! -f "$NAMES" ]]; then
@@ -37,9 +58,28 @@ if [[ ! -f "$EXE" ]]; then
     exit 1
 fi
 
+IMPORT=$EXE
+if [[ "$RAW" == 1 ]]; then
+    if [[ ! "$OFFSET" =~ ^(0x[0-9A-Fa-f]+|[0-9]+)$ ]]; then
+        echo "invalid image offset: $OFFSET" >&2
+        exit 2
+    fi
+    IMPORT=$PROJ_DIR/image.bin
+    python3 -c '
+import sys
+src, off_s, dst = sys.argv[1:]
+off = int(off_s, 0)
+data = open(src, "rb").read()
+if off < 0 or off >= len(data):
+    raise SystemExit("image offset %d out of range for %d-byte file" % (off, len(data)))
+open(dst, "wb").write(data[off:])
+' "$EXE" "$OFFSET" "$IMPORT"
+fi
+
 # Overwrite this module's project only.
 rm -rf "$PROJ_DIR/$MODULE.gpr" "$PROJ_DIR/$MODULE.rep" \
-    "$PROJ_DIR/$MODULE.lock" "$PROJ_DIR/$MODULE.lock~"
+    "$PROJ_DIR/$MODULE.lock" "$PROJ_DIR/$MODULE.lock~" \
+    "$PROJ_DIR/headless.log" "$PROJ_DIR/script.log" "$PROJ_DIR/console.log"
 find "$OUT_DIR" -maxdepth 1 -type f \
     \( -name '*.c' -o -name '*.asm' -o -name 'index.tsv' \) -delete
 
@@ -47,8 +87,26 @@ POST=(ExportFunctions.java "$OUT_DIR")
 if [[ -n "$NAMES" ]]; then
     POST+=("$NAMES")
 fi
+if [[ "$RAW" == 1 ]]; then
+    POST+=(raw)
+fi
 
 export GHIDRA_HEADLESS_MAXMEM="${GHIDRA_HEADLESS_MAXMEM:-8G}"
+
+if [[ "$RAW" == 1 ]]; then
+    exec "$GHIDRA_HOME/support/analyzeHeadless" \
+        "$PROJ_DIR" "$MODULE" \
+        -import "$IMPORT" \
+        -loader BinaryLoader \
+        -processor "x86:LE:16:Real Mode" \
+        -cspec default \
+        -loader-baseAddr "1000:0000" \
+        -overwrite \
+        -scriptPath "$SCRIPT_DIR" \
+        -log "$PROJ_DIR/headless.log" \
+        -scriptlog "$PROJ_DIR/script.log" \
+        -postScript "${POST[@]}"
+fi
 
 exec "$GHIDRA_HOME/support/analyzeHeadless" \
     "$PROJ_DIR" "$MODULE" \

@@ -33,8 +33,8 @@ public class ExportFunctions extends GhidraScript {
     @Override
     public void run() throws Exception {
         String[] args = getScriptArgs();
-        if (args.length < 1 || args.length > 2) {
-            println("usage: ExportFunctions.java <out_dir> [names.tsv]");
+        if (args.length < 1 || args.length > 3) {
+            println("usage: ExportFunctions.java <out_dir> [names.tsv] [raw]");
             return;
         }
         File outDir = new File(args[0]);
@@ -42,14 +42,33 @@ public class ExportFunctions extends GhidraScript {
             println("cannot create " + outDir);
             return;
         }
+        String namesPath = null;
+        boolean raw = false;
+        for (int i = 1; i < args.length; i++) {
+            if (args[i].equals("raw")) {
+                raw = true;
+            } else if (namesPath == null) {
+                namesPath = args[i];
+            } else {
+                println("usage: ExportFunctions.java <out_dir> [names.tsv] [raw]");
+                return;
+            }
+        }
         int[] named = new int[] { 0, 0 };
-        if (args.length == 2) {
-            named = applyNames(new File(args[1]));
+        if (namesPath != null) {
+            named = applyNames(new File(namesPath));
+        }
+        if (raw) {
+            logImageBase();
         }
         int prologues = findPrologues();
+        int entry = raw ? seedImageEntry() : 0;
         int[] exported = exportAll(outDir);
         String summary = "exported=" + exported[0] + " decompiled=" + exported[1]
             + " names_applied=" + named[0] + "/" + named[1] + " prologues=" + prologues;
+        if (raw) {
+            summary += " entry=" + entry;
+        }
         println(summary);
         System.out.println(summary);
     }
@@ -67,6 +86,147 @@ public class ExportFunctions extends GhidraScript {
         int seg = (sa.getSegment() - IMAGE_BASE) & 0xffff;
         int off = sa.getSegmentOffset() & 0xffff;
         return String.format("%04X:%04X", seg, off);
+    }
+
+    // Raw images have no loader entry point. Seed 0000:0000 for a jump, a run of
+    // jumps, or other entry code. A leading far-pointer table stays data.
+    private int seedImageEntry() throws Exception {
+        Address addr = imageAddr(0, 0);
+        if (getFunctionContaining(addr) != null) {
+            println("entry already present");
+            return 0;
+        }
+        byte[] head = new byte[16];
+        int n = readAt(addr, head);
+        if (!looksLikeCodeOrJump(head, n)) {
+            println("image start is not code");
+            return 0;
+        }
+        int created = ensureFunction(addr, null) != null ? 1 : 0;
+        println("entry function " + (created == 1 ? "created" : "not created"));
+        return created;
+    }
+
+    private void logImageBase() throws Exception {
+        Address addr = imageAddr(0, 0);
+        SegmentedAddress sa = (SegmentedAddress) addr;
+        byte[] buf = new byte[8];
+        int n = readAt(addr, buf);
+        StringBuilder sb = new StringBuilder();
+        sb.append(String.format("image_base %04X:%04X bytes", sa.getSegment(), sa.getSegmentOffset()));
+        for (int i = 0; i < n; i++) {
+            sb.append(String.format(" %02x", buf[i] & 0xff));
+        }
+        println(sb.toString());
+        System.out.println(sb);
+    }
+
+    private int readAt(Address addr, byte[] buf) throws MemoryAccessException {
+        MemoryBlock block = currentProgram.getMemory().getBlock(addr);
+        if (block == null || !block.contains(addr)) {
+            return 0;
+        }
+        long avail = block.getEnd().subtract(addr) + 1;
+        int n = (int) Math.min(buf.length, avail);
+        if (n <= 0) {
+            return 0;
+        }
+        if (n == buf.length) {
+            return block.getBytes(addr, buf);
+        }
+        byte[] tmp = new byte[n];
+        int got = block.getBytes(addr, tmp);
+        System.arraycopy(tmp, 0, buf, 0, got);
+        return got;
+    }
+
+    private static boolean looksLikeCodeOrJump(byte[] buf, int n) {
+        if (n < 1) {
+            return false;
+        }
+        if (isUncondJump(buf, n, 0) || isPrologue(buf, n, 0)) {
+            return true;
+        }
+        if (farPointerTable(buf, n)) {
+            return false;
+        }
+        return isEntryOpcode(buf[0] & 0xff);
+    }
+
+    private static boolean isUncondJump(byte[] buf, int n, int i) {
+        if (i >= n) {
+            return false;
+        }
+        int op = buf[i] & 0xff;
+        if (op == 0xEB) {
+            return i + 1 < n;
+        }
+        if (op == 0xE9) {
+            return i + 2 < n;
+        }
+        if (op == 0xEA) {
+            return i + 4 < n;
+        }
+        if (op != 0xFF || i + 1 >= n) {
+            return false;
+        }
+        int reg = (buf[i + 1] >> 3) & 7;
+        return reg == 4 || reg == 5;
+    }
+
+    private static boolean isPrologue(byte[] buf, int n, int i) {
+        if (i + 2 < n && (buf[i] & 0xff) == 0x55 && (buf[i + 1] & 0xff) == 0x8b
+            && (buf[i + 2] & 0xff) == 0xec) {
+            return true;
+        }
+        return i + 3 < n && (buf[i] & 0xff) == 0xc8 && (buf[i + 3] & 0xff) == 0x00;
+    }
+
+    // Four far pointers that share a segment are an LSCI DLL table, not code.
+    private static boolean farPointerTable(byte[] buf, int n) {
+        if (n < 16) {
+            return false;
+        }
+        int seg = u16(buf, 2);
+        if (seg == 0 || seg == 0xffff) {
+            return false;
+        }
+        int same = 0;
+        for (int i = 0; i < 4; i++) {
+            if (u16(buf, i * 4 + 2) == seg) {
+                same++;
+            }
+        }
+        return same >= 3;
+    }
+
+    private static int u16(byte[] buf, int i) {
+        return (buf[i] & 0xff) | ((buf[i + 1] & 0xff) << 8);
+    }
+
+    private static boolean isEntryOpcode(int op) {
+        if (op == 0xE8 || op == 0x9A || op == 0xC3 || op == 0xCB) {
+            return true;
+        }
+        if (op == 0x1E || op == 0x06 || op == 0x0E || op == 0x16 || op == 0x60) {
+            return true;
+        }
+        if (op >= 0x50 && op <= 0x57) {
+            return true;
+        }
+        if (op == 0xFC || op == 0xFA || op == 0xFB || op == 0x8C || op == 0x8E || op == 0x8B) {
+            return true;
+        }
+        if (op >= 0xB8 && op <= 0xBF) {
+            return true;
+        }
+        if (op == 0x31 || op == 0x33) {
+            return true;
+        }
+        if (op >= 0x70 && op <= 0x7F) {
+            return true;
+        }
+        return op >= 0xE0 && op <= 0xE3;
     }
 
     /** @return {applied, total} */
