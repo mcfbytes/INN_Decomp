@@ -11,11 +11,14 @@ startup module. Borland C++ 3.1 lives in `/mnt/source/tools/borlandcpp/BCPP31.ZI
 | SHOPADV.EXE | Borland C++ 3.1 (CONFIRMED startup) | large | entry matches `C0L.OBJ` 309/310; 88 `CL.LIB` modules |
 | RB.EXE (Red Baron) | Borland C++ 3.1 (CONFIRMED startup) | medium | entry matches `C0M.OBJ` 315/316; 93 `CM.LIB` modules |
 | CGENN, DARKSTRT, TWGENN, FATES | Borland C++ (version INFERRED 3.x) | large | 65-80 `CL.LIB` modules; entry diverges from `C0L.OBJ` at +38 (INFERRED: overlay-enabled startup, they use VROOMM) |
-| LSCITV.EXE | unknown, no compiler RTL | - | 1 incidental match; VM core is hand-written assembly |
-| TSNEXEC.EXE | unknown, no compiler RTL | - | 1 incidental match |
+| LSCITV.EXE | C, INFERRED Microsoft C; no compiler RTL linked | small/medium code, near-heavy | 310 C prologues; register saves after the prologue `push di/push si` 21x vs `push si/push di` 15x; VM core is hand-written assembly |
+| TSNEXEC.EXE | C, INFERRED Microsoft C, own minimal runtime | small/medium | 98 C prologues in 14.8 KB; saves `push di/push si` 22x vs 3x; no `__chkstk`; custom start-up at 0000:0010; own DOS error-message table; printf-style formats |
 
 The single differing startup byte (+338 large, +350 medium) is not yet explained; INFERRED a
 link-time constant.
+
+Register-save order is a heuristic: Microsoft C saves DI before SI after `push bp/mov bp,sp`, Borland
+saves SI before DI. Neither binary contains Microsoft's runtime strings (`R6000`, `_C_FILE_INFO`).
 
 ## Use
 
