@@ -65,3 +65,15 @@ build runs the whole path above.
 | 3 | list land types 4 and 8 in the land directory, with a new stamp | "no places available" |
 | 5, 6 | answer 41/2 with command 41, the service SID in the word at byte 6 | black screen forever |
 | 6 | joinNet kinds 5, 4, 2 with ObjID, GrpJoin echo for self | "Unable To Join Land!" and similar |
+
+## Verifying lifts
+
+`tools/verify_lifted.sh` takes the C: drive to copy from `INN_DRIVE` and the server from `INNKEEPERD`:
+
+```
+INN_DRIVE=$PWD/work/yserbius-c INNKEEPERD=../TSN-INN-Decomp/target/debug/innkeeperd \
+    tools/verify_lifted.sh build-<area> <port> 196000 20 private/lifted/scenarios/ys_dungeon.txt
+```
+
+The scenario logs on, opens MedievaLand (Tab, Enter), picks Yserbius and its place, presses Play in the
+gallery, walks into the volcano and turns in the dungeon.

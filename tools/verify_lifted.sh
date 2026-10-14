@@ -3,7 +3,8 @@
 # Uses a per-port copy of work/inn-c, so concurrent runs never share swap or player files.
 # usage: verify_lifted.sh <build_dir> <server_port> [run_ms] [calls_per_function] [script]
 # The script (input_script format) replaces the logon one; @OUT@ in it becomes the output directory.
-# INN_ARGS adds frontend options, e.g. INN_ARGS='--conv-kb 520'.
+# INN_ARGS adds frontend options, e.g. INN_ARGS='--conv-kb 520'. INN_DRIVE picks the C: drive to copy
+# (default work/inn-c; the Yserbius scenarios need one with \INN\YSERBIUS, docs/yserbius.md).
 set -euo pipefail
 BUILD=$1
 PORT=$2
@@ -26,7 +27,7 @@ fi
 # Each run gets its own C: drive: the client writes swap and player files there.
 DRIVE=$ROOT/work/verify-drive/$PORT
 mkdir -p "$DRIVE"
-rsync -a --delete --delete-excluded --exclude 'VMF/*' "$ROOT/work/inn-c/" "$DRIVE/"
+rsync -a --delete --delete-excluded --exclude 'VMF/*' "${INN_DRIVE:-$ROOT/work/inn-c}/" "$DRIVE/"
 "$SERVER" --bind 127.0.0.1:"$PORT" --no-int14h --no-capture > "$OUT/server.log" 2>&1 &
 SERVER_PID=$!
 trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
