@@ -243,11 +243,13 @@ static void test_uart(void)
     CHECK(port_in(m, 0x3F8, 1) == 'K', "second byte");
 
     port_out(m, 0x3F8, 'A', 1);
-    port_out(m, 0x3F8, 'B', 1); /* FIFO off: holding register overrun drops B */
+    CHECK(port_in(m, 0x3FD, 1) & 0x20, "THRE rises once A moves to the shift register");
+    port_out(m, 0x3F8, 'B', 1);
+    port_out(m, 0x3F8, 'C', 1); /* FIFO off: holding register overrun drops C */
     run_until(m, 3000);
     uint8_t out[4];
     int n = uart_test_take(m, UART_COM1, out, sizeof out);
-    CHECK(n == 1 && out[0] == 'A', "guest byte reaches the link (n=%d)", n);
+    CHECK(n == 2 && out[0] == 'A' && out[1] == 'B', "guest bytes reach the link (n=%d)", n);
     port_out(m, 0x3FA, 0x07, 1); /* FIFO on */
     CHECK((port_in(m, 0x3FA, 1) & 0xC0) == 0xC0, "IIR FIFO bits");
     finish(m);

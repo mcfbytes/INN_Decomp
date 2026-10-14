@@ -40,6 +40,7 @@ typedef struct Cpu {
     bool yielded; /* a callback asked to be retried later (guest is waiting for input) */
     bool irq_inhibit; /* one-instruction shadow after mov ss / pop ss / sti */
     uint64_t instructions;
+    uint32_t stall; /* extra instruction slots consumed by slow bus cycles (port I/O) */
 } Cpu;
 
 typedef struct Machine Machine;
@@ -76,6 +77,7 @@ struct Machine {
     uint64_t virtual_us;  /* emulated time, advanced by the scheduler */
 
     uint64_t ips; /* emulated instructions per second */
+    uint32_t io_cost_ns; /* ISA bus time charged per port access */
     TickFn tickers[16];
     int ticker_count;
 

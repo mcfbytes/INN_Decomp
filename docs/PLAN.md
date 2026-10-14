@@ -54,10 +54,10 @@ produces the game.
 
 ## 4. Milestones
 
-- [ ] **M0** Repo, plan, toolchain (Emscripten 6.0.12 in `/mnt/source/tools/emsdk`).
-- [ ] **M1** `dosrt` with the interpreter: MZ loader, EXEC, DOS file I/O, VGA mode 13h, keyboard,
+- [x] **M0** Repo, plan, toolchain (Emscripten 6.0.12 in `/mnt/source/tools/emsdk`).
+- [x] **M1** `dosrt` with the interpreter: MZ loader, EXEC, DOS file I/O, VGA mode 13h, keyboard,
       mouse, PIT, UART. Native SDL2 build. TSNEXEC + LSCITV reach the dial screen.
-- [ ] **M2** UART over TCP to `innkeeperd`; the client logs on and reaches the Clubhouse.
+- [x] **M2** UART over TCP to `innkeeperd`; the client logs on and reaches the map (2026-10-14).
 - [ ] **M3** Emscripten build; the same in a browser over WebSocket (adds WS ingress to `innkeeperd`).
 - [ ] **M4** Recompiler for LSCITV and TSNEXEC; interpreter fallback rate reported per run.
 - [ ] **M5** Lift LSCITV: VM, memory manager, resources, kernels, graphics, sound, TSN kernel.

@@ -34,7 +34,10 @@ typedef struct Uart {
     uint8_t ier, lcr, mcr, lsr, msr, scr, fcr, dll, dlm;
     Fifo rx, tx;
     bool thre_pending, irq_high;
-    uint64_t next_tx_us, next_rx_us, last_rx_us;
+    bool shifting; /* the transmit shift register holds shift_byte until shift_done_us */
+    uint8_t shift_byte;
+    uint64_t shift_done_us;
+    uint64_t next_rx_us, last_rx_us;
     SerialLink link;
 } Uart;
 
@@ -151,13 +154,24 @@ static uint8_t data_read(Machine *m, Uart *u)
     return b;
 }
 
+/* THR (or the FIFO) empties into the shift register at once, so THRE rises a byte early. */
+static void start_shift(Machine *m, Uart *u)
+{
+    if (u->shifting || !u->tx.count)
+        return;
+    u->shift_byte = fifo_pop(&u->tx);
+    u->shifting = true;
+    u->shift_done_us = m->virtual_us + byte_us(u);
+    if (!u->tx.count)
+        u->thre_pending = true;
+}
+
 static void data_write(Machine *m, Uart *u, uint8_t b)
 {
     u->thre_pending = false;
-    if (u->tx.count == 0 && m->virtual_us >= u->next_tx_us)
-        u->next_tx_us = m->virtual_us + byte_us(u);
     if (u->tx.count < capacity(u))
         fifo_push(&u->tx, b);
+    start_shift(m, u);
 }
 
 static void set_break(Uart *u, uint8_t new_lcr)
@@ -175,7 +189,9 @@ static uint8_t lsr_value(const Uart *u)
     if (u->rx.count)
         v |= LSR_DR;
     if (!u->tx.count)
-        v |= LSR_THRE | LSR_TEMT;
+        v |= LSR_THRE;
+    if (!u->tx.count && !u->shifting)
+        v |= LSR_TEMT;
     return v;
 }
 
@@ -246,18 +262,15 @@ static void uart_out(Machine *m, uint16_t port, uint32_t value, int size)
 
 static void pump_tx(Machine *m, Uart *u)
 {
-    if (!u->tx.count || m->virtual_us < u->next_tx_us)
+    if (!u->shifting || m->virtual_us < u->shift_done_us)
         return;
-    uint8_t b = u->tx.data[u->tx.head];
     if (u->mcr & MCR_LOOP) {
-        receive_byte(m, u, b);
-    } else if (u->link.send && u->link.send(u->link.ctx, &b, 1) == 0) {
+        receive_byte(m, u, u->shift_byte);
+    } else if (u->link.send && u->link.send(u->link.ctx, &u->shift_byte, 1) == 0) {
         return; /* link busy: retry next slice */
     }
-    fifo_pop(&u->tx);
-    u->next_tx_us = m->virtual_us + byte_us(u);
-    if (!u->tx.count)
-        u->thre_pending = true;
+    u->shifting = false;
+    start_shift(m, u);
 }
 
 static void pump_rx(Machine *m, Uart *u)

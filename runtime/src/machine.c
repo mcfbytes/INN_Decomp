@@ -81,8 +81,15 @@ void port_register(Machine *m, uint16_t first, uint16_t last, PortInFn in, PortO
     }
 }
 
+/* Drivers time out on fixed poll counts, which only works if port I/O costs real bus time. */
+static void charge_io(Machine *m)
+{
+    m->cpu.stall += (uint32_t)(m->ips * m->io_cost_ns / 1000000000u);
+}
+
 uint32_t port_in(Machine *m, uint16_t port, int size)
 {
+    charge_io(m);
     if (size > 1 && (!m->port_in[port] || m->port_in[port] != m->port_in[(uint16_t)(port + 1)])) {
         uint32_t lo = port_in(m, port, 1), hi = port_in(m, (uint16_t)(port + 1), 1);
         uint32_t v = lo | hi << 8;
@@ -99,6 +106,7 @@ uint32_t port_in(Machine *m, uint16_t port, int size)
 
 void port_out(Machine *m, uint16_t port, uint32_t value, int size)
 {
+    charge_io(m);
     if (size > 1 && (!m->port_out[port] || m->port_out[port] != m->port_out[(uint16_t)(port + 1)])) {
         port_out(m, port, value & 0xFF, 1);
         port_out(m, (uint16_t)(port + 1), value >> 8 & 0xFF, 1);
@@ -122,6 +130,7 @@ Machine *machine_create(void)
         fatal("out of memory");
     memset(m->mem + 0xC0000, 0xFF, MEM_ONE_MEG - 0xC0000);
     m->ips = 20000000;
+    m->io_cost_ns = 1000;
     cpu_reset(m);
     return m;
 }

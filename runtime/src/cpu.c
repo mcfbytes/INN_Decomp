@@ -1406,7 +1406,8 @@ uint64_t cpu_run(Machine *m, uint64_t budget)
         if (m->trace >= 2)
             trace_insn(m);
         exec_one(m);
-        done++;
+        done += 1 + c->stall;
+        c->stall = 0;
         if (c->yielded)
             break;
     }

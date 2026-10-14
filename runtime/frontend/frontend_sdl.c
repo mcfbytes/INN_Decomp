@@ -11,6 +11,7 @@
 #endif
 
 #include "devices.h"
+#include "input_script.h"
 #include "machine.h"
 #if __has_include("dos.h")
 #include "dos.h"
@@ -32,6 +33,7 @@ typedef struct Options {
     bool headless;
     uint64_t run_ms;
     const char *screenshot;
+    const char *script;
     const char *c_dir, *program;
     char args[ARGS_MAX];
 } Options;
@@ -241,8 +243,18 @@ static int run_windowed(Frontend *f)
 static int run_headless(Frontend *f, const Options *o)
 {
     uint64_t end = f->m->virtual_us + o->run_ms * 1000;
-    while (f->m->virtual_us < end && !f->m->exit_requested)
+    InputScript *script = NULL;
+    if (o->script && !(script = input_script_load(o->script))) {
+        fprintf(stderr, "cannot load script %s\n", o->script);
+        return -1;
+    }
+    while (f->m->virtual_us < end && !f->m->exit_requested) {
+        if (script)
+            input_script_apply(script, f->m);
         machine_run_for(f->m, HEADLESS_CHUNK_US);
+    }
+    if (script)
+        input_script_free(script);
     if (o->screenshot && vga_write_ppm(f->m, o->screenshot) != 0) {
         fprintf(stderr, "cannot write %s\n", o->screenshot);
         return -1;
@@ -255,7 +267,7 @@ static int run_headless(Frontend *f, const Options *o)
 static void usage(void)
 {
     fprintf(stderr, "usage: inn [--trace N] [--ips N] [--com1 host:port] "
-                    "[--headless --run-ms N --screenshot out.ppm] <c-drive-dir> <program> [args]\n");
+                    "[--headless --run-ms N --screenshot out.ppm --script input.txt] <c-drive-dir> <program> [args]\n");
 }
 
 static int parse_args(int argc, char **argv, Options *o)
@@ -272,6 +284,7 @@ static int parse_args(int argc, char **argv, Options *o)
         else if (!strcmp(a, "--com1")) o->com1 = next;
         else if (!strcmp(a, "--run-ms")) o->run_ms = strtoull(next, NULL, 10);
         else if (!strcmp(a, "--screenshot")) o->screenshot = next;
+        else if (!strcmp(a, "--script")) o->script = next;
         else return -1;
         i++;
     }

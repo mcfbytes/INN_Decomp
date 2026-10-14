@@ -46,3 +46,32 @@ can drive it.
 The interpreter has no x87: escape opcodes decode their operand and do nothing, so `FNINIT` /
 `FNSTSW` probes report no coprocessor and Borland programs fall back to their linked emulator.
 Red Baron is the first title that may need real x87 support (milestone M8).
+
+## Port I/O costs bus time
+
+Every `IN`/`OUT` adds `io_cost_ns` (default 1000 ns, an ISA bus cycle) of emulated time through
+`Cpu.stall`. Drivers poll with fixed loop counts: `MODEM.DRV` waits at most 8696 reads of the
+UART line status before writing anyway, which on real hardware outlasts one 2400-baud byte only
+because each read is slow. Without the charge it overran the transmit holding register.
+
+## Input scripts
+
+`inn --headless --script FILE` replays timed input. One event per line, times in emulated ms:
+
+```
+10000 shot work/e2e/select.ppm   # screenshot
+11000 click 285 59               # move, press and release the left button (frame pixels)
+12000 move 100 50
+13000 key 1C                     # set-1 make code, pressed and released
+14000 type guybrush\n            # US layout, \n is Enter
+```
+
+`tools/ppm2png.py` converts screenshots. Example end-to-end run against the sibling server:
+
+```
+../TSN-INN-Decomp/target/debug/innkeeperd --bind 127.0.0.1:2314 --no-int14h &
+build/inn --headless --run-ms 95000 --script play.txt --com1 127.0.0.1:2314 work/inn-c 'INN\TSNEXEC.EXE' DEFAULT
+```
+
+The C: drive is a copy of the installed client with the program under `\INN`, as `LSCI.CFG`
+expects. The frontend starts each program in its own directory.
