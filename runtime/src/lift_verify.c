@@ -301,10 +301,11 @@ bool lift_verify_call(Machine *m, ActiveHook *h)
 {
     LiftState *s = lift_state(m);
     VerifyState *v = s->verify;
-    if (!v || s->in_shadow || h->shadow_calls >= v->calls_per_entry)
+    if (!v || s->in_shadow || h->entry->no_shadow || h->shadow_calls >= v->calls_per_entry)
         return false;
     h->shadow_calls++;
     s->in_shadow = true;
+    s->shadow_of = h;
     m->irq_hold = true;
     uint16_t entry_sp = m->cpu.r[R_SP].w;
     v->cpu_before = m->cpu;
@@ -319,6 +320,7 @@ bool lift_verify_call(Machine *m, ActiveHook *h)
         m->cpu.stop = false;
         m->irq_hold = false;
         s->in_shadow = false;
+        s->shadow_of = NULL;
         return true;
     }
     run_original(m, h);
@@ -335,5 +337,6 @@ bool lift_verify_call(Machine *m, ActiveHook *h)
     m->cpu.stop = false;
     m->irq_hold = false;
     s->in_shadow = false;
+    s->shadow_of = NULL;
     return true;
 }

@@ -4,6 +4,7 @@
 
 #include "lift.h"
 
+enum { SHADOW_STALL_INSNS = 200000000 };
 enum { MAX_TABLES = 64, MAX_ACTIVE = 8192, MAX_NESTING = 64, HOOK_BITMAP_BYTES = MEM_ONE_MEG / 8 };
 
 typedef struct ActiveHook {
@@ -32,6 +33,8 @@ typedef struct LiftState {
     int return_callback;
     bool in_shadow;
     bool hooks_off; /* shadow runs of the original run with every lifted hook off */
+    const ActiveHook *shadow_of; /* the hook being shadow-verified, for stall reports */
+    const char *only; /* INN_LIFT_ONLY: comma-separated names to hook, all when NULL */
     struct VerifyState *verify;
     struct { char name[16]; uint16_t load_seg; } modules[16];
     int module_count;

@@ -35,6 +35,12 @@ exit CS:IP and SP; the original then runs from the same snapshot, with recorded 
 until it first reaches that CS:IP with that SP. Memory below the exit SP is dead stack. The game
 continues from the lifted end state.
 
+## Guest stack use
+
+Lifted code that needs scratch space in guest memory (a buffer passed to original code, a DOS
+call's argument block) takes it by moving SP down, as the original does, never at a fixed depth
+below SP: small stacks (TSNEXEC has 1 KB inside DGROUP) put static data right below them.
+
 ## Registration
 
 Scratch sets must use macros from shared headers (`include/`): the generated table is a separate
@@ -69,6 +75,14 @@ The game then continues from the original's end state, so a wrong lift cannot de
 lifted hooks are off during the original's shadow run, so lifted callees inside it run original
 code and the whole call tree is compared. The
 first difference is reported with the function, the call number and the differing value.
+
+Functions whose original would repeat device I/O during a shadow run (dialling, UART handshakes
+through a modem driver) or end the process are marked `LIFT_FAR_NOSHADOW` / `LIFT_NEAR_NOSHADOW`:
+they are hooked but only ever checked functionally, and the summary lists them as not shadowed.
+Interrupts are held during shadow runs, so code that waits for a timer tick spins there; a shadow
+run still going after 200 million instructions is logged with the hook's name and CS:IP.
+`INN_LIFT_ONLY=name,name,...` hooks only the named functions, which checks functions that are
+otherwise only reached from other lifted code.
 
 Enable it with `INN_VERIFY_LIFTED=<calls per function>`; `tools/verify_lifted.sh` runs the logon
 scenario against a local server and prints the per-function summary. Snapshots cover guest

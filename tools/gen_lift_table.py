@@ -14,7 +14,7 @@ import struct
 import sys
 
 MARKER = re.compile(
-    r'^LIFTED\(\s*(0x[0-9A-Fa-f]+)\s*,\s*(0x[0-9A-Fa-f]+)\s*,\s*(\w+)\s*,\s*(LIFT_FAR|LIFT_NEAR|LIFT_REGION)\s*,'
+    r'^LIFTED\(\s*(0x[0-9A-Fa-f]+)\s*,\s*(0x[0-9A-Fa-f]+)\s*,\s*(\w+)\s*,\s*(LIFT_FAR_NOSHADOW|LIFT_NEAR_NOSHADOW|LIFT_FAR|LIFT_NEAR|LIFT_REGION)\s*,'
     r'\s*([\w|\s]+?)\s*\)', re.M)
 SIGNATURE_LEN = 12
 SPLIT_HEAD = 1 << 15  # byte 0 is the high half of a relocated word that starts before the entry
@@ -73,17 +73,19 @@ def entries_of(module_dir, image, relocs):
             signature = image[start:start + SIGNATURE_LEN]
             if len(signature) != SIGNATURE_LEN:
                 sys.exit(f'{source}: {match[3]} lies outside the image')
-            yield seg, off, match[3], match[4] == 'LIFT_NEAR', match[5], signature, reloc_mask(start, relocs), match[4] == 'LIFT_REGION'
+            kind = match[4]
+            yield (seg, off, match[3], kind.startswith('LIFT_NEAR'), match[5], signature, reloc_mask(start, relocs),
+                   kind == 'LIFT_REGION', kind.endswith('_NOSHADOW'))
 
 
 def emit_module(out, index, name, entries):
     for _, _, fn, *_ in entries:
         out.append(f'void {fn}(Machine *m);')
     out.append(f'static const LiftedEntry module_{index}[] = {{')
-    for seg, off, fn, near, scratch, signature, mask, region in entries:
+    for seg, off, fn, near, scratch, signature, mask, region, no_shadow in entries:
         sig = ', '.join(f'0x{b:02X}' for b in signature)
         out.append(f'    {{ "{name}", 0x{seg:04X}, 0x{off:04X}, {fn}, "{fn}", {str(near).lower()}, '
-                   f'{scratch}, {{ {sig} }}, 0x{mask:04X}, {str(region).lower()} }},')
+                   f'{scratch}, {{ {sig} }}, 0x{mask:04X}, {str(region).lower()}, {str(no_shadow).lower()} }},')
     out.append('};')
 
 

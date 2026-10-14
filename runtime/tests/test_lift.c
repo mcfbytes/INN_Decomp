@@ -1,5 +1,6 @@
 /* Lifted-function hooks: dispatch at the entry, nested near/far guest calls, signature guard. */
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "lift.h"
@@ -50,12 +51,13 @@ typedef struct Run { uint16_t ax; int mismatches; } Run;
 
 static LiftedEntry entries[1];
 
-static Run run_program(LiftedFn fn, uint16_t off, bool near, bool good_signature, bool verify)
+static Run run_program_ex(LiftedFn fn, uint16_t off, bool near, bool good_signature, bool verify, bool no_shadow)
 {
     Machine *m = machine_create();
     memcpy(m->mem + real_addr(CODE_SEG, 0), PROGRAM, sizeof PROGRAM);
     entries[0] = (LiftedEntry){ .module = "TEST.EXE", .off = off, .fn = fn, .name = "fn",
-                                .near_return = near, .scratch_regs = LIFT_REG_FLAGS };
+                                .near_return = near, .scratch_regs = LIFT_REG_FLAGS,
+                                .no_shadow = no_shadow };
     memcpy(entries[0].signature, PROGRAM + off, LIFT_SIGNATURE_LEN);
     if (!good_signature)
         entries[0].signature[0] ^= 0xFF;
@@ -77,6 +79,11 @@ static Run run_program(LiftedFn fn, uint16_t off, bool near, bool good_signature
     return r;
 }
 
+static Run run_program(LiftedFn fn, uint16_t off, bool near, bool good_signature, bool verify)
+{
+    return run_program_ex(fn, off, near, good_signature, verify, false);
+}
+
 int main(void)
 {
     enum { ORIGINAL_RESULT = 5 * 2 + 1, LIFTED_F_RESULT = 5 * 3 + 1 + 100 };
@@ -90,6 +97,16 @@ int main(void)
     r = run_program(lifted_f, F_OFF, false, true, true);
     CHECK(r.mismatches == 1, "unfaithful F is caught (%d mismatches)", r.mismatches);
     CHECK(r.ax == ORIGINAL_RESULT, "verification continues from the original (AX=%u)", r.ax);
+    r = run_program_ex(lifted_f, F_OFF, false, true, true, true);
+    CHECK(r.ax == LIFTED_F_RESULT && r.mismatches == 0, "no-shadow F runs lifted, unverified (AX=%u, %d mismatches)",
+          r.ax, r.mismatches);
+    setenv("INN_LIFT_ONLY", "other,fnx", 1);
+    r = run_program(lifted_f, F_OFF, false, true, false);
+    CHECK(r.ax == ORIGINAL_RESULT, "INN_LIFT_ONLY without the name leaves it unhooked (AX=%u)", r.ax);
+    setenv("INN_LIFT_ONLY", "other,fn", 1);
+    r = run_program(lifted_f, F_OFF, false, true, false);
+    CHECK(r.ax == LIFTED_F_RESULT, "INN_LIFT_ONLY with the name hooks it (AX=%u)", r.ax);
+    unsetenv("INN_LIFT_ONLY");
     if (failures)
         fprintf(stderr, "%d check(s) failed\n", failures);
     return failures != 0;

@@ -34,6 +34,7 @@ void lift_init(Machine *m)
         fatal("out of memory");
     lift_state(m)->return_callback = callback_register(m, "lift far return", far_return_reached, -1);
     lifted_register_all(m);
+    lift_state(m)->only = getenv("INN_LIFT_ONLY");
     const char *verify_calls = getenv("INN_VERIFY_LIFTED");
     if (verify_calls && atoi(verify_calls) > 0)
         lift_verify_enable(m, atoi(verify_calls));
@@ -41,6 +42,10 @@ void lift_init(Machine *m)
 
 static void log_verify_line(const ActiveHook *h)
 {
+    if (h->entry->no_shadow) {
+        log_msg("verify: %s %s: not shadowed (LIFT_NOSHADOW)", h->entry->module, h->entry->name);
+        return;
+    }
     log_msg("verify: %s %s: %d calls checked, %d mismatches", h->entry->module, h->entry->name,
             h->shadow_calls, h->shadow_mismatches);
 }
@@ -79,9 +84,21 @@ static int by_linear(const void *a, const void *b)
     return x->linear < y->linear ? -1 : x->linear > y->linear;
 }
 
+/* Whether name is one of the comma-separated names in list. */
+static bool listed(const char *list, const char *name)
+{
+    size_t len = strlen(name);
+    for (const char *p = list; (p = strstr(p, name)); p += len)
+        if ((p == list || p[-1] == ',') && (p[len] == ',' || p[len] == 0))
+            return true;
+    return false;
+}
+
 static void arm(Machine *m, const LiftedEntry *e, uint16_t load_seg)
 {
     LiftState *s = lift_state(m);
+    if (s->only && !listed(s->only, e->name))
+        return;
     if (s->active_count >= MAX_ACTIVE)
         fatal("too many active lifted functions");
     uint32_t linear = real_addr((uint16_t)(load_seg + e->seg), e->off);
@@ -222,8 +239,17 @@ void lift_run_nested(Machine *m, uint32_t return_linear, uint16_t return_sp, boo
         fatal("lifted code nested too deeply");
     NestedCall *n = &s->nested[s->nesting++];
     *n = (NestedCall){ .return_linear = return_linear, .return_sp = return_sp, .sp_above = sp_above };
-    while (!n->returned && !m->exit_requested)
+    uint64_t start = m->cpu.instructions, stall_report = start + SHADOW_STALL_INSNS;
+    while (!n->returned && !m->exit_requested) {
         machine_step(m);
+        if (s->shadow_of && m->cpu.instructions >= stall_report) {
+            /* Interrupts are held during a shadow run, so code that waits on a timer tick spins. */
+            log_msg("verify: shadow run of %s still running after %llu instructions, at %04X:%04X",
+                    s->shadow_of->entry->name, (unsigned long long)(m->cpu.instructions - start),
+                    m->cpu.seg[S_CS], (unsigned)(m->cpu.eip & 0xFFFF));
+            stall_report += SHADOW_STALL_INSNS;
+        }
+    }
     s->nesting--;
 }
 
