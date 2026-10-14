@@ -129,7 +129,7 @@ static void run_lifted(Machine *m, ActiveHook *h)
     VerifyState *v = verify(m);
     v->replay_pos = 0;
     m->io_mode = IO_REPLAY;
-    h->entry->fn(m);
+    lift_call_c(m, h->entry->fn);
     m->io_mode = IO_LIVE;
     if (v->replay_pos != v->log_len)
         v->io_diverged = true;
@@ -271,7 +271,7 @@ static void verify_region(Machine *m, ActiveHook *h)
     VerifyState *v = verify(m);
     uint16_t entry_sp = m->cpu.r[R_SP].w;
     m->io_mode = IO_RECORD;
-    h->entry->fn(m);
+    lift_call_c(m, h->entry->fn);
     m->io_mode = IO_LIVE;
     save(m, &v->cpu_lifted, v->mem_lifted, v->vga_lifted, v->dos_lifted_end);
     if (m->exit_requested)

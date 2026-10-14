@@ -20,6 +20,9 @@ typedef struct FrameClock {
     FramePerf window;
 } FrameClock;
 
+/* Host wall clock in microseconds. */
+uint64_t frame_clock_now_us(void);
+
 void frame_clock_start(FrameClock *c, const Machine *m, bool report);
 /* Runs m for the wall time since the previous call, capped so a stalled tab or a slow host
  * slows the game down instead of making it race to catch up. */

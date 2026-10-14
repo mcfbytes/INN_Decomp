@@ -94,9 +94,16 @@ current directory). Host file deletions, renames, creations and growth are journ
 between the two runs. Known limits: bytes written to host files are written by both runs and not restored; devices other than VGA (PIT, UART, OPL) see only the original run's I/O, which is the
 intended behaviour.
 
-## Browser constraint
+## Waiting in lifted code
 
-The browser build has one thread and no blocking. If lifted code calls original code that waits
-for input (`CB_RETRY` inside a nested call), the nested loop would never return to the browser's
-event loop. Such call paths either get lifted as non-blocking state machines or the web build
-enables Emscripten's ASYNCIFY for them. Track any such path when it appears.
+Lifted C runs no instructions, so two things keep its waits working:
+
+- Port accesses made from lifted C (outside shadow runs) charge their bus time to emulated time and
+  end scheduler slices as they fill, so a C poll loop sees retrace, UART and timer state change.
+- A nested guest call that waits (a dial, kWait) calls the frontend's yield hook between slices
+  (`lift_set_nested_yield`): it keeps emulated time with the wall clock, presents frames, takes input
+  and, in the browser, returns to the event loop through Emscripten's Asyncify, so WebSocket data
+  arrives. The browser build therefore links with `-sASYNCIFY`; the functions that reach the sleep
+  through an indirect call are listed in CMakeLists.txt. Headless runs have no hook and stay
+  deterministic.
+

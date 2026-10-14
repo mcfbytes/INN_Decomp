@@ -8,7 +8,7 @@ enum {
     REPORT_EVERY_US = 5000000,
 };
 
-static uint64_t host_now_us(void)
+uint64_t frame_clock_now_us(void)
 {
     return SDL_GetPerformanceCounter() * 1000000 / SDL_GetPerformanceFrequency();
 }
@@ -16,7 +16,7 @@ static uint64_t host_now_us(void)
 void frame_clock_start(FrameClock *c, const Machine *m, bool report)
 {
     *c = (FrameClock){ .report = report };
-    c->last_us = c->window_start_us = host_now_us();
+    c->last_us = c->window_start_us = frame_clock_now_us();
     c->window_instructions = m->cpu.instructions;
 }
 
@@ -38,7 +38,7 @@ static void report_window(FrameClock *c, const Machine *m, uint64_t now)
 
 void frame_clock_run(FrameClock *c, Machine *m)
 {
-    uint64_t now = host_now_us(), elapsed = now - c->last_us;
+    uint64_t now = frame_clock_now_us(), elapsed = now - c->last_us;
     c->last_us = now;
     if (elapsed > MAX_FRAME_US) {
         c->window.dropped_us += elapsed - MAX_FRAME_US;
@@ -53,7 +53,7 @@ void frame_clock_run(FrameClock *c, Machine *m)
     uint64_t advanced = m->virtual_us - before;
     c->owed_us -= (int64_t)advanced;
     c->window.emulated_us += advanced;
-    c->window.busy_us += host_now_us() - now;
+    c->window.busy_us += frame_clock_now_us() - now;
     if (c->report && now - c->window_start_us >= REPORT_EVERY_US)
         report_window(c, m, now);
 }

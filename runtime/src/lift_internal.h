@@ -34,6 +34,8 @@ typedef struct LiftState {
     bool in_shadow;
     bool hooks_off; /* shadow runs of the original run with every lifted hook off */
     const ActiveHook *shadow_of; /* the hook being shadow-verified, for stall reports */
+    void (*nested_yield)(Machine *m);
+    int c_depth; /* lifted C on the host stack and not inside a nested guest call */
     const char *only; /* INN_LIFT_ONLY: comma-separated names to hook, all when NULL */
     struct VerifyState *verify;
     struct { char name[16]; uint16_t load_seg; } modules[16];
@@ -47,6 +49,8 @@ static inline LiftState *lift_state(Machine *m) { return m->lift; }
 void lift_set_hook_bit(Machine *m, uint32_t linear, bool on);
 /* Runs guest code until the pending nested call returns (see NestedCall). */
 void lift_run_nested(Machine *m, uint32_t return_linear, uint16_t return_sp, bool sp_above);
+/* Runs a lifted function, marking lifted C as running for port-time accounting. */
+void lift_call_c(Machine *m, LiftedFn fn);
 /* Shadow-verifies one call of h; returns false when verification does not apply. */
 bool lift_verify_call(Machine *m, ActiveHook *h);
 

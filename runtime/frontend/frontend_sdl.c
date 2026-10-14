@@ -10,6 +10,7 @@
 #endif
 
 #include "audio_sdl.h"
+#include "lift.h"
 #include "devices.h"
 #include "frame_clock.h"
 #include "input_script.h"
@@ -22,6 +23,9 @@
 enum {
     WINDOW_W = 960, WINDOW_H = 720, /* 4:3, so 200-line modes get their tall pixels */
     HEADLESS_CHUNK_US = 10000,
+    FRAME_PERIOD_US = 16667,
+    NESTED_AHEAD_US = 2000,    /* emulated time a nested wait may run ahead of the wall clock */
+    NESTED_PRESENT_US = 16667,
     DEFAULT_RUN_MS = 10000,
     ARGS_MAX = 128,
 };
@@ -48,6 +52,8 @@ typedef struct Frontend {
     uint32_t frame[VGA_MAX_W * VGA_MAX_H];
     int frame_w, frame_h;
     FrameClock clock;
+    uint64_t step_wall_us, step_virtual_us; /* at the start of the current frame */
+    uint64_t last_present_us;
     bool quit;
 } Frontend;
 
@@ -160,6 +166,7 @@ static void draw_cursor_overlay(Frontend *f)
 
 static void present(Frontend *f)
 {
+    f->last_present_us = frame_clock_now_us();
     vga_render(f->m, f->frame, &f->frame_w, &f->frame_h);
     draw_cursor_overlay(f);
     SDL_Rect src = { 0, 0, f->frame_w, f->frame_h };
@@ -173,24 +180,68 @@ static void present(Frontend *f)
 
 static Frontend *g_frontend; /* emscripten_set_main_loop takes no context argument */
 
+static void host_sleep_us(uint64_t us)
+{
+#ifdef INN_ASYNCIFY
+    emscripten_sleep((unsigned)(us / 1000));
+#elif !defined(__EMSCRIPTEN__)
+    SDL_Delay((uint32_t)(us / 1000));
+#else
+    (void)us; /* without Asyncify the browser cannot be yielded to from inside a frame */
+#endif
+}
+
+/* Lifted code waiting inside one frame (a dial, kWait): keep emulated time with the wall clock,
+ * show frames and take input, as the frame loop would. */
+void frontend_nested_yield(Machine *m)
+{
+    Frontend *f = g_frontend;
+    uint64_t now = frame_clock_now_us();
+    uint64_t emulated = m->virtual_us - f->step_virtual_us, wall = now - f->step_wall_us;
+    if (emulated > wall + NESTED_AHEAD_US)
+        host_sleep_us(emulated - wall);
+    if (now - f->last_present_us < NESTED_PRESENT_US)
+        return;
+    SDL_Event e;
+    while (SDL_PollEvent(&e))
+        handle_event(f, &e);
+    frontend_audio_pump(m);
+    present(f);
+    host_sleep_us(0); /* a poll loop may take no emulated time; the browser still needs its turn */
+}
+
 static void frame_step(void)
 {
     Frontend *f = g_frontend;
     SDL_Event e;
     while (SDL_PollEvent(&e))
         handle_event(f, &e);
+    f->step_wall_us = frame_clock_now_us();
+    f->step_virtual_us = f->m->virtual_us;
     frame_clock_run(&f->clock, f->m);
     frontend_audio_pump(f->m);
     present(f);
     if (f->m->exit_requested)
         f->quit = true;
-#ifdef __EMSCRIPTEN__
-    if (f->quit) {
-        emscripten_cancel_main_loop();
-        EM_ASM({ if (Module.onGuestExit) Module.onGuestExit($0); }, f->m->exit_code);
-    }
-#endif
 }
+
+#ifdef __EMSCRIPTEN__
+static void report_exit(Frontend *f)
+{
+    EM_ASM({ if (Module.onGuestExit) Module.onGuestExit($0); }, f->m->exit_code);
+}
+
+#ifndef INN_ASYNCIFY
+static void main_loop_step(void)
+{
+    frame_step();
+    if (g_frontend->quit) {
+        emscripten_cancel_main_loop();
+        report_exit(g_frontend);
+    }
+}
+#endif
+#endif
 
 #ifdef __EMSCRIPTEN__
 enum { WINDOW_FLAGS = 0 }; /* the page sizes the canvas */
@@ -203,6 +254,8 @@ static int open_window(Frontend *f)
 #ifdef __EMSCRIPTEN__
     /* Keys reach the guest only while the canvas has focus, so the page's own fields still type. */
     SDL_SetHint(SDL_HINT_EMSCRIPTEN_KEYBOARD_ELEMENT, "#canvas");
+    /* Our loop yields to the browser itself; SDL's own sleep in SwapWindow is not instrumented. */
+    SDL_SetHint("SDL_EMSCRIPTEN_ASYNCIFY", "0");
 #endif
     if (SDL_Init(SDL_INIT_VIDEO) != 0) {
         fprintf(stderr, "SDL_Init: %s\n", SDL_GetError());
@@ -243,8 +296,18 @@ static int run_windowed(Frontend *f, const Options *o)
     frontend_audio_open(f->m, true, o->wav);
     frame_clock_start(&f->clock, f->m, o->perf);
     g_frontend = f;
-#ifdef __EMSCRIPTEN__
-    emscripten_set_main_loop(frame_step, 0, 1);
+    lift_set_nested_yield(f->m, frontend_nested_yield);
+#if defined(INN_ASYNCIFY)
+    /* A plain loop rather than emscripten_set_main_loop: lifted code may sleep inside a frame. */
+    while (!f->quit) {
+        uint64_t start = frame_clock_now_us();
+        frame_step();
+        uint64_t spent = frame_clock_now_us() - start;
+        host_sleep_us(spent < FRAME_PERIOD_US ? FRAME_PERIOD_US - spent : 0);
+    }
+    report_exit(f);
+#elif defined(__EMSCRIPTEN__)
+    emscripten_set_main_loop(main_loop_step, 0, 1);
 #else
     while (!f->quit)
         frame_step();

@@ -230,8 +230,25 @@ bool lift_dispatch(Machine *m, uint32_t linear)
     if (!h || !signature_matches(m, h))
         return false;
     if (!lift_verify_call(m, h))
-        h->entry->fn(m);
+        lift_call_c(m, h->entry->fn);
     return true;
+}
+
+void lift_call_c(Machine *m, LiftedFn fn)
+{
+    lift_state(m)->c_depth++;
+    fn(m);
+    lift_state(m)->c_depth--;
+}
+
+bool lift_in_c(const Machine *m)
+{
+    return m->lift && ((const LiftState *)m->lift)->c_depth > 0;
+}
+
+void lift_set_nested_yield(Machine *m, void (*fn)(Machine *m))
+{
+    lift_state(m)->nested_yield = fn;
 }
 
 void lift_run_nested(Machine *m, uint32_t return_linear, uint16_t return_sp, bool sp_above)
@@ -242,8 +259,12 @@ void lift_run_nested(Machine *m, uint32_t return_linear, uint16_t return_sp, boo
     NestedCall *n = &s->nested[s->nesting++];
     *n = (NestedCall){ .return_linear = return_linear, .return_sp = return_sp, .sp_above = sp_above };
     uint64_t start = m->cpu.instructions, stall_report = start + SHADOW_STALL_INSNS;
+    int c_depth = s->c_depth;
+    s->c_depth = 0;
     while (!n->returned && !m->exit_requested) {
         machine_step(m);
+        if (s->nested_yield && !s->in_shadow)
+            s->nested_yield(m);
         if (s->shadow_of && m->cpu.instructions >= stall_report) {
             /* Interrupts are held during a shadow run, so code that waits on a timer tick spins. */
             log_msg("verify: shadow run of %s still running after %llu instructions, at %04X:%04X",
@@ -252,6 +273,7 @@ void lift_run_nested(Machine *m, uint32_t return_linear, uint16_t return_sp, boo
             stall_report += SHADOW_STALL_INSNS;
         }
     }
+    s->c_depth = c_depth;
     s->nesting--;
 }
 

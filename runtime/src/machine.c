@@ -88,10 +88,22 @@ static bool vga_port(uint16_t port)
     return port >= 0x3B0 && port <= 0x3DF;
 }
 
-/* Drivers time out on fixed poll counts, which only works if port I/O costs real bus time. */
+static void end_slice(Machine *m);
+
+/* Drivers time out on fixed poll counts, which only works if port I/O costs real bus time. Lifted
+ * C runs no instructions, so its accesses advance time directly and a poll loop in C still sees
+ * retrace, UART and timer state change; shadow runs keep time still (lift_verify.c). */
 static void charge_io(Machine *m)
 {
-    m->cpu.stall += (uint32_t)(m->ips * m->io_cost_ns / 1000000000u);
+    if (m->io_mode != IO_LIVE || !lift_in_c(m)) {
+        m->cpu.stall += (uint32_t)(m->ips * m->io_cost_ns / 1000000000u);
+        return;
+    }
+    m->c_io_ns += m->io_cost_ns;
+    if (m->c_io_ns >= TICK_SLICE_US * 1000u) {
+        m->c_io_ns -= TICK_SLICE_US * 1000u;
+        end_slice(m);
+    }
 }
 
 static uint32_t device_in(Machine *m, uint16_t port, int size)

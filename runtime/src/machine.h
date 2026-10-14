@@ -82,6 +82,7 @@ struct Machine {
 
     uint64_t ips; /* emulated instructions per second */
     uint32_t io_cost_ns; /* ISA bus time charged per port access */
+    uint64_t c_io_ns;    /* bus time of lifted C's port accesses not yet turned into a slice */
     TickFn tickers[16];
     int ticker_count;
     uint64_t slice_left; /* instructions left in the current time slice */

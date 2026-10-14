@@ -58,6 +58,9 @@ uint16_t lift_module_base(Machine *m, const char *module);
 /* Deactivates every hook inside [load_seg, load_seg + paragraphs). */
 void lift_module_unloaded(Machine *m, uint16_t load_seg, uint32_t paragraphs);
 
+/* Whether the code running now is lifted C rather than interpreted guest code. */
+bool lift_in_c(const Machine *m);
+
 /* Called by the CPU before an instruction whose linear address has a hook bit set. */
 bool lift_dispatch(Machine *m, uint32_t linear);
 
@@ -77,6 +80,10 @@ uint32_t lift_io_replay_in(Machine *m, uint16_t port, int size);
 void lift_io_replay_out(Machine *m, uint16_t port, uint32_t value, int size);
 
 /* ---- helpers for lifted code ---- */
+
+/* Called between slices while lifted code waits in a nested guest call, so a frontend can present
+ * frames, take input and pace against the wall clock; never during shadow verification. */
+void lift_set_nested_yield(Machine *m, void (*fn)(Machine *m));
 
 /* Runs original code at seg:off as a far call and returns when it returns. */
 void guest_call_far(Machine *m, uint16_t seg, uint16_t off);

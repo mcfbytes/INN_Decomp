@@ -51,6 +51,12 @@ if(EMSCRIPTEN)
   set_target_properties(inn PROPERTIES SUFFIX ".html")
   target_link_libraries(inn dosrt)
   target_compile_options(inn PRIVATE -sUSE_SDL=2)
+  # Lifted code can wait inside a frame (nested guest calls); Asyncify lets it yield to the browser.
+  # Indirect calls are ignored, so the functions that reach a sleep through one are listed
+  # (lift_dispatch is inlined into cpu_run by the optimizer; both are named for other builds).
+  target_compile_definitions(inn PRIVATE INN_ASYNCIFY=1)
+  target_link_options(inn PRIVATE -sASYNCIFY -sASYNCIFY_IGNORE_INDIRECT=1 -sASYNCIFY_STACK_SIZE=262144 -sSTACK_SIZE=1048576
+    "-sASYNCIFY_ADD=['lift_run_nested','lift_dispatch','cpu_run','frontend_nested_yield']")
   target_link_options(inn PRIVATE -sUSE_SDL=2 -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=64MB
     -sINVOKE_RUN=0 -sEXIT_RUNTIME=0 -sFORCE_FILESYSTEM=1 -sENVIRONMENT=web
     -sEXPORTED_RUNTIME_METHODS=callMain,FS -lidbfs.js -lwebsocket.js
