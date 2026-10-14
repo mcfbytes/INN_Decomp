@@ -42,7 +42,7 @@ mismatch (another build, or code not yet unpacked) logs once and runs the origin
 4. Verify with shadow execution (below) over recorded play sessions; only then enable it by
    default.
 
-## Shadow verification (planned)
+## Shadow verification
 
 With `--verify-lifted`, each call to a lifted function snapshots the machine, runs the lifted C,
 records the resulting state, restores the snapshot, runs the original under the interpreter until
@@ -50,6 +50,13 @@ it returns (interrupts held), and compares the two end states: memory, the regis
 convention preserves or returns, and the port I/O log. Port reads made by the original are
 replayed to the lifted run so device timing cannot cause false differences. The first difference
 is reported with the function, the call count and a byte-level diff.
+
+Enable it with `INN_VERIFY_LIFTED=<calls per function>`; `tools/verify_lifted.sh` runs the logon
+scenario against a local server and prints the per-function summary. Snapshots cover guest
+memory, the VGA device (registers, DAC, planes) and host-side DOS state (open files, positions,
+current directory). Known limits: bytes written to host files are written by both runs and not
+restored; devices other than VGA (PIT, UART, OPL) see only the original run's I/O, which is the
+intended behaviour.
 
 ## Browser constraint
 

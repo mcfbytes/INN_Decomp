@@ -5,6 +5,8 @@
 
 #include <stdbool.h>
 
+#include <stddef.h>
+
 #include "machine.h"
 
 /* Registers the DOS interrupt vectors, builds kernel data and the root shell process. Call after
@@ -20,5 +22,11 @@ void dos_set_cwd(Machine *m, const char *dos_dir);
 
 /* Frees host resources (open files). Call before machine_destroy. */
 void dos_shutdown(Machine *m);
+
+/* Host-side DOS state (open files and their positions) for shadow verification. File contents
+ * written in both shadow runs are not restored. */
+size_t dos_snapshot_size(void);
+void dos_snapshot_save(Machine *m, void *dst);
+void dos_snapshot_load(Machine *m, const void *src);
 
 #endif

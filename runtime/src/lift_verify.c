@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "devices.h"
+#include "dos.h"
 #include "lift_internal.h"
 
 enum {
@@ -20,6 +21,7 @@ typedef struct VerifyState {
     int calls_per_entry, mismatches;
     uint8_t *mem_before, *mem_original;
     uint8_t *vga_before, *vga_original; /* video memory lives in the VGA device, not m->mem */
+    uint8_t *dos_before, *dos_original, *dos_lifted; /* open files and positions live host-side */
     Cpu cpu_before, cpu_original;
     IoEvent log[IO_LOG_MAX];
     int log_len, replay_pos;
@@ -39,8 +41,12 @@ void lift_verify_enable(Machine *m, int calls_per_entry)
         s->verify->mem_original = malloc(SNAPSHOT_BYTES);
         s->verify->vga_before = malloc(vga_snapshot_size());
         s->verify->vga_original = malloc(vga_snapshot_size());
+        s->verify->dos_before = malloc(dos_snapshot_size());
+        s->verify->dos_original = malloc(dos_snapshot_size());
+        s->verify->dos_lifted = malloc(dos_snapshot_size());
         if (!s->verify->mem_before || !s->verify->mem_original || !s->verify->vga_before ||
-            !s->verify->vga_original)
+            !s->verify->vga_original || !s->verify->dos_before || !s->verify->dos_original ||
+            !s->verify->dos_lifted)
             fatal("out of memory");
     }
     s->verify->calls_per_entry = calls_per_entry;
@@ -189,17 +195,23 @@ static void compare(Machine *m, ActiveHook *h, uint16_t entry_sp)
         return;
     }
     vga_snapshot_save(m, v->vga_before);
-    if (memcmp(v->vga_before, v->vga_original, vga_snapshot_size()) != 0)
+    if (memcmp(v->vga_before, v->vga_original, vga_snapshot_size()) != 0) {
         report(m, h, "VGA state (registers, DAC or planes) differs");
+        return;
+    }
+    dos_snapshot_save(m, v->dos_lifted);
+    if (memcmp(v->dos_lifted, v->dos_original, dos_snapshot_size()) != 0)
+        report(m, h, "DOS state (open files, positions, current directory) differs");
 }
 
 /* ---- one verified call ---- */
 
-static void restore(Machine *m, const Cpu *cpu, const uint8_t *mem, const uint8_t *vga)
+static void restore(Machine *m, const Cpu *cpu, const uint8_t *mem, const uint8_t *vga, const uint8_t *dos)
 {
     m->cpu = *cpu;
     memcpy(m->mem, mem, SNAPSHOT_BYTES);
     vga_snapshot_load(m, vga);
+    dos_snapshot_load(m, dos);
 }
 
 bool lift_verify_call(Machine *m, ActiveHook *h)
@@ -215,6 +227,7 @@ bool lift_verify_call(Machine *m, ActiveHook *h)
     v->cpu_before = m->cpu;
     memcpy(v->mem_before, m->mem, SNAPSHOT_BYTES);
     vga_snapshot_save(m, v->vga_before);
+    dos_snapshot_save(m, v->dos_before);
     v->log_len = 0;
     v->io_diverged = false;
 
@@ -222,12 +235,13 @@ bool lift_verify_call(Machine *m, ActiveHook *h)
     v->cpu_original = m->cpu;
     memcpy(v->mem_original, m->mem, SNAPSHOT_BYTES);
     vga_snapshot_save(m, v->vga_original);
+    dos_snapshot_save(m, v->dos_original);
 
-    restore(m, &v->cpu_before, v->mem_before, v->vga_before);
+    restore(m, &v->cpu_before, v->mem_before, v->vga_before, v->dos_before);
     run_lifted(m, h);
     compare(m, h, entry_sp);
 
-    restore(m, &v->cpu_original, v->mem_original, v->vga_original);
+    restore(m, &v->cpu_original, v->mem_original, v->vga_original, v->dos_original);
     m->cpu.stop = false;
     m->irq_hold = false;
     s->in_shadow = false;
