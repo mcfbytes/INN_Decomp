@@ -24,7 +24,8 @@ enum {
     WINDOW_W = 960, WINDOW_H = 720, /* 4:3, so 200-line modes get their tall pixels */
     HEADLESS_CHUNK_US = 10000,
     FRAME_PERIOD_US = 16667,
-    NESTED_AHEAD_US = 2000,    /* emulated time a nested wait may run ahead of the wall clock */
+    NESTED_AHEAD_US = 50000,   /* the frame clock's largest burst (MAX_FRAME_US): no wait below it */
+    NESTED_CHECK_US = 1000,    /* emulated time between wall-clock checks in a nested wait */
     NESTED_PRESENT_US = 16667,
     DEFAULT_RUN_MS = 10000,
     ARGS_MAX = 128,
@@ -54,6 +55,7 @@ typedef struct Frontend {
     FrameClock clock;
     uint64_t step_wall_us, step_virtual_us; /* at the start of the current frame */
     uint64_t last_present_us;
+    uint64_t nested_checked_us; /* emulated time of the last wall-clock check in a nested wait */
     bool quit;
 } Frontend;
 
@@ -196,11 +198,15 @@ static void host_sleep_us(uint64_t us)
 void frontend_nested_yield(Machine *m)
 {
     Frontend *f = g_frontend;
+    if (m->virtual_us - f->nested_checked_us < NESTED_CHECK_US)
+        return;
+    f->nested_checked_us = m->virtual_us;
     uint64_t now = frame_clock_now_us();
     uint64_t emulated = m->virtual_us - f->step_virtual_us, wall = now - f->step_wall_us;
+    /* A frame normally runs its emulated time in a burst; only a wait longer than that is paced. */
     if (emulated > wall + NESTED_AHEAD_US)
-        host_sleep_us(emulated - wall);
-    if (now - f->last_present_us < NESTED_PRESENT_US)
+        host_sleep_us(emulated - wall - NESTED_AHEAD_US);
+    if (wall < NESTED_PRESENT_US || now - f->last_present_us < NESTED_PRESENT_US)
         return;
     SDL_Event e;
     while (SDL_PollEvent(&e))

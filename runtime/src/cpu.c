@@ -1406,12 +1406,12 @@ uint64_t cpu_run(Machine *m, uint64_t budget)
         if (c->halted)
             break;
         uint32_t linear = c->seg_base[S_CS] + (c->eip & 0xFFFF);
-        if (lift_hooked(m, linear) && lift_dispatch(m, linear)) {
-            done++;
-            c->instructions++;
-            if (c->stop || c->yielded)
-                break;
-            continue;
+        /* Lifted code runs from machine_step, so this loop stays off Asyncify's unwind path. */
+        bool skip_hook = c->hook_skip == linear; /* declined just now: run the original once */
+        c->hook_skip = UINT32_MAX;
+        if (!skip_hook && lift_hooked(m, linear)) {
+            c->hook_pending = true;
+            break;
         }
         if (m->trace >= 2)
             trace_insn(m);
@@ -1430,6 +1430,7 @@ void cpu_reset(Machine *m)
     Cpu *c = &m->cpu;
     memset(c, 0, sizeof *c);
     c->flags = 2 | F_IF;
+    c->hook_skip = UINT32_MAX;
     for (int s = 0; s < 6; s++)
         cpu_set_seg(c, s, 0);
 }

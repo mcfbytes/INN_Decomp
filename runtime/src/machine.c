@@ -210,6 +210,16 @@ void machine_step(Machine *m)
     if (m->slice_left == 0)
         m->slice_left = m->ips * TICK_SLICE_US / 1000000;
     uint64_t done = cpu_run(m, m->slice_left);
+    if (m->cpu.hook_pending) {
+        m->cpu.hook_pending = false;
+        uint32_t linear = m->cpu.seg_base[S_CS] + (m->cpu.eip & 0xFFFF);
+        if (lift_dispatch(m, linear)) {
+            done++;
+            m->cpu.instructions++;
+        } else {
+            m->cpu.hook_skip = linear;
+        }
+    }
     m->slice_left -= done < m->slice_left ? done : m->slice_left;
     if (m->slice_left == 0 || m->cpu.halted || m->cpu.yielded)
         end_slice(m);

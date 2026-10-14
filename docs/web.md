@@ -17,6 +17,7 @@ scripts `page.js` and `zip.js` copied from `runtime/web/`. The default build typ
 
 | CMake cache variable | Default | Effect |
 |---|---|---|
+| `INN_WEB_SUSPEND` | `ASYNCIFY` | How lifted code that waits inside a frame yields to the browser. `JSPI` (Chromium-based browsers: Edge, Chrome) suspends without instrumentation and leaves about 1.5x more headroom; `ASYNCIFY` works in every browser. |
 | `INN_WEB_PRELOAD_DIR` | empty | A local C: drive (for example `work/inn-c`) packed into `inn.data` and mounted at `/c`. Development only: that file holds the user's media, so a build made with it must never be published. Changes in the directory need a relink (`touch runtime/web/shell.html`). |
 
 Link settings worth knowing: `INVOKE_RUN=0` (the page calls `main` once the drive is ready),

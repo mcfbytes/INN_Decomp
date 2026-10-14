@@ -51,12 +51,20 @@ if(EMSCRIPTEN)
   set_target_properties(inn PROPERTIES SUFFIX ".html")
   target_link_libraries(inn dosrt)
   target_compile_options(inn PRIVATE -sUSE_SDL=2)
-  # Lifted code can wait inside a frame (nested guest calls); Asyncify lets it yield to the browser.
-  # Indirect calls are ignored, so the functions that reach a sleep through one are listed
-  # (lift_dispatch is inlined into cpu_run by the optimizer; both are named for other builds).
+  # Lifted code can wait inside a frame (nested guest calls) and must yield to the browser there.
+  # JSPI suspends without instrumenting code (Chromium-based browsers); Asyncify works everywhere
+  # but instruments the call path. With Asyncify, indirect calls are ignored, so the functions that
+  # reach a sleep through one are listed; the interpreter loop is not on that path (lifted code is
+  # dispatched from machine_step, into which lift_dispatch may be inlined, so both are named).
+  set(INN_WEB_SUSPEND "ASYNCIFY" CACHE STRING "How lifted code yields to the browser: ASYNCIFY or JSPI")
   target_compile_definitions(inn PRIVATE INN_ASYNCIFY=1)
-  target_link_options(inn PRIVATE -sASYNCIFY -sASYNCIFY_IGNORE_INDIRECT=1 -sASYNCIFY_STACK_SIZE=262144 -sSTACK_SIZE=1048576
-    "-sASYNCIFY_ADD=['lift_run_nested','lift_dispatch','cpu_run','frontend_nested_yield']")
+  target_link_options(inn PRIVATE -sSTACK_SIZE=1048576)
+  if(INN_WEB_SUSPEND STREQUAL "JSPI")
+    target_link_options(inn PRIVATE -sJSPI)
+  else()
+    target_link_options(inn PRIVATE -sASYNCIFY -sASYNCIFY_IGNORE_INDIRECT=1 -sASYNCIFY_STACK_SIZE=262144
+      "-sASYNCIFY_ADD=['lift_run_nested','lift_dispatch','machine_step','frontend_nested_yield']")
+  endif()
   target_link_options(inn PRIVATE -sUSE_SDL=2 -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=64MB
     -sINVOKE_RUN=0 -sEXIT_RUNTIME=0 -sFORCE_FILESYSTEM=1 -sENVIRONMENT=web
     -sEXPORTED_RUNTIME_METHODS=callMain,FS -lidbfs.js -lwebsocket.js

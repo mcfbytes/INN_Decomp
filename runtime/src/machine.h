@@ -38,6 +38,8 @@ typedef struct Cpu {
     uint32_t flags;
     bool halted;
     bool yielded; /* a callback asked to be retried later (guest is waiting for input) */
+    bool hook_pending;    /* cpu_run stopped at a lifted entry; machine_step dispatches it */
+    uint32_t hook_skip;   /* linear address whose hook was declined: execute it once */
     bool stop;    /* leave cpu_run now without ending the time slice (nested call returned) */
     bool irq_inhibit; /* one-instruction shadow after mov ss / pop ss / sti */
     uint64_t instructions;
