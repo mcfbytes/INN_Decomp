@@ -154,9 +154,11 @@ void lift_module_unloaded(Machine *m, uint16_t load_seg, uint32_t paragraphs)
     int kept = 0;
     for (int i = 0; i < s->active_count; i++) {
         ActiveHook *h = &s->active[i];
-        if (h->linear >= lo && h->linear < hi)
+        if (h->linear >= lo && h->linear < hi) {
+            if (s->verify)
+                log_verify_line(h); /* the shutdown summary no longer sees it */
             lift_set_hook_bit(m, h->linear, false);
-        else
+        } else
             s->active[kept++] = *h;
     }
     s->active_count = kept;

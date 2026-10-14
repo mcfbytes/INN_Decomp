@@ -277,6 +277,7 @@ static void verify_region(Machine *m, ActiveHook *h)
     if (m->exit_requested)
         return;
     restore(m, &v->cpu_before, v->mem_before, v->vga_before, v->dos_before);
+    dos_journal_undo(m);
     bool reached = run_original_to(m, &v->cpu_lifted);
     save(m, &v->cpu_original, v->mem_original, v->vga_original, v->dos_original);
     restore(m, &v->cpu_lifted, v->mem_lifted, v->vga_lifted, v->dos_lifted_end);
@@ -312,11 +313,13 @@ bool lift_verify_call(Machine *m, ActiveHook *h)
     memcpy(v->mem_before, m->mem, SNAPSHOT_BYTES);
     vga_snapshot_save(m, v->vga_before);
     dos_snapshot_save(m, v->dos_before);
+    dos_journal_begin(m);
     v->log_len = 0;
     v->io_diverged = false;
 
     if (h->entry->region) {
         verify_region(m, h);
+        dos_journal_end(m);
         m->cpu.stop = false;
         m->irq_hold = false;
         s->in_shadow = false;
@@ -330,10 +333,12 @@ bool lift_verify_call(Machine *m, ActiveHook *h)
     dos_snapshot_save(m, v->dos_original);
 
     restore(m, &v->cpu_before, v->mem_before, v->vga_before, v->dos_before);
+    dos_journal_undo(m);
     run_lifted(m, h);
     compare(m, h, entry_sp, entry_sp);
 
     restore(m, &v->cpu_original, v->mem_original, v->vga_original, v->dos_original);
+    dos_journal_end(m);
     m->cpu.stop = false;
     m->irq_hold = false;
     s->in_shadow = false;

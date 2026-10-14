@@ -244,7 +244,7 @@ CallbackResult dos_delete(Machine *m)
         return dos_fail(m, (uint16_t)err);
     if (!p.exists || p.dev)
         return dos_fail(m, DE_FILE_NOT_FOUND);
-    if (p.is_dir || unlink(p.host) != 0)
+    if (p.is_dir || dos_host_unlink(p.host) != 0)
         return dos_fail(m, DE_ACCESS_DENIED);
     return dos_ok(m);
 }
@@ -264,7 +264,7 @@ CallbackResult dos_rename(Machine *m)
         return dos_fail(m, DE_FILE_NOT_FOUND);
     if (to.exists || from.dev || to.dev)
         return dos_fail(m, DE_ACCESS_DENIED);
-    if (rename(from.host, to.host) != 0)
+    if (dos_host_rename(from.host, to.host) != 0)
         return dos_fail(m, errno_to_dos(errno));
     return dos_ok(m);
 }

@@ -277,6 +277,32 @@ static void emit_search(Prog *p)
     mov_rr(p, R_BX, R_AX); dos(p, 0x3E00);
 }
 
+/* Shadow verification undoes a run's deletions and renames, then makes the last run's permanent. */
+static void test_journal(void)
+{
+    make_root("journal");
+    write_host("A.TXT", "a", 1);
+    char a[1100], b[1100], buf[4];
+    snprintf(a, sizeof a, "%s/A.TXT", root);
+    snprintf(b, sizeof b, "%s/B.TXT", root);
+    dos_journal_begin(NULL);
+    CHECK(dos_host_unlink(a) == 0 && read_host("A.TXT", buf, sizeof buf) == (size_t)-1);
+    dos_journal_undo(NULL);
+    CHECK(read_host("A.TXT", buf, sizeof buf) == 1);
+    CHECK(dos_host_rename(a, b) == 0);
+    dos_journal_undo(NULL);
+    CHECK(read_host("A.TXT", buf, sizeof buf) == 1 && read_host("B.TXT", buf, sizeof buf) == (size_t)-1);
+    CHECK(dos_host_unlink(a) == 0);
+    dos_journal_end(NULL);
+    CHECK(read_host("A.TXT", buf, sizeof buf) == (size_t)-1);
+    int left = 0;
+    DIR *d = opendir(root);
+    for (struct dirent *e; (e = readdir(d));)
+        left += e->d_name[0] != '.';
+    closedir(d);
+    CHECK(left == 0);
+}
+
 static void test_files(void)
 {
     make_root("files");
@@ -512,6 +538,7 @@ int main(void)
     test_allocator();
     test_psp_and_env();
     test_files();
+    test_journal();
     test_memory_program();
     test_exec();
     if (failures)

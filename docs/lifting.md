@@ -87,8 +87,8 @@ otherwise only reached from other lifted code.
 Enable it with `INN_VERIFY_LIFTED=<calls per function>`; `tools/verify_lifted.sh` runs the logon
 scenario against a local server and prints the per-function summary. Snapshots cover guest
 memory, the VGA device (registers, DAC, planes) and host-side DOS state (open files, positions,
-current directory). Known limits: bytes written to host files are written by both runs and not
-restored; devices other than VGA (PIT, UART, OPL) see only the original run's I/O, which is the
+current directory). Host file deletions and renames are journaled and undone between the two
+runs. Known limits: bytes written to host files are written by both runs and not restored; devices other than VGA (PIT, UART, OPL) see only the original run's I/O, which is the
 intended behaviour.
 
 ## Browser constraint

@@ -130,6 +130,10 @@ typedef struct DosState {
 
 static inline DosState *dos_state(Machine *m) { return (DosState *)m->dos; }
 
+/* unlink and rename on the host, journaled during shadow verification (dos_snapshot.c). */
+int dos_host_unlink(const char *path);
+int dos_host_rename(const char *from, const char *to);
+
 typedef CallbackResult (*DosHandler)(Machine *m);
 
 /* ---- results ---- */
