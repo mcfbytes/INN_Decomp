@@ -20,6 +20,10 @@ bool dos_start_program(Machine *m, const char *dos_path, const char *args);
 /* Sets the current directory of the current drive, e.g. "\\" or "\\INN". */
 void dos_set_cwd(Machine *m, const char *dos_dir);
 
+/* Leaves only the first kb KB of conventional memory to programs, as a machine with less memory
+ * or more resident software would; the rest becomes a system block. */
+void dos_limit_memory(Machine *m, unsigned kb);
+
 /* Frees host resources (open files). Call before machine_destroy. */
 void dos_shutdown(Machine *m);
 

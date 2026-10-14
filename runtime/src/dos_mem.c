@@ -68,6 +68,21 @@ static void split(Machine *m, uint16_t mcb, uint16_t paras)
     mcb_write(m, mcb, MCB_MID, mcb_owner(m, mcb), paras);
 }
 
+enum { OWNER_SYSTEM = 0x0008 };
+
+void dos_limit_memory(Machine *m, unsigned kb)
+{
+    uint32_t end = kb * 64u;
+    uint16_t mcb = first_mcb(m);
+    while (mcb_valid(m, mcb) && mcb_type(m, mcb) != MCB_LAST)
+        mcb = (uint16_t)(mcb + mcb_size(m, mcb) + 1);
+    if (!mcb_valid(m, mcb) || mcb_owner(m, mcb) != OWNER_FREE || end <= mcb + 1u || end >= DOS_ARENA_END)
+        return;
+    split(m, mcb, (uint16_t)(end - mcb - 1));
+    uint16_t top = (uint16_t)end;
+    mcb_write(m, top, MCB_LAST, OWNER_SYSTEM, mcb_size(m, top));
+}
+
 static bool better_fit(uint8_t strategy, uint16_t found_size, uint16_t best_size, bool have)
 {
     switch (strategy & FIT_MASK) {

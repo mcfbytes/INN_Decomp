@@ -78,6 +78,12 @@ Sinks, in `runtime/frontend/audio_sdl.c`:
 | SDL2 device | queue mode from the main loop, no audio thread (works in the browser). `audio_read_paced` keeps about `AUDIO_TARGET_MS` (50 ms) queued, plus SDL's 1024-frame device buffer: drift is absorbed by stretching at most 0.5%, an underrun gets silence, a lasting excess (smoothed error over 50%) is skipped, and more than 200 ms is dropped |
 | `--wav out.wav` | every rendered frame, unpaced; with `--headless` this is the test path |
 
+## Conventional memory
+
+`--conv-kb N` leaves programs only the first N KB of conventional memory; the rest becomes a DOS
+system block, as resident software would take it. Use it to drive LSCITV into swapping (it needs about
+500 KB to start). There is no EMS or XMS.
+
 ## Input scripts
 
 `inn --headless --script FILE` replays timed input. One event per line, times in emulated ms:

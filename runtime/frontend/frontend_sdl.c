@@ -35,6 +35,7 @@ typedef struct Options {
     const char *screenshot;
     const char *script;
     const char *wav;
+    unsigned conv_kb;
     const char *c_dir, *program;
     char args[ARGS_MAX];
 } Options;
@@ -284,7 +285,7 @@ static int run_headless(Frontend *f, const Options *o)
 
 static void usage(void)
 {
-    fprintf(stderr, "usage: inn [--trace N] [--ips N] [--com1 host:port|ws://host:port] [--perf] [--wav out.wav] "
+    fprintf(stderr, "usage: inn [--trace N] [--ips N] [--com1 host:port|ws://host:port] [--perf] [--wav out.wav] [--conv-kb N] "
                     "[--headless --run-ms N --screenshot out.ppm --script input.txt] <c-drive-dir> <program> [args]\n");
 }
 
@@ -305,6 +306,7 @@ static int parse_args(int argc, char **argv, Options *o)
         else if (!strcmp(a, "--screenshot")) o->screenshot = next;
         else if (!strcmp(a, "--script")) o->script = next;
         else if (!strcmp(a, "--wav")) o->wav = next;
+        else if (!strcmp(a, "--conv-kb")) o->conv_kb = (unsigned)strtoul(next, NULL, 10);
         else return -1;
         i++;
     }
@@ -344,6 +346,8 @@ static int boot(Machine *m, const Options *o)
     char path[256];
     snprintf(path, sizeof path, "C:\\%s", o->program);
     dos_init(m, o->c_dir);
+    if (o->conv_kb)
+        dos_limit_memory(m, o->conv_kb);
     /* Start in the program's directory, as if launched from a prompt there. */
     char cwd[256];
     snprintf(cwd, sizeof cwd, "\\%s", o->program);
