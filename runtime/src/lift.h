@@ -97,6 +97,23 @@ static inline void lift_ret_near(Machine *m, uint16_t arg_bytes)
     m->cpu.r[R_SP].w += arg_bytes;
 }
 
+/* Runs INT n through the current interrupt vector, as the instruction does. */
+static inline void guest_int(Machine *m, uint8_t vector)
+{
+    cpu_push16(m, (uint16_t)m->cpu.flags);
+    m->cpu.flags &= ~(uint32_t)(F_IF | F_TF);
+    guest_call_far(m, mem_rd16(m, vector * 4u + 2), mem_rd16(m, vector * 4u));
+}
+
+/* Returns from a lifted interrupt handler as IRET does in real mode. */
+static inline void lift_ret_iret(Machine *m)
+{
+    uint16_t ip = cpu_pop16(m), cs = cpu_pop16(m), flags = cpu_pop16(m);
+    cpu_set_seg(&m->cpu, S_CS, cs);
+    m->cpu.eip = ip;
+    m->cpu.flags = (m->cpu.flags & 0xFFFF0000u) | (flags & 0x7FD5u) | 2u;
+}
+
 /* Word at SS:SP+offset, e.g. the first argument of a far cdecl call is at +4. */
 static inline uint16_t stack_arg16(Machine *m, uint16_t offset)
 {
