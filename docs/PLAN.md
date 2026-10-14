@@ -43,7 +43,9 @@ A mechanical recompiler tier was planned and dropped (2026-10-14): the interpret
 client at 2-4x real speed even in the browser, and lifted C replaces functions directly, so a
 recompiled middle step would add work without removing any.
 
-The end state is "lifted everywhere", with the interpreter kept only as a debugging oracle.
+The end state is "lifted everywhere", with the interpreter kept only as a debugging oracle, and
+then a web-native port (M9): lifted code calls canvas, WebAudio and WebSocket through thin
+host APIs, not emulated VGA, OPL and UART registers.
 
 Serial is the network seam: the browser build tunnels UART bytes over a WebSocket into
 `innkeeperd`, which already speaks Hayes, the SprintNet PAD and the TSN link layer.
@@ -65,10 +67,11 @@ produces the game.
       headless Chromium reaches the town map (2026-10-14, [web.md](web.md)).
 - [x] **M4** Lifting infrastructure: entry hooks, nested guest calls, shadow verification, generated
       registration tables, Ghidra export (`tools/ghidra/`). First lifted function verified live.
-- [ ] **M5** Lift LSCITV: VM, memory manager, resources, kernels, graphics, sound, TSN kernel.
-      Status 2026-10-14: VM (207 functions plus the bytecode interpreter), memory/resources/files (144),
-      events/input/time/sound sequencer (86 hooked) and TSNEXEC's C code (110) lifted and verified;
-      graphics in progress. Open: TSNEXEC INT 14h handler and driver glue, the drivers and DLLs.
+- [x] **M5** Lift the INN client (2026-10-14): TSNEXEC (118 hooks, INT 14h handler and driver glue),
+      LSCITV (VM, memory and swapping, resources, events and the sound sequencer, graphics: about 587
+      of 764 functions), GRAPH256.DLL, NLNULL.DLL and the VGA320, MODEM, NOBRK, IBMKBD, ADL and
+      SNDBLAST drivers. The combined build verifies about 43,000 calls on the logon path with one
+      documented residue (kDrawPic). Not lifted: EMS/XMS transfers, MT32, dead and non-returning code.
 - [ ] **M6** Sound: OPL2 (AdLib), then Sound Blaster digital audio. OPL2, PC speaker, mixer,
       SDL2 output and `--wav` done (2026-10-14), browser audio confirmed in Edge. Sound Blaster 2.0 DSP
       and 8237 DMA done (2026-10-14): `SNDBLAST.DRV` initialises, plays FM and, called directly, plays a
@@ -79,6 +82,11 @@ produces the game.
       the dungeon with music, `TWGENN` and `FATES` to the town, given three host additions ([yserbius.md](yserbius.md)). Per-overlay
       registration done ([lifting.md](lifting.md), "Overlays").
 - [ ] **M8** Golf, Red Baron (x87), Shoppers Advantage.
+- [ ] **M9** Web-native port (goal set 2026-10-14). Once a program is fully lifted, its video, sound,
+      timer and serial code talks to the host directly: frames to a canvas, music and effects to
+      WebAudio, the link to a WebSocket, with no emulated VGA, OPL, PIT or UART behind it. Lifted
+      functions then call each other directly instead of through entry hooks, and the interpreter
+      remains only for shadow verification. The original data files are still read at run time.
 
 ## 5. Verification
 
