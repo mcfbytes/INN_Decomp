@@ -69,9 +69,32 @@ function installRoot(paths) {
   return hit.slice(0, hit.length - PROGRAM.exe.length);
 }
 
+// Folder pickers drop empty directories, but the interpreter needs its swap directory to exist.
+function createVirtualDirs(configPaths) {
+  for (const cfg of configPaths) {
+    const text = new TextDecoder('latin1').decode(FS.readFile(cfg));
+    const match = /^\s*virtualDir\s*=\s*(\S+)/im.exec(text);
+    if (!match || match[1].includes('..')) continue;
+    const dir = `${cfg.slice(0, cfg.lastIndexOf('/'))}/${match[1].replace(/\\/g, '/')}`;
+    if (!exists(dir)) FS.mkdirTree(dir);
+  }
+}
+
+function findConfigs(dir) {
+  const found = [];
+  for (const name of FS.readdir(dir)) {
+    if (name === '.' || name === '..') continue;
+    const path = `${dir}/${name}`;
+    if (FS.isDir(FS.stat(path).mode)) found.push(...findConfigs(path));
+    else if (/^lsci\.cfg$/i.test(name)) found.push(path);
+  }
+  return found;
+}
+
 function installFiles(files) {
   const root = installRoot(files.map((f) => f.path));
   clearDir(DRIVE);
+  const configs = [];
   let count = 0;
   for (const file of files) {
     if (!file.path.startsWith(root)) continue;
@@ -80,8 +103,10 @@ function installFiles(files) {
     const dest = `${DRIVE}/${PROGRAM.dir}/${parts.join('/')}`;
     FS.mkdirTree(dest.slice(0, dest.lastIndexOf('/')));
     FS.writeFile(dest, file.data);
+    if (/(^|\/)lsci\.cfg$/i.test(dest)) configs.push(dest);
     count++;
   }
+  createVirtualDirs(configs);
   return count;
 }
 
@@ -98,6 +123,7 @@ function syncDrive(populate) {
 async function mountDrive() {
   if (exists(programPath())) {
     page.drive = 'preloaded';
+    createVirtualDirs(findConfigs(DRIVE));
     return;
   }
   if (!exists(DRIVE)) FS.mkdir(DRIVE);
@@ -105,7 +131,10 @@ async function mountDrive() {
   FS.mount(FS.filesystems.IDBFS, {}, DRIVE);
   page.persistent = true;
   await syncDrive(true);
-  if (exists(programPath())) page.drive = 'saved';
+  if (exists(programPath())) {
+    page.drive = 'saved';
+    createVirtualDirs(findConfigs(DRIVE));
+  }
 }
 
 // ---- picking an install ----
