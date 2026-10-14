@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "lift.h"
 #include "machine.h"
 
 typedef struct Insn {
@@ -1393,25 +1394,34 @@ uint64_t cpu_run(Machine *m, uint64_t budget)
     Cpu *c = &m->cpu;
     uint64_t done = 0;
     c->yielded = false;
+    c->stop = false;
     while (done < budget && !m->exit_requested) {
         if (c->irq_inhibit) {
             c->irq_inhibit = false;
-        } else if ((c->flags & F_IF) && m->irq_pending) {
+        } else if ((c->flags & F_IF) && m->irq_pending && !m->irq_hold) {
             int vector = pic_acknowledge(m);
             if (vector >= 0)
                 cpu_interrupt(m, (uint8_t)vector);
         }
         if (c->halted)
             break;
+        uint32_t linear = c->seg_base[S_CS] + (c->eip & 0xFFFF);
+        if (lift_hooked(m, linear) && lift_dispatch(m, linear)) {
+            done++;
+            c->instructions++;
+            if (c->stop || c->yielded)
+                break;
+            continue;
+        }
         if (m->trace >= 2)
             trace_insn(m);
         exec_one(m);
         done += 1 + c->stall;
+        c->instructions += 1 + c->stall; /* kept current: machine_now_ns reads it mid-slice */
         c->stall = 0;
-        if (c->yielded)
+        if (c->yielded || c->stop)
             break;
     }
-    c->instructions += done;
     return done;
 }
 

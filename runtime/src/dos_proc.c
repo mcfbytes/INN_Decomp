@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "dos_int.h"
+#include "lift.h"
 
 enum { INT22 = 0x22, INT23 = 0x23, INT24 = 0x24 };
 enum { TERM_NORMAL = 0, TERM_TSR = 3, TSR_MIN_PARAS = 6, KEEP_NONE = -1 };
@@ -113,6 +114,7 @@ void dos_terminate(Machine *m, uint8_t code, uint8_t type, int keep_paras)
     mem_wr32(m, vector_addr(INT23), mem_rd32(m, b + PSP_INT23));
     mem_wr32(m, vector_addr(INT24), mem_rd32(m, b + PSP_INT24));
     if (keep_paras == KEEP_NONE) {
+        lift_module_unloaded(m, psp, mem_rd16(m, real_addr((uint16_t)(psp - 1), MCB_SIZE)));
         dos_close_all(m, psp);
         dos_mem_free_owner(m, psp);
     } else {

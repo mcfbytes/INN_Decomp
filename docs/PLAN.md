@@ -58,10 +58,12 @@ produces the game.
 - [x] **M1** `dosrt` with the interpreter: MZ loader, EXEC, DOS file I/O, VGA mode 13h, keyboard,
       mouse, PIT, UART. Native SDL2 build. TSNEXEC + LSCITV reach the dial screen.
 - [x] **M2** UART over TCP to `innkeeperd`; the client logs on and reaches the map (2026-10-14).
-- [ ] **M3** Emscripten build; the same in a browser over WebSocket (adds WS ingress to `innkeeperd`).
+- [x] **M3** Emscripten build; the same in a browser over WebSocket (adds WS ingress to `innkeeperd`);
+      headless Chromium reaches the town map (2026-10-14, [web.md](web.md)).
 - [ ] **M4** Recompiler for LSCITV and TSNEXEC; interpreter fallback rate reported per run.
 - [ ] **M5** Lift LSCITV: VM, memory manager, resources, kernels, graphics, sound, TSN kernel.
-- [ ] **M6** Sound: OPL2 (AdLib), then Sound Blaster digital audio.
+- [ ] **M6** Sound: OPL2 (AdLib), then Sound Blaster digital audio. OPL2, PC speaker, mixer,
+      SDL2 output and `--wav` done (2026-10-14); Sound Blaster DSP open.
 - [ ] **M7** Yserbius and Twinion (overlay-aware recompile, then lift the shared engine).
 - [ ] **M8** Golf, Red Baron (x87), Shoppers Advantage.
 

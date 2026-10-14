@@ -58,6 +58,9 @@ enum {
 };
 
 /* DOS error codes (INT 21h AX on carry). */
+/* Memory control block fields, relative to the MCB paragraph. */
+enum { MCB_TYPE = 0, MCB_OWNER = 1, MCB_SIZE = 3, MCB_NAME = 8, MCB_NAME_LEN = 8 };
+
 enum {
     DE_OK = 0, DE_FUNCTION = 1, DE_FILE_NOT_FOUND = 2, DE_PATH_NOT_FOUND = 3,
     DE_TOO_MANY_OPEN = 4, DE_ACCESS_DENIED = 5, DE_INVALID_HANDLE = 6, DE_MCB_DESTROYED = 7,

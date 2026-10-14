@@ -1,6 +1,5 @@
-/* INT 33h mouse driver (HLE). User event handlers (AX=0Ch/14h) run from IRQ12: host events
- * queue up, IRQ12 enters a ROM trampoline that saves registers, far-calls the handler with the
- * event in AX/BX/CX/DX/SI/DI, restores, EOIs and IRETs. */
+/* INT 33h mouse driver (HLE). User handlers (AX=0Ch/14h) run from IRQ12 through a ROM
+ * trampoline that passes the event in AX-DI; design in docs/runtime.md, "Devices". */
 #include <stdlib.h>
 
 #include "bios_internal.h"

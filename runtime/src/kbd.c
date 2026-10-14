@@ -1,6 +1,5 @@
-/* 8042 keyboard controller: port 60h data, 64h status/command, IRQ1 per byte delivered.
- * Host key events queue up and are released one byte per scheduler slice once the guest has
- * read the previous one, which is how fast a real keyboard's serial link is anyway. */
+/* 8042 keyboard controller (60h data, 64h status/command, IRQ1). Host keys are released one
+ * byte per slice after the guest read the previous one, about a real keyboard link's speed. */
 #include <stdlib.h>
 
 #include "devices.h"

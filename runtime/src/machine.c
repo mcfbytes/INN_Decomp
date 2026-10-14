@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "lift.h"
 #include "machine.h"
 
 uint8_t mem_rd8_slow(Machine *m, uint32_t linear)
@@ -87,14 +88,13 @@ static void charge_io(Machine *m)
     m->cpu.stall += (uint32_t)(m->ips * m->io_cost_ns / 1000000000u);
 }
 
-uint32_t port_in(Machine *m, uint16_t port, int size)
+static uint32_t device_in(Machine *m, uint16_t port, int size)
 {
-    charge_io(m);
     if (size > 1 && (!m->port_in[port] || m->port_in[port] != m->port_in[(uint16_t)(port + 1)])) {
-        uint32_t lo = port_in(m, port, 1), hi = port_in(m, (uint16_t)(port + 1), 1);
+        uint32_t lo = device_in(m, port, 1), hi = device_in(m, (uint16_t)(port + 1), 1);
         uint32_t v = lo | hi << 8;
         if (size == 4)
-            v |= port_in(m, (uint16_t)(port + 2), 2) << 16;
+            v |= device_in(m, (uint16_t)(port + 2), 2) << 16;
         return v;
     }
     if (m->port_in[port])
@@ -104,20 +104,42 @@ uint32_t port_in(Machine *m, uint16_t port, int size)
     return size == 1 ? 0xFF : size == 2 ? 0xFFFF : 0xFFFFFFFFu;
 }
 
-void port_out(Machine *m, uint16_t port, uint32_t value, int size)
+static void device_out(Machine *m, uint16_t port, uint32_t value, int size)
 {
-    charge_io(m);
     if (size > 1 && (!m->port_out[port] || m->port_out[port] != m->port_out[(uint16_t)(port + 1)])) {
-        port_out(m, port, value & 0xFF, 1);
-        port_out(m, (uint16_t)(port + 1), value >> 8 & 0xFF, 1);
+        device_out(m, port, value & 0xFF, 1);
+        device_out(m, (uint16_t)(port + 1), value >> 8 & 0xFF, 1);
         if (size == 4)
-            port_out(m, (uint16_t)(port + 2), value >> 16, 2);
+            device_out(m, (uint16_t)(port + 2), value >> 16, 2);
         return;
     }
     if (m->port_out[port])
         m->port_out[port](m, port, value, size);
     else if (m->trace)
         log_msg("io: unhandled out %04X <- %X", port, value);
+}
+
+uint32_t port_in(Machine *m, uint16_t port, int size)
+{
+    charge_io(m);
+    if (m->io_mode == IO_REPLAY)
+        return lift_io_replay_in(m, port, size);
+    uint32_t v = device_in(m, port, size);
+    if (m->io_mode == IO_RECORD)
+        lift_io_record(m, port, size, v, false);
+    return v;
+}
+
+void port_out(Machine *m, uint16_t port, uint32_t value, int size)
+{
+    charge_io(m);
+    if (m->io_mode == IO_REPLAY) {
+        lift_io_replay_out(m, port, value, size);
+        return;
+    }
+    if (m->io_mode == IO_RECORD)
+        lift_io_record(m, port, size, value, true);
+    device_out(m, port, value, size);
 }
 
 Machine *machine_create(void)
@@ -132,11 +154,13 @@ Machine *machine_create(void)
     m->ips = 20000000;
     m->io_cost_ns = 1000;
     cpu_reset(m);
+    lift_init(m);
     return m;
 }
 
 void machine_destroy(Machine *m)
 {
+    lift_shutdown(m);
     free(m->mem);
     free(m);
 }
@@ -148,16 +172,39 @@ void machine_add_ticker(Machine *m, TickFn fn)
     m->tickers[m->ticker_count++] = fn;
 }
 
+static void end_slice(Machine *m)
+{
+    m->virtual_us += TICK_SLICE_US;
+    m->slice_left = m->ips * TICK_SLICE_US / 1000000;
+    m->slice_start_insn = m->cpu.instructions;
+    for (int i = 0; i < m->ticker_count; i++)
+        m->tickers[i](m);
+}
+
+/* Time follows instructions executed, so nested guest calls from lifted code cost what they run. */
+void machine_step(Machine *m)
+{
+    if (m->slice_left == 0)
+        m->slice_left = m->ips * TICK_SLICE_US / 1000000;
+    uint64_t done = cpu_run(m, m->slice_left);
+    m->slice_left -= done < m->slice_left ? done : m->slice_left;
+    if (m->slice_left == 0 || m->cpu.halted || m->cpu.yielded)
+        end_slice(m);
+}
+
 void machine_run_for(Machine *m, uint64_t us)
 {
     uint64_t end = m->virtual_us + us;
-    uint64_t per_slice = m->ips * TICK_SLICE_US / 1000000;
-    while (m->virtual_us < end && !m->exit_requested) {
-        cpu_run(m, per_slice);
-        m->virtual_us += TICK_SLICE_US;
-        for (int i = 0; i < m->ticker_count; i++)
-            m->tickers[i](m);
-    }
+    while (m->virtual_us < end && !m->exit_requested)
+        machine_step(m);
+}
+
+uint64_t machine_now_ns(const Machine *m)
+{
+    enum { SLICE_NS = TICK_SLICE_US * 1000 };
+    uint64_t insn = m->cpu.instructions - m->slice_start_insn;
+    uint64_t ns = m->ips ? insn * 1000000000u / m->ips : 0;
+    return m->virtual_us * 1000 + (ns < SLICE_NS ? ns : SLICE_NS);
 }
 
 void log_msg(const char *fmt, ...)

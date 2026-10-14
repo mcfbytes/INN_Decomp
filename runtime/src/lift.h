@@ -1,0 +1,96 @@
+/* Lifted functions: hand-decompiled C that replaces original code at its entry address.
+ * Contract, registration and verification: docs/lifting.md. */
+#ifndef DOSRT_LIFT_H
+#define DOSRT_LIFT_H
+
+#include "machine.h"
+
+/* Entered with CS:IP at the function entry and the caller's return address on the stack;
+ * leaves the machine exactly as the original's return would. */
+typedef void (*LiftedFn)(Machine *m);
+
+enum { LIFT_SIGNATURE_LEN = 12 };
+
+/* Register bits for LiftedEntry.scratch_regs: general registers by index, then segments. */
+enum {
+    LIFT_REG_AX = 1 << R_AX, LIFT_REG_CX = 1 << R_CX, LIFT_REG_DX = 1 << R_DX, LIFT_REG_BX = 1 << R_BX,
+    LIFT_REG_ES = 1 << (8 + S_ES), LIFT_REG_FLAGS = 1 << 15,
+};
+
+/* One lifted function of one module build. The signature guards against other builds. */
+typedef struct LiftedEntry {
+    const char *module;     /* module name as registered by its loader, e.g. "LSCITV.EXE" */
+    uint16_t seg, off;      /* entry, segment relative to the module's load segment */
+    LiftedFn fn;
+    const char *name;
+    bool near_return;       /* returns with RET rather than RETF */
+    uint16_t scratch_regs;  /* LIFT_REG_* bits the calling convention lets differ on return */
+    uint8_t signature[LIFT_SIGNATURE_LEN]; /* original bytes at the entry */
+} LiftedEntry;
+
+/* Marks a lifted function in a lifted source file; tools/gen_lift_table.py builds the
+ * registration table from these markers and the original binary. */
+enum { LIFT_FAR = 0, LIFT_NEAR = 1 };
+#define LIFTED(seg, off, fn, kind, scratch) void fn(Machine *m);
+
+/* Registers every lifted table built into this binary; a no-op without the private tree. */
+void lifted_register_all(Machine *m);
+
+void lift_init(Machine *m);
+void lift_shutdown(Machine *m);
+/* Adds a table of lifted functions; tables are static data owned by the caller. */
+void lift_add_table(Machine *m, const LiftedEntry *entries, int count);
+
+/* A loader announces where a module image now lives; matching entries become active. */
+void lift_module_loaded(Machine *m, const char *module, uint16_t load_seg, uint32_t image_bytes);
+/* Load segment of a module announced by lift_module_loaded, or 0 if it is not loaded. */
+uint16_t lift_module_base(Machine *m, const char *module);
+/* Deactivates every hook inside [load_seg, load_seg + paragraphs). */
+void lift_module_unloaded(Machine *m, uint16_t load_seg, uint32_t paragraphs);
+
+/* Called by the CPU before an instruction whose linear address has a hook bit set. */
+bool lift_dispatch(Machine *m, uint32_t linear);
+
+static inline bool lift_hooked(const Machine *m, uint32_t linear)
+{
+    return m->exec_hooks && (m->exec_hooks[linear >> 3] >> (linear & 7) & 1);
+}
+
+/* Shadow verification (docs/lifting.md): each lifted entry is checked against the original for
+ * its first calls_per_entry calls. Returns the number of mismatches seen so far. */
+void lift_verify_enable(Machine *m, int calls_per_entry);
+int lift_verify_mismatches(const Machine *m);
+
+/* Port I/O taps used while verifying; machine.c calls them according to m->io_mode. */
+void lift_io_record(Machine *m, uint16_t port, int size, uint32_t value, bool is_out);
+uint32_t lift_io_replay_in(Machine *m, uint16_t port, int size);
+void lift_io_replay_out(Machine *m, uint16_t port, uint32_t value, int size);
+
+/* ---- helpers for lifted code ---- */
+
+/* Runs original code at seg:off as a far call and returns when it returns. */
+void guest_call_far(Machine *m, uint16_t seg, uint16_t off);
+/* Runs original code at CS:off as a near call. */
+void guest_call_near(Machine *m, uint16_t off);
+
+static inline void lift_ret_far(Machine *m, uint16_t arg_bytes)
+{
+    uint16_t ip = cpu_pop16(m), cs = cpu_pop16(m);
+    cpu_set_seg(&m->cpu, S_CS, cs);
+    m->cpu.eip = ip;
+    m->cpu.r[R_SP].w += arg_bytes;
+}
+
+static inline void lift_ret_near(Machine *m, uint16_t arg_bytes)
+{
+    m->cpu.eip = cpu_pop16(m);
+    m->cpu.r[R_SP].w += arg_bytes;
+}
+
+/* Word at SS:SP+offset, e.g. the first argument of a far cdecl call is at +4. */
+static inline uint16_t stack_arg16(Machine *m, uint16_t offset)
+{
+    return mem_rd16(m, m->cpu.seg_base[S_SS] + (uint16_t)(m->cpu.r[R_SP].w + offset));
+}
+
+#endif

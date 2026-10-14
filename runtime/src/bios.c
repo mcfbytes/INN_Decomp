@@ -4,6 +4,7 @@
 #include <string.h>
 #include <time.h>
 
+#include "audio.h"
 #include "bios_internal.h"
 #include "font.h"
 
@@ -180,7 +181,8 @@ static struct tm host_now(void)
 
 static CallbackResult int1a_time(Machine *m)
 {
-    struct tm tm = host_now();
+    /* Drivers poll AH=00h in tight loops and localtime is costly, so only RTC reads take it. */
+    struct tm tm = AH == 0x02 || AH == 0x04 ? host_now() : (struct tm){ 0 };
     switch (AH) {
     case 0x00:
         CX = bda_rd16(m, BDA_TICKS + 2);
@@ -279,11 +281,17 @@ void bios_init(Machine *m)
     bios_kbd_init(m);
     mouse_init(m);
     uart_init(m);
+    audio_init(m);
+    opl_init(m);
+    speaker_init(m);
 }
 
 void bios_shutdown(Machine *m)
 {
     void **parts[] = { &m->bios, &m->pic, &m->pit, &m->vga, &m->kbd, &m->mouse };
+    speaker_shutdown(m);
+    opl_shutdown(m);
+    audio_shutdown(m);
     if (m->uart)
         uart_attach(m, UART_COM1, (SerialLink){ 0 }), uart_attach(m, UART_COM2, (SerialLink){ 0 });
     free(m->uart);

@@ -1,8 +1,8 @@
-/* 8253/8254 programmable interval timer. Counters are derived from m->virtual_us rather than
- * stepped, so reads are exact to the scheduler slice. Channel 0 drives IRQ0; channel 2 is
- * gated by port 61h and feeds the speaker. */
+/* 8253/8254 PIT. Counters derive from emulated time instead of being stepped, so reads are exact
+ * to the slice. Channel 0 drives IRQ0; channel 2, gated by port 61h, feeds the speaker. */
 #include <stdlib.h>
 
+#include "audio.h"
 #include "devices.h"
 
 enum {
@@ -158,6 +158,8 @@ static uint32_t pit_in(Machine *m, uint16_t port, int size)
 static void pit_out(Machine *m, uint16_t port, uint32_t value, int size)
 {
     Pit *p = pit_state(m);
+    if (port != PIT_PORT_CH0)
+        audio_sync(m); /* the speaker hears channel 2 and port 61h changes at their exact time */
     if (port == PORT_SYSCTL_B) {
         bool gate_rise = (value & SYSB_GATE2) && !(p->sysctl_b & SYSB_GATE2);
         p->sysctl_b = (uint8_t)value;
@@ -207,6 +209,12 @@ bool pit_speaker(Machine *m, double *hz)
     if (hz)
         *hz = (double)PIT_CLOCK_HZ / p->ch[2].reload;
     return on && p->ch[2].armed;
+}
+
+bool pit_speaker_held(Machine *m)
+{
+    Pit *p = pit_state(m);
+    return (p->sysctl_b & SYSB_SPEAKER) && !((p->sysctl_b & SYSB_GATE2) && p->ch[2].armed);
 }
 
 void pit_init(Machine *m)

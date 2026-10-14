@@ -38,6 +38,7 @@ typedef struct Cpu {
     uint32_t flags;
     bool halted;
     bool yielded; /* a callback asked to be retried later (guest is waiting for input) */
+    bool stop;    /* leave cpu_run now without ending the time slice (nested call returned) */
     bool irq_inhibit; /* one-instruction shadow after mov ss / pop ss / sti */
     uint64_t instructions;
     uint32_t stall; /* extra instruction slots consumed by slow bus cycles (port I/O) */
@@ -54,6 +55,8 @@ typedef enum CallbackResult {
 typedef CallbackResult (*CallbackFn)(Machine *m);
 
 typedef void (*TickFn)(Machine *m);
+
+typedef enum IoMode { IO_LIVE, IO_RECORD, IO_REPLAY } IoMode;
 
 typedef uint32_t (*PortInFn)(Machine *m, uint16_t port, int size);
 typedef void (*PortOutFn)(Machine *m, uint16_t port, uint32_t value, int size);
@@ -75,13 +78,21 @@ struct Machine {
 
     uint64_t irq_pending; /* bit n: interrupt vector n requested by a device */
     uint64_t virtual_us;  /* emulated time, advanced by the scheduler */
+    uint64_t slice_start_insn; /* cpu.instructions when the current slice began */
 
     uint64_t ips; /* emulated instructions per second */
     uint32_t io_cost_ns; /* ISA bus time charged per port access */
     TickFn tickers[16];
     int ticker_count;
+    uint64_t slice_left; /* instructions left in the current time slice */
+
+    uint8_t *exec_hooks; /* one bit per linear address: a lifted function starts here */
+    IoMode io_mode;      /* shadow verification records or replays port I/O */
+    bool irq_hold;       /* no interrupt delivery while a shadow run compares two paths */
+    void *lift;
 
     void *dos, *bios, *pic, *pit, *vga, *kbd, *mouse, *uart, *ems, *xms, *frontend;
+    void *audio, *opl, *speaker;
     bool exit_requested;
     int exit_code;
     int trace; /* 0 off, 1 interrupts and DOS calls, 2 every instruction */
@@ -219,8 +230,14 @@ void machine_destroy(Machine *m);
 void machine_add_ticker(Machine *m, TickFn fn);
 /* Advances emulated time by us microseconds: CPU slices interleaved with device ticks. */
 void machine_run_for(Machine *m, uint64_t us);
+/* Runs the CPU until the current slice is used up or the CPU stops; ends the slice if used up. */
+void machine_step(Machine *m);
 
 enum { TICK_SLICE_US = 100 };
+
+/* Emulated time in ns, refined inside a slice by the instructions already run, so devices that
+ * are polled in tight loops (OPL timers) and sample-accurate audio see time pass. */
+uint64_t machine_now_ns(const Machine *m);
 
 void log_msg(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 _Noreturn void fatal(const char *fmt, ...) __attribute__((format(printf, 1, 2)));

@@ -40,6 +40,8 @@ void pit_init(Machine *m);
 double pit_timer_hz(Machine *m);
 /* True while the speaker is driven by channel 2; *hz gets its square-wave frequency. */
 bool pit_speaker(Machine *m, double *hz);
+/* True while port 61h enables the speaker but channel 2 is not counting (its output stays high). */
+bool pit_speaker_held(Machine *m);
 
 /* ---- VGA ---- */
 
@@ -53,6 +55,10 @@ uint8_t vga_mode(Machine *m);
 void vga_render(Machine *m, uint32_t *rgba_out, int *w, int *h);
 /* Writes a PPM (P6) of the current frame; returns 0 or -1 on I/O error. */
 int vga_write_ppm(Machine *m, const char *path);
+/* Whole VGA state (registers, DAC, planes) for shadow verification; plain bytes, no pointers. */
+size_t vga_snapshot_size(void);
+void vga_snapshot_save(Machine *m, void *dst);
+void vga_snapshot_load(Machine *m, const void *src);
 
 /* ---- 8042 keyboard controller (ports 60h/64h, IRQ1) ---- */
 
@@ -94,6 +100,9 @@ int uart_attach(Machine *m, int com, SerialLink link);
 SerialLink *uart_link(Machine *m, int com);
 /* Raw TCP client link to e.g. innkeeperd's line port; 0 on success, -1 on failure. */
 int uart_attach_tcp(Machine *m, int com, const char *host, int port);
+/* Browser builds: WebSocket link (ws:// or wss:// URL, binary frames of raw bytes); the native
+ * build returns -1. Connects in the background like the TCP link. */
+int uart_attach_ws(Machine *m, int com, const char *url);
 /* In-memory link for tests: bytes sent by the guest are readable with uart_test_take,
  * bytes given to uart_test_give arrive at the guest. */
 int uart_attach_pipe(Machine *m, int com);

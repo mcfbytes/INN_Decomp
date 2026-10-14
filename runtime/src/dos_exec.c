@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "dos_int.h"
+#include "lift.h"
 
 enum {
     MZ_LAST_PAGE = 0x02, MZ_PAGES = 0x04, MZ_NRELOC = 0x06, MZ_HDR_PARAS = 0x08,
@@ -205,6 +206,10 @@ static int create_process(Machine *m, const Program *p, const ExecArgs *a, uint1
     mem_write_block(m, real_addr(seg, PSP_FCB1), a->fcb1, sizeof a->fcb1);
     mem_write_block(m, real_addr(seg, PSP_FCB2), a->fcb2, sizeof a->fcb2);
     load_image(m, p, (uint16_t)(seg + PSP_PARAS), (uint16_t)(seg + PSP_PARAS));
+    /* The whole block, not the file image: packed programs unpack in place and grow. */
+    const char *base = strrchr(p->dos_path, '\\');
+    lift_module_loaded(m, base ? base + 1 : p->dos_path, (uint16_t)(seg + PSP_PARAS),
+                       (uint32_t)(paras - PSP_PARAS) * PARA);
     *psp = seg;
     *entry = program_entry(m, p, seg, paras);
     if (m->trace)

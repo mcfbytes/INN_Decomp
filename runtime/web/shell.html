@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ImagiNation Network</title>
+<link rel="icon" href="data:,">
+<style>
+  :root { --bg: #14121a; --panel: #211e2b; --text: #e8e4f0; --muted: #a49db5; --accent: #3fb6a8;
+          --danger: #c0504d; --border: #3a3548; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+               font: 15px/1.45 system-ui, sans-serif; }
+  header { display: flex; align-items: baseline; gap: 16px; padding: 8px 16px; flex-wrap: wrap; }
+  header h1 { font-size: 17px; margin: 0; font-weight: 600; }
+  #status { color: var(--muted); font-size: 13px; }
+  main { padding: 0 16px 16px; }
+  #setup { max-width: 640px; margin: 24px auto; background: var(--panel); border: 1px solid var(--border);
+           border-radius: 8px; padding: 20px; }
+  #setup h2 { font-size: 16px; margin: 0 0 12px; }
+  #setup p { color: var(--muted); margin: 6px 0 14px; font-size: 14px; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 10px 0; }
+  label.pick { border: 1px dashed var(--border); border-radius: 6px; padding: 8px 12px; cursor: pointer; }
+  label.pick:hover { border-color: var(--accent); }
+  label.pick input { display: none; }
+  #com1 { flex: 1; min-width: 220px; background: var(--bg); color: var(--text);
+                     border: 1px solid var(--border); border-radius: 6px; padding: 7px 9px; font: inherit; }
+  button { background: var(--accent); color: #0b1514; border: 0; border-radius: 6px; padding: 8px 18px;
+           font: inherit; font-weight: 600; cursor: pointer; }
+  button:disabled { opacity: .4; cursor: default; }
+  button.quiet { background: transparent; color: var(--danger); border: 1px solid var(--danger); font-weight: 400; }
+  #install-state { font-size: 14px; }
+  #screen { display: none; position: relative; margin: 0 auto;
+            width: min(100%, calc((100vh - 60px) * 4 / 3)); aspect-ratio: 4 / 3; }
+  #canvas { display: block; width: 100%; height: 100%; background: #000; image-rendering: pixelated;
+            outline: none; }
+  #focus-hint { position: absolute; inset: auto 0 8px 0; text-align: center; pointer-events: none;
+                color: #fff; text-shadow: 0 1px 3px #000; font-size: 14px; display: none; }
+  #screen.blurred #focus-hint { display: block; }
+  details { max-width: 960px; margin: 12px auto 0; color: var(--muted); font-size: 13px; }
+  #log { max-height: 240px; overflow: auto; background: #0c0b10; padding: 8px; border-radius: 6px;
+         white-space: pre-wrap; margin: 6px 0 0; }
+  @media (max-width: 480px) { #setup { padding: 14px; margin: 12px 0; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>ImagiNation Network</h1>
+  <span id="status">Loading the runtime...</span>
+</header>
+<main>
+  <section id="setup">
+    <h2>Your INN installation</h2>
+    <p>This page runs the original DOS client. It needs your own installed copy: pick a .zip of the
+       INN directory or the directory itself. The files stay in this browser.</p>
+    <div class="row">
+      <label class="pick">Choose .zip<input id="pick-zip" type="file" accept=".zip,application/zip"></label>
+      <label class="pick">Choose folder<input id="pick-dir" type="file" webkitdirectory multiple></label>
+    </div>
+    <div class="row" id="install-state">No installation loaded.</div>
+    <div class="row">
+      <label><input id="remember" type="checkbox" checked> Remember the installation and player files in this browser</label>
+    </div>
+    <div class="row">
+      <label for="com1">Server</label>
+      <input id="com1" type="text" spellcheck="false" autocomplete="off">
+    </div>
+    <div class="row">
+      <button id="start" disabled>Start</button>
+      <button id="forget" class="quiet" hidden>Forget saved installation</button>
+    </div>
+  </section>
+  <div id="screen">
+    <canvas id="canvas" tabindex="0"></canvas>
+    <div id="focus-hint">Click the screen to type</div>
+  </div>
+  <details>
+    <summary>Log</summary>
+    <pre id="log"></pre>
+  </details>
+</main>
+<script src="zip.js"></script>
+<script src="page.js"></script>
+{{{ SCRIPT }}}
+</body>
+</html>

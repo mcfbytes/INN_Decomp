@@ -24,9 +24,9 @@ the stub and ends the slice, so no host thread ever blocks. That is required for
 
 `machine_run_for(m, us)` runs the CPU in `TICK_SLICE_US` slices of `ips * slice` instructions,
 advancing `virtual_us` and calling every registered ticker (PIT, UART pacing, VGA retrace) after
-each slice. `HLT` and `CB_RETRY` end a slice early. The frontend calls `machine_run_for` with the
-wall-clock time since the last frame, capped, from a per-frame function so Emscripten's main loop
-can drive it.
+each slice. `HLT` and `CB_RETRY` end a slice early. The frontend's `FrameClock`
+(`runtime/frontend/frame_clock.c`) calls `machine_run_for` once per frame with the wall-clock time owed,
+capped at 50 ms, from `frame_step`, which Emscripten's main loop drives ([web.md](web.md)).
 
 ## Memory map
 
@@ -54,6 +54,30 @@ Every `IN`/`OUT` adds `io_cost_ns` (default 1000 ns, an ISA bus cycle) of emulat
 UART line status before writing anyway, which on real hardware outlasts one 2400-baud byte only
 because each read is slow. Without the charge it overran the transmit holding register.
 
+`machine_now_ns` refines `virtual_us` inside a slice by the instructions (and stalls) already run.
+Devices polled in tight loops read it: the AdLib probe starts OPL timer 1 (80 us) and polls the
+status about 100 times, all inside one 100 us slice.
+
+## Sound
+
+`audio.c` mixes every source into a ring of 16-bit stereo frames at one output rate (48 kHz unless
+the sink asks for another). Output frame n belongs to emulated time `base + n / rate`, so sound
+follows the emulated clock. Sources render lazily: `audio_sync` runs before any register write that
+changes a sound (OPL data, PIT channel 2, port 61h), before a sink reads, and from a ticker once
+5 ms are pending. With no sink the mixer only advances its clock and costs nothing.
+
+| Source | Ports | Notes |
+|---|---|---|
+| OPL2 (`opl.c`) | 388h/389h, mirror 228h/229h | Nuked-OPL3 core (docs/third_party.md) at 49716 Hz, linear resampling; status reads `06h` in the low bits (OPL2, not OPL3); timers evaluated lazily from `machine_now_ns`; no IRQ, as on an AdLib |
+| PC speaker (`speaker.c`) | 42h, 43h, 61h | square wave at PIT channel 2's rate; held high while the gate is off, so bit-1 toggling is heard; DC-blocked |
+
+Sinks, in `runtime/frontend/audio_sdl.c`:
+
+| Sink | How it reads |
+|---|---|
+| SDL2 device | queue mode from the main loop, no audio thread (works in the browser). `audio_read_paced` keeps about `AUDIO_TARGET_MS` (50 ms) queued, plus SDL's 1024-frame device buffer: drift is absorbed by stretching at most 0.5%, an underrun gets silence, a lasting excess (smoothed error over 50%) is skipped, and more than 200 ms is dropped |
+| `--wav out.wav` | every rendered frame, unpaced; with `--headless` this is the test path |
+
 ## Input scripts
 
 `inn --headless --script FILE` replays timed input. One event per line, times in emulated ms:
@@ -75,3 +99,10 @@ build/inn --headless --run-ms 95000 --script play.txt --com1 127.0.0.1:2314 work
 
 The C: drive is a copy of the installed client with the program under `\INN`, as `LSCI.CFG`
 expects. The frontend starts each program in its own directory.
+
+## Devices
+
+- **Mouse (INT 33h, HLE).** User event handlers (AX=0Ch/14h) run from IRQ12: host events queue,
+  IRQ12 enters a ROM trampoline that saves registers, far-calls the handler with the event in
+  AX/BX/CX/DX/SI/DI, restores, EOIs and IRETs. One queued event per call.
+- **VGA.** B8000h is the text buffer; the A0000h window is routed through `vga_mem_read/write`.

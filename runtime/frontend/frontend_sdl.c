@@ -1,6 +1,5 @@
-/* SDL2 frontend: window, keyboard and mouse into the machine, frames out of the VGA.
- * The per-frame work lives in frame_step so the browser build can drive it from
- * emscripten_set_main_loop; --headless runs without any display for tests. */
+/* SDL2 frontend: input into the machine, frames and sound out. Per-frame work is in frame_step so
+ * the browser build can drive it from emscripten_set_main_loop; --headless needs no display. */
 #include <SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -10,7 +9,9 @@
 #include <emscripten.h>
 #endif
 
+#include "audio_sdl.h"
 #include "devices.h"
+#include "frame_clock.h"
 #include "input_script.h"
 #include "machine.h"
 #if __has_include("dos.h")
@@ -20,7 +21,6 @@
 
 enum {
     WINDOW_W = 960, WINDOW_H = 720, /* 4:3, so 200-line modes get their tall pixels */
-    MAX_FRAME_US = 50000,           /* never try to catch up more than this per frame */
     HEADLESS_CHUNK_US = 10000,
     DEFAULT_RUN_MS = 10000,
     ARGS_MAX = 128,
@@ -30,10 +30,11 @@ typedef struct Options {
     int trace;
     uint64_t ips;
     const char *com1;
-    bool headless;
+    bool headless, perf;
     uint64_t run_ms;
     const char *screenshot;
     const char *script;
+    const char *wav;
     const char *c_dir, *program;
     char args[ARGS_MAX];
 } Options;
@@ -45,7 +46,7 @@ typedef struct Frontend {
     SDL_Texture *texture;
     uint32_t frame[VGA_MAX_W * VGA_MAX_H];
     int frame_w, frame_h;
-    uint64_t last_counter;
+    FrameClock clock;
     bool quit;
 } Frontend;
 
@@ -177,27 +178,37 @@ static void frame_step(void)
     SDL_Event e;
     while (SDL_PollEvent(&e))
         handle_event(f, &e);
-    uint64_t now = SDL_GetPerformanceCounter();
-    uint64_t us = (now - f->last_counter) * 1000000 / SDL_GetPerformanceFrequency();
-    f->last_counter = now;
-    machine_run_for(f->m, us > MAX_FRAME_US ? MAX_FRAME_US : us);
+    frame_clock_run(&f->clock, f->m);
+    frontend_audio_pump(f->m);
     present(f);
     if (f->m->exit_requested)
         f->quit = true;
 #ifdef __EMSCRIPTEN__
-    if (f->quit)
+    if (f->quit) {
         emscripten_cancel_main_loop();
+        EM_ASM({ if (Module.onGuestExit) Module.onGuestExit($0); }, f->m->exit_code);
+    }
 #endif
 }
 
+#ifdef __EMSCRIPTEN__
+enum { WINDOW_FLAGS = 0 }; /* the page sizes the canvas */
+#else
+enum { WINDOW_FLAGS = SDL_WINDOW_RESIZABLE };
+#endif
+
 static int open_window(Frontend *f)
 {
+#ifdef __EMSCRIPTEN__
+    /* Keys reach the guest only while the canvas has focus, so the page's own fields still type. */
+    SDL_SetHint(SDL_HINT_EMSCRIPTEN_KEYBOARD_ELEMENT, "#canvas");
+#endif
     if (SDL_Init(SDL_INIT_VIDEO) != 0) {
         fprintf(stderr, "SDL_Init: %s\n", SDL_GetError());
         return -1;
     }
     f->window = SDL_CreateWindow("ImagiNation Network", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-                                 WINDOW_W, WINDOW_H, SDL_WINDOW_RESIZABLE);
+                                 WINDOW_W, WINDOW_H, WINDOW_FLAGS);
     if (!f->window)
         return -1;
     f->renderer = SDL_CreateRenderer(f->window, -1, SDL_RENDERER_PRESENTVSYNC);
@@ -220,7 +231,7 @@ static void close_window(Frontend *f)
     SDL_Quit();
 }
 
-static int run_windowed(Frontend *f)
+static int run_windowed(Frontend *f, const Options *o)
 {
     if (open_window(f) != 0) {
         fprintf(stderr, "window: %s\n", SDL_GetError());
@@ -228,13 +239,15 @@ static int run_windowed(Frontend *f)
         return -1;
     }
     f->frame_w = 320, f->frame_h = 200;
-    f->last_counter = SDL_GetPerformanceCounter();
+    frontend_audio_open(f->m, true, o->wav);
+    frame_clock_start(&f->clock, f->m, o->perf);
     g_frontend = f;
 #ifdef __EMSCRIPTEN__
     emscripten_set_main_loop(frame_step, 0, 1);
 #else
     while (!f->quit)
         frame_step();
+    frontend_audio_close(f->m);
     close_window(f);
 #endif
     return 0;
@@ -248,13 +261,18 @@ static int run_headless(Frontend *f, const Options *o)
         fprintf(stderr, "cannot load script %s\n", o->script);
         return -1;
     }
+    if (o->wav && frontend_audio_open(f->m, false, o->wav) != 0)
+        return -1;
     while (f->m->virtual_us < end && !f->m->exit_requested) {
         if (script)
             input_script_apply(script, f->m);
         machine_run_for(f->m, HEADLESS_CHUNK_US);
+        frontend_audio_pump(f->m);
     }
     if (script)
         input_script_free(script);
+    if (frontend_audio_close(f->m) != 0)
+        return -1;
     if (o->screenshot && vga_write_ppm(f->m, o->screenshot) != 0) {
         fprintf(stderr, "cannot write %s\n", o->screenshot);
         return -1;
@@ -266,7 +284,7 @@ static int run_headless(Frontend *f, const Options *o)
 
 static void usage(void)
 {
-    fprintf(stderr, "usage: inn [--trace N] [--ips N] [--com1 host:port] "
+    fprintf(stderr, "usage: inn [--trace N] [--ips N] [--com1 host:port|ws://host:port] [--perf] [--wav out.wav] "
                     "[--headless --run-ms N --screenshot out.ppm --script input.txt] <c-drive-dir> <program> [args]\n");
 }
 
@@ -277,6 +295,7 @@ static int parse_args(int argc, char **argv, Options *o)
     for (; i < argc && strncmp(argv[i], "--", 2) == 0; i++) {
         const char *a = argv[i], *next = i + 1 < argc ? argv[i + 1] : NULL;
         if (!strcmp(a, "--headless")) { o->headless = true; continue; }
+        if (!strcmp(a, "--perf")) { o->perf = true; continue; }
         if (!next)
             return -1;
         if (!strcmp(a, "--trace")) o->trace = atoi(next);
@@ -285,6 +304,7 @@ static int parse_args(int argc, char **argv, Options *o)
         else if (!strcmp(a, "--run-ms")) o->run_ms = strtoull(next, NULL, 10);
         else if (!strcmp(a, "--screenshot")) o->screenshot = next;
         else if (!strcmp(a, "--script")) o->script = next;
+        else if (!strcmp(a, "--wav")) o->wav = next;
         else return -1;
         i++;
     }
@@ -302,6 +322,8 @@ static int parse_args(int argc, char **argv, Options *o)
 
 static int attach_com1(Machine *m, const char *spec)
 {
+    if (!strncmp(spec, "ws://", 5) || !strncmp(spec, "wss://", 6))
+        return uart_attach_ws(m, UART_COM1, spec);
     char host[256];
     const char *colon = strrchr(spec, ':');
     if (!colon || (size_t)(colon - spec) >= sizeof host)
@@ -352,7 +374,7 @@ int main(int argc, char **argv)
         f.m->ips = o.ips;
     int rc = boot(f.m, &o);
     if (rc == 0)
-        rc = o.headless ? run_headless(&f, &o) : run_windowed(&f);
+        rc = o.headless ? run_headless(&f, &o) : run_windowed(&f, &o);
     int exit_code = rc != 0 ? 1 : f.m->exit_code;
     if (f.m->exit_requested)
         fprintf(stderr, "program exited with code %d\n", f.m->exit_code);

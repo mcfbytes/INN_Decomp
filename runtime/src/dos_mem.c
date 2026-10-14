@@ -5,7 +5,6 @@
 
 #include "dos_int.h"
 
-enum { MCB_TYPE = 0, MCB_OWNER = 1, MCB_SIZE = 3, MCB_NAME = 8, MCB_NAME_LEN = 8 };
 enum { MCB_MID = 'M', MCB_LAST = 'Z', OWNER_FREE = 0 };
 enum { FIT_FIRST = 0, FIT_BEST = 1, FIT_LAST = 2, FIT_MASK = 3 };
 

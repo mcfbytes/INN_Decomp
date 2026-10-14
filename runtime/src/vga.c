@@ -1,6 +1,5 @@
-/* VGA: register file (3C0h-3CFh, 3D4h/3D5h, 3DAh), DAC, and the A0000h window in chained
- * (mode 13h), unchained (mode X) and planar 16-colour layouts; B8000h is the text buffer.
- * Chained byte n lives in plane n&3 at offset n>>2, so mode 13h and mode X share one layout. */
+/* VGA registers, DAC and the A0000h window: chained (13h), unchained (mode X) and planar modes.
+ * Chained byte n lives in plane n&3 at n>>2, so mode 13h and mode X share one layout. */
 #include <stdlib.h>
 #include <string.h>
 
@@ -346,4 +345,21 @@ void vga_init(Machine *m)
     port_register(m, PORT_MONO_CRTC_INDEX, PORT_MONO_CRTC_DATA, vga_in, vga_out);
     port_register(m, PORT_MONO_STATUS1, PORT_MONO_STATUS1, vga_in, vga_out);
     vga_set_mode(m, 0x03, true);
+}
+
+size_t vga_snapshot_size(void) { return sizeof(Vga); }
+
+/* A machine built without devices (unit tests) has no VGA; its snapshot is all zero. */
+void vga_snapshot_save(Machine *m, void *dst)
+{
+    if (m->vga)
+        memcpy(dst, vga_state(m), sizeof(Vga));
+    else
+        memset(dst, 0, sizeof(Vga));
+}
+
+void vga_snapshot_load(Machine *m, const void *src)
+{
+    if (m->vga)
+        memcpy(vga_state(m), src, sizeof(Vga));
 }
