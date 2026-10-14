@@ -67,7 +67,7 @@ produces the game.
       registration tables, Ghidra export (`tools/ghidra/`). First lifted function verified live.
 - [ ] **M5** Lift LSCITV: VM, memory manager, resources, kernels, graphics, sound, TSN kernel.
 - [ ] **M6** Sound: OPL2 (AdLib), then Sound Blaster digital audio. OPL2, PC speaker, mixer,
-      SDL2 output and `--wav` done (2026-10-14); Sound Blaster DSP open.
+      SDL2 output and `--wav` done (2026-10-14), browser audio confirmed in Edge; Sound Blaster DSP open.
 - [ ] **M7** Yserbius and Twinion (lift the shared engine; overlays need per-overlay module registration).
 - [ ] **M8** Golf, Red Baron (x87), Shoppers Advantage.
 
