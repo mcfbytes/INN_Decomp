@@ -8,6 +8,7 @@
 
 enum {
     DEVICE_BUFFER_FRAMES = 1024, /* 21 ms at 48 kHz; a power of two for WebAudio */
+    WEB_TARGET_MS = 100,
     FRAME_BYTES = AUDIO_CHANNELS * (int)sizeof(int16_t),
     PUMP_CAP_FRAMES = AUDIO_RING_FRAMES * 2, /* ring contents plus re-prime silence and stretch */
 };
@@ -31,6 +32,9 @@ static int open_device(Machine *m)
     if (!g_sinks.device)
         return -1;
     audio_set_rate(m, have.freq);
+#ifdef __EMSCRIPTEN__
+    audio_set_target_ms(m, WEB_TARGET_MS); /* the output runs on the busy main thread */
+#endif
     SDL_PauseAudioDevice(g_sinks.device, 0);
     return 0;
 }

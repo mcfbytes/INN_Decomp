@@ -40,6 +40,15 @@ int audio_read(Machine *m, int16_t *out, int frames);
 
 /* For a real-time sink with queued frames buffered: fills out (at most cap) so the queue stays near
  * the target. Drift is stretched away (AUDIO_MAX_STRETCH_PPM at most); underruns get silence. */
+/* Glitches since the last call, for --perf: the output ran dry, or queued audio was thrown away
+ * to bound latency (in one go when the level stayed far over target). */
+typedef struct AudioStats { uint32_t underruns, resyncs, dropped_frames; } AudioStats;
+AudioStats audio_take_stats(Machine *m);
+
+/* Queued audio to aim for (default AUDIO_TARGET_MS); the drop limit scales with it. A host whose
+ * frames can run their emulated time in bursts (the browser, with lifted code) wants more. */
+void audio_set_target_ms(Machine *m, int ms);
+
 enum { AUDIO_TARGET_MS = 50, AUDIO_MAX_LATENCY_MS = 200, AUDIO_MAX_STRETCH_PPM = 5000 };
 int audio_read_paced(Machine *m, int16_t *out, int cap, int queued);
 

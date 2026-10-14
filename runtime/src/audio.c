@@ -17,6 +17,8 @@ static const double RESYNC_ERROR = 0.5;     /* a sustained excess the stretch wo
 
 typedef struct Audio {
     int rate;
+    AudioStats stats;
+    int target_ms; /* 0: AUDIO_TARGET_MS */
     bool enabled;
     AudioRenderFn sources[AUDIO_MAX_SOURCES];
     int source_count;
@@ -155,15 +157,21 @@ int audio_read_paced(Machine *m, int16_t *out, int cap, int queued)
 {
     Audio *a = audio_state(m);
     audio_sync(m);
-    int target = a->rate * AUDIO_TARGET_MS / 1000, n = 0;
+    int target_ms = a->target_ms ? a->target_ms : AUDIO_TARGET_MS;
+    int target = a->rate * target_ms / 1000, n = 0;
     if (queued == 0 && a->count < target) {
+        a->stats.underruns++;
         n = target - a->count < cap ? target - a->count : cap;
         memset(out, 0, sizeof(int16_t) * AUDIO_CHANNELS * (size_t)n);
     }
-    int excess = queued + a->count - a->rate * AUDIO_MAX_LATENCY_MS / 1000;
-    if (excess > 0)
+    int excess = queued + a->count - a->rate * (target_ms * AUDIO_MAX_LATENCY_MS / AUDIO_TARGET_MS) / 1000;
+    if (excess > 0) {
+        a->stats.dropped_frames += (uint32_t)excess;
         ring_drop(a, excess);
+    }
     if (track_error(a, queued + n + a->count, target) > RESYNC_ERROR) {
+        a->stats.dropped_frames += (uint32_t)(queued + n + a->count - target);
+        a->stats.resyncs++;
         ring_drop(a, queued + n + a->count - target);
         a->error_avg = (double)(queued + n + a->count - target) / target;
     }
@@ -197,6 +205,18 @@ void audio_set_rate(Machine *m, int rate)
 }
 
 int audio_rate(Machine *m) { return audio_state(m)->rate; }
+
+void audio_set_target_ms(Machine *m, int ms)
+{
+    audio_state(m)->target_ms = ms;
+}
+
+AudioStats audio_take_stats(Machine *m)
+{
+    AudioStats s = audio_state(m)->stats;
+    audio_state(m)->stats = (AudioStats){ 0 };
+    return s;
+}
 
 void audio_enable(Machine *m, bool on)
 {
