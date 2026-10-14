@@ -25,7 +25,8 @@ enum {
     HEADLESS_CHUNK_US = 10000,
     FRAME_PERIOD_US = 16667,
     NESTED_AHEAD_US = 50000,   /* the frame clock's largest burst (MAX_FRAME_US): no wait below it */
-    NESTED_CHECK_US = 1000,    /* emulated time between wall-clock checks in a nested wait */
+    NESTED_CHECK_US = 1000,
+    LONG_FRAME_US = 100000,    /* --perf reports frames longer than this */    /* emulated time between wall-clock checks in a nested wait */
     NESTED_PRESENT_US = 16667,
     DEFAULT_RUN_MS = 10000,
     ARGS_MAX = 128,
@@ -55,7 +56,9 @@ typedef struct Frontend {
     FrameClock clock;
     uint64_t step_wall_us, step_virtual_us; /* at the start of the current frame */
     uint64_t last_present_us;
-    uint64_t nested_checked_us; /* emulated time of the last wall-clock check in a nested wait */
+    uint64_t nested_checked_us;
+    uint64_t slept_us, yields; /* in the current frame, for --perf long-frame reports */
+    bool perf; /* emulated time of the last wall-clock check in a nested wait */
     bool quit;
 } Frontend;
 
@@ -184,6 +187,17 @@ static Frontend *g_frontend; /* emscripten_set_main_loop takes no context argume
 
 static void host_sleep_us(uint64_t us)
 {
+    if (g_frontend) {
+        uint64_t start = frame_clock_now_us();
+        g_frontend->yields++;
+#ifdef INN_ASYNCIFY
+        emscripten_sleep((unsigned)(us / 1000));
+#elif !defined(__EMSCRIPTEN__)
+        SDL_Delay((uint32_t)(us / 1000));
+#endif
+        g_frontend->slept_us += frame_clock_now_us() - start;
+        return;
+    }
 #ifdef INN_ASYNCIFY
     emscripten_sleep((unsigned)(us / 1000));
 #elif !defined(__EMSCRIPTEN__)
@@ -224,7 +238,13 @@ static void frame_step(void)
         handle_event(f, &e);
     f->step_wall_us = frame_clock_now_us();
     f->step_virtual_us = f->m->virtual_us;
+    f->slept_us = f->yields = 0;
     frame_clock_run(&f->clock, f->m);
+    uint64_t wall = frame_clock_now_us() - f->step_wall_us;
+    if (f->perf && wall > LONG_FRAME_US)
+        log_msg("perf: long frame %llu ms: emulated %llu ms, slept %llu ms in %llu yields",
+                (unsigned long long)wall / 1000, (unsigned long long)(f->m->virtual_us - f->step_virtual_us) / 1000,
+                (unsigned long long)f->slept_us / 1000, (unsigned long long)f->yields);
     frontend_audio_pump(f->m);
     present(f);
     if (f->m->exit_requested)
@@ -301,6 +321,7 @@ static int run_windowed(Frontend *f, const Options *o)
     f->frame_w = 320, f->frame_h = 200;
     frontend_audio_open(f->m, true, o->wav);
     frame_clock_start(&f->clock, f->m, o->perf);
+    f->perf = o->perf;
     g_frontend = f;
     lift_set_nested_yield(f->m, frontend_nested_yield);
 #if defined(INN_ASYNCIFY)

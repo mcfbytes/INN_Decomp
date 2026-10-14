@@ -87,6 +87,11 @@ void lift_set_nested_yield(Machine *m, void (*fn)(Machine *m));
 
 /* Runs original code at seg:off as a far call and returns when it returns. */
 void guest_call_far(Machine *m, uint16_t seg, uint16_t off);
+/* Waits for the next interrupt as STI; HLT would, with the caller's flags restored: emulated time
+ * moves to the next timer tick or device IRQ and its handler runs. The way for lifted code to wait
+ * for ticks: a busy loop of short guest calls advances time by a few instructions per pass. */
+void lift_idle(Machine *m);
+
 /* Runs original code at CS:off as a near call. */
 void guest_call_near(Machine *m, uint16_t off);
 

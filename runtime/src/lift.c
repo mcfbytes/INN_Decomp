@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "bios_internal.h"
 #include "lift_internal.h"
 
 void lift_set_hook_bit(Machine *m, uint32_t linear, bool on)
@@ -291,6 +292,15 @@ void guest_call_far(Machine *m, uint16_t seg, uint16_t off)
     lift_run_nested(m, UINT32_MAX, sp_after_return, false); /* the sentinel callback ends it */
     cpu_set_seg(&m->cpu, S_CS, saved_cs);
     m->cpu.eip = saved_ip;
+}
+
+void lift_idle(Machine *m)
+{
+    static const uint8_t IDLE[] = { 0x9C, 0xFB, 0xF4, 0x9D, 0xCB };
+    LiftState *s = lift_state(m);
+    if (!s->idle_off)
+        s->idle_off = bios_rom_emit(m, IDLE, sizeof IDLE);
+    guest_call_far(m, BIOS_SEG, s->idle_off);
 }
 
 /* The return address pushed is the lifted function's own entry, which is already hooked. */

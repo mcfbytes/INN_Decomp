@@ -35,6 +35,7 @@ typedef struct LiftState {
     bool hooks_off; /* shadow runs of the original run with every lifted hook off */
     const ActiveHook *shadow_of; /* the hook being shadow-verified, for stall reports */
     void (*nested_yield)(Machine *m);
+    uint16_t idle_off; /* BIOS-segment stub PUSHF; STI; HLT; POPF; RETF, emitted on first use */
     int c_depth; /* lifted C on the host stack and not inside a nested guest call */
     const char *verify_skip; /* INN_VERIFY_SKIP: hooked names whose calls are never shadowed */
     const char *only; /* INN_LIFT_ONLY: comma-separated names to hook, all when NULL */

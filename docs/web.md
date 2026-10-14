@@ -95,7 +95,12 @@ game down instead of making it race. `--perf` logs, every 5 s:
 | host busy | share of wall time spent in `machine_run_for` |
 | executed | guest instructions per wall second |
 | capacity | guest instructions per second of `machine_run_for` time: the rate the host could sustain |
-| dropped | wall time not emulated because a frame exceeded the cap |
+| dropped | wall time minus emulated time over the window (time the guest fell behind) |
+| longest frame | longest single frame; audio runs dry if it exceeds the queue without yielding |
+
+With `--perf`, a frame over 100 ms also logs `long frame`: its emulated time and how long nested
+waits in lifted code slept. A frame that waits inside lifted code keeps pace with the wall clock and
+keeps presenting and feeding audio; the frame clock does not owe that time back afterwards.
 
 Measured 2026-10-14 in headless Chromium (Playwright build 1243, SwiftShader GL) on a Ryzen 9 9950X3D,
 boot, dial, logon and town map, guest clock 20 MIPS: speed 1.000 throughout, host busy 22 to 44%,

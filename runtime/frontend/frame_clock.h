@@ -10,6 +10,7 @@
 
 typedef struct FramePerf {
     uint64_t wall_us, busy_us, emulated_us, dropped_us, instructions;
+    uint64_t longest_us; /* longest single frame: audio runs dry when it exceeds the queue */
 } FramePerf;
 
 typedef struct FrameClock {
