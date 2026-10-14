@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Runs the client with every lifted function shadow-verified: boot, Play, log on, reach the map.
+# Uses a per-port copy of work/inn-c, so concurrent runs never share swap or player files.
 # usage: verify_lifted.sh <build_dir> <server_port> [run_ms] [calls_per_function] [script]
 # The script (input_script format) replaces the logon one; @OUT@ in it becomes the output directory.
 # INN_ARGS adds frontend options, e.g. INN_ARGS='--conv-kb 520'.
@@ -22,12 +23,16 @@ else
 60000 shot $OUT/map.ppm
 SCRIPT
 fi
+# Each run gets its own C: drive: the client writes swap and player files there.
+DRIVE=$ROOT/work/verify-drive/$PORT
+mkdir -p "$DRIVE"
+rsync -a --delete --delete-excluded --exclude 'VMF/*' "$ROOT/work/inn-c/" "$DRIVE/"
 "$SERVER" --bind 127.0.0.1:"$PORT" --no-int14h --no-capture > "$OUT/server.log" 2>&1 &
 SERVER_PID=$!
 trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
 sleep 1
 INN_VERIFY_LIFTED=$CALLS timeout 900 "$BUILD/inn" ${INN_ARGS:-} --headless --run-ms "$RUN_MS" --script "$OUT/play.txt" \
-    --com1 127.0.0.1:"$PORT" "$ROOT/work/inn-c" 'INN\TSNEXEC.EXE' DEFAULT > "$OUT/client.log" 2>&1 || true
+    --com1 127.0.0.1:"$PORT" "$DRIVE" 'INN\TSNEXEC.EXE' DEFAULT > "$OUT/client.log" 2>&1 || true
 python3 -I "$ROOT/tools/ppm2png.py" "$OUT/map.ppm" "$OUT/map.png" 2>/dev/null || true
 grep -E '^verify:' "$OUT/client.log" | sort | uniq -c | sort -rn | head -200 || true
 echo "logs and the map screenshot: $OUT"

@@ -2,6 +2,7 @@
  * directories, search, memory blocks and EXEC/terminate/TSR on a scratch C: drive. */
 #define _POSIX_C_SOURCE 200809L
 #include <dirent.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -292,6 +293,22 @@ static void test_journal(void)
     CHECK(dos_host_rename(a, b) == 0);
     dos_journal_undo(NULL);
     CHECK(read_host("A.TXT", buf, sizeof buf) == 1 && read_host("B.TXT", buf, sizeof buf) == (size_t)-1);
+    char c[1100];
+    snprintf(c, sizeof c, "%s/C.TXT", root);
+    int fd = dos_host_open(c, O_RDWR | O_CREAT | O_TRUNC, false);
+    CHECK(fd >= 0);
+    close(fd);
+    fd = dos_host_open(a, O_RDWR, true);
+    CHECK(fd >= 0 && write(fd, "bcd", 3) == 3 && write(fd, "e", 1) == 1);
+    close(fd);
+    dos_journal_undo(NULL);
+    CHECK(read_host("C.TXT", buf, sizeof buf) == (size_t)-1);
+    CHECK(read_host("A.TXT", buf, sizeof buf) == 1 && buf[0] == 'b'); /* in-place bytes stay */
+    fd = dos_host_open(a, O_RDWR | O_CREAT | O_TRUNC, true);
+    CHECK(fd >= 0);
+    close(fd);
+    dos_journal_undo(NULL);
+    CHECK(read_host("A.TXT", buf, sizeof buf) == 1);
     CHECK(dos_host_unlink(a) == 0);
     dos_journal_end(NULL);
     CHECK(read_host("A.TXT", buf, sizeof buf) == (size_t)-1);

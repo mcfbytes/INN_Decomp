@@ -64,7 +64,7 @@ static int open_file(Machine *m, const char *name, OpenHow how, uint8_t mode, ui
     if (idx < 0)
         return DE_TOO_MANY_OPEN;
     int fd = -1;
-    if (!p.dev && (fd = open(p.host, host_flags(mode, how), 0666)) < 0)
+    if (!p.dev && (fd = dos_host_open(p.host, host_flags(mode, how), p.exists)) < 0)
         return errno_to_dos(errno);
     DosFile *f = &dos_state(m)->sft[idx];
     f->fd = fd;

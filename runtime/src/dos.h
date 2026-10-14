@@ -33,8 +33,9 @@ size_t dos_snapshot_size(void);
 void dos_snapshot_save(Machine *m, void *dst);
 void dos_snapshot_load(Machine *m, const void *src);
 
-/* Host file deletions and renames made between begin and end are journaled: undo reverts those
- * made so far (between the two shadow runs), end makes the remaining ones permanent. */
+/* Host file changes between begin and end are journaled: deletions, renames, creations and growth
+ * of files (not bytes rewritten in place). Undo reverts those so far, between the two shadow runs;
+ * end keeps the rest. */
 void dos_journal_begin(Machine *m);
 void dos_journal_undo(Machine *m);
 void dos_journal_end(Machine *m);

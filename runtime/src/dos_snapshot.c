@@ -1,7 +1,9 @@
 /* DOS host-side state for shadow verification: the state struct plus every open file's position,
  * so a function that reads a file sees the same bytes in both shadow runs. */
+#include <fcntl.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include "dos_int.h"
@@ -39,20 +41,47 @@ static bool snapshot_uses_fd(const DosSnapshot *snap, int fd)
 
 enum { JOURNAL_MAX = 32 };
 
+typedef enum JournalKind { J_DELETED, J_RENAMED, J_CREATED, J_SIZED, J_SIZED_FD } JournalKind;
+
 typedef struct JournalEntry {
-    bool deleted;              /* else renamed */
-    char path[HOST_PATH_MAX];  /* deleted file, or rename source */
-    char other[HOST_PATH_MAX]; /* where the deleted file is kept, or rename target */
+    JournalKind kind;
+    char path[HOST_PATH_MAX];  /* the file (J_DELETED: where it was, J_RENAMED: the source) */
+    char other[HOST_PATH_MAX]; /* J_DELETED: where it is kept, J_RENAMED: the target */
+    int fd;                    /* J_SIZED_FD: a descriptor open when the journal began */
+    off_t size;                /* J_SIZED, J_SIZED_FD: size to truncate back to */
 } JournalEntry;
 
 /* Shadow runs are nested in one machine's step, so one journal serves the process. */
 static struct { bool active; int count, serial; JournalEntry e[JOURNAL_MAX]; } journal;
 
+static JournalEntry *journal_add(JournalKind kind, const char *path)
+{
+    if (!journal.active || journal.count >= JOURNAL_MAX)
+        return NULL;
+    JournalEntry *e = &journal.e[journal.count++];
+    e->kind = kind;
+    snprintf(e->path, sizeof e->path, "%s", path ? path : "");
+    return e;
+}
+
+/* Files open now may grow during the run; their sizes are restored on undo. */
 void dos_journal_begin(Machine *m)
 {
-    (void)m;
     journal.active = true;
     journal.count = 0;
+    if (!m || !m->dos)
+        return;
+    const DosState *d = dos_state(m);
+    for (int i = 0; i < DOS_SFT_MAX; i++) {
+        struct stat st;
+        if (!d->sft[i].refs || d->sft[i].fd < 0 || fstat(d->sft[i].fd, &st) != 0)
+            continue;
+        JournalEntry *e = journal_add(J_SIZED_FD, NULL);
+        if (e) {
+            e->fd = d->sft[i].fd;
+            e->size = st.st_size;
+        }
+    }
 }
 
 void dos_journal_undo(Machine *m)
@@ -60,11 +89,15 @@ void dos_journal_undo(Machine *m)
     (void)m;
     while (journal.count > 0) {
         JournalEntry *e = &journal.e[--journal.count];
-        if (e->deleted) {
+        switch (e->kind) {
+        case J_DELETED:
             unlink(e->path); /* recreated by the run being undone */
             rename(e->other, e->path);
-        } else {
-            rename(e->other, e->path);
+            break;
+        case J_RENAMED: rename(e->other, e->path); break;
+        case J_CREATED: unlink(e->path); break;
+        case J_SIZED: if (truncate(e->path, e->size) != 0) { /* gone again: nothing to restore */ } break;
+        case J_SIZED_FD: if (ftruncate(e->fd, e->size) != 0) { /* closed by the run */ } break;
         }
     }
 }
@@ -73,7 +106,7 @@ void dos_journal_end(Machine *m)
 {
     (void)m;
     for (int i = 0; i < journal.count; i++)
-        if (journal.e[i].deleted)
+        if (journal.e[i].kind == J_DELETED)
             unlink(journal.e[i].other);
     journal.active = false;
     journal.count = 0;
@@ -87,7 +120,7 @@ int dos_host_unlink(const char *path)
     snprintf(e->other, sizeof e->other, "%s.shadow%d", path, journal.serial++);
     if (rename(path, e->other) != 0)
         return -1;
-    e->deleted = true;
+    e->kind = J_DELETED;
     snprintf(e->path, sizeof e->path, "%s", path);
     journal.count++;
     return 0;
@@ -97,13 +130,27 @@ int dos_host_rename(const char *from, const char *to)
 {
     if (rename(from, to) != 0)
         return -1;
-    if (journal.active && journal.count < JOURNAL_MAX) {
-        JournalEntry *e = &journal.e[journal.count++];
-        e->deleted = false;
-        snprintf(e->path, sizeof e->path, "%s", from);
+    JournalEntry *e = journal_add(J_RENAMED, from);
+    if (e)
         snprintf(e->other, sizeof e->other, "%s", to);
-    }
     return 0;
+}
+
+int dos_host_open(const char *path, int flags, bool exists)
+{
+    if (journal.active && exists && (flags & O_TRUNC) && dos_host_unlink(path) != 0)
+        return -1; /* a truncating create keeps the old file aside, as a delete does */
+    struct stat st;
+    bool grows = journal.active && exists && !(flags & O_TRUNC) && (flags & O_ACCMODE) != O_RDONLY;
+    if (grows && stat(path, &st) == 0) {
+        JournalEntry *e = journal_add(J_SIZED, path);
+        if (e)
+            e->size = st.st_size;
+    }
+    int fd = open(path, flags, 0666);
+    if (fd >= 0 && journal.active && (!exists || (flags & O_TRUNC)))
+        journal_add(J_CREATED, path);
+    return fd;
 }
 
 /* Descriptors opened after the snapshot are closed, or every shadow run would leak them. */
