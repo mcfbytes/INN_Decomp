@@ -178,7 +178,8 @@ static void report(Machine *m, ActiveHook *h, const char *why)
     log_msg("verify: %s %s call %d: %s", h->entry->module, h->entry->name, h->shadow_calls, why);
 }
 
-/* Memory below hi_sp, down to 0x2000 below lo_sp, is dead stack. */
+/* Memory below hi_sp, down to 0x2000 below lo_sp but not below SS:0, is dead stack: a lift whose
+ * locals wrap below the stack segment (into static data of a small DGROUP stack) is caught. */
 static void compare(Machine *m, ActiveHook *h, uint16_t lo_sp, uint16_t hi_sp)
 {
     VerifyState *v = verify(m);
@@ -192,7 +193,8 @@ static void compare(Machine *m, ActiveHook *h, uint16_t lo_sp, uint16_t hi_sp)
         return;
     }
     uint32_t stack_top = v->cpu_before.seg_base[S_SS] + hi_sp, stack_low = v->cpu_before.seg_base[S_SS] + lo_sp;
-    uint32_t dead_lo = stack_low > DEAD_STACK_BYTES ? stack_low - DEAD_STACK_BYTES : 0;
+    uint32_t ss_base = v->cpu_before.seg_base[S_SS];
+    uint32_t dead_lo = stack_low > ss_base + DEAD_STACK_BYTES ? stack_low - DEAD_STACK_BYTES : ss_base;
     long at = first_memory_difference(m->mem, v->mem_original, dead_lo, stack_top);
     if (at >= 0) {
         snprintf(why, sizeof why, "memory %05lX lifted %02X original %02X", (unsigned long)at,
