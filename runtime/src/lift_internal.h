@@ -7,12 +7,21 @@
 enum { SHADOW_STALL_INSNS = 200000000 };
 enum { MAX_TABLES = 64, MAX_ACTIVE = 8192, MAX_NESTING = 64, HOOK_BITMAP_BYTES = MEM_ONE_MEG / 8 };
 
+/* Shadow-verification counts of one entry, kept across loads (overlays come and go). */
+typedef struct HookStats {
+    bool armed_once;
+    int shadow_calls, shadow_mismatches;
+} HookStats;
+
 typedef struct ActiveHook {
     uint32_t linear;
-    uint16_t load_seg; /* relocated words in the signature hold load_seg + file value */
+    uint16_t load_seg;
+    uint16_t reloc_base; /* relocated words in the signature hold reloc_base + file value */
     const LiftedEntry *entry;
     bool verified, rejected; /* entry bytes compared on first use */
-    int shadow_calls, shadow_mismatches;
+    bool overlay;        /* in an overlay buffer: entry bytes compared on every call */
+    bool absent_logged;  /* an overlay entry was reached with other bytes there; logged once */
+    HookStats *stats;
 } ActiveHook;
 
 /* A pending return from guest code called by lifted code. */
@@ -24,7 +33,7 @@ typedef struct NestedCall {
 } NestedCall;
 
 typedef struct LiftState {
-    struct { const LiftedEntry *entries; int count; } tables[MAX_TABLES];
+    struct { const LiftedEntry *entries; HookStats *stats; int count; } tables[MAX_TABLES];
     int table_count;
     ActiveHook active[MAX_ACTIVE];
     int active_count;

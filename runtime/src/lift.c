@@ -42,28 +42,34 @@ void lift_init(Machine *m)
         lift_verify_enable(m, atoi(verify_calls));
 }
 
-static void log_verify_line(const ActiveHook *h)
+static void log_verify_line(const LiftedEntry *e, const HookStats *st)
 {
-    if (h->entry->no_shadow) {
-        log_msg("verify: %s %s: not shadowed (LIFT_NOSHADOW)", h->entry->module, h->entry->name);
+    if (e->no_shadow) {
+        log_msg("verify: %s %s: not shadowed (LIFT_NOSHADOW)", e->module, e->name);
         return;
     }
-    log_msg("verify: %s %s: %d calls checked, %d mismatches", h->entry->module, h->entry->name,
-            h->shadow_calls, h->shadow_mismatches);
+    log_msg("verify: %s %s: %d calls checked, %d mismatches", e->module, e->name, st->shadow_calls,
+            st->shadow_mismatches);
 }
 
+/* Every entry that was armed at some point, loaded now or not. */
 static void log_verify_summary(LiftState *s)
 {
-    for (int i = 0; i < s->active_count; i++)
-        log_verify_line(&s->active[i]);
+    for (int t = 0; t < s->table_count; t++)
+        for (int i = 0; i < s->tables[t].count; i++)
+            if (s->tables[t].stats[i].armed_once)
+                log_verify_line(&s->tables[t].entries[i], &s->tables[t].stats[i]);
 }
 
 void lift_shutdown(Machine *m)
 {
     if (m->lift && lift_state(m)->verify)
         log_verify_summary(lift_state(m));
-    if (m->lift)
+    if (m->lift) {
         free(lift_state(m)->verify);
+        for (int t = 0; t < lift_state(m)->table_count; t++)
+            free(lift_state(m)->tables[t].stats);
+    }
     free(m->lift);
     free(m->exec_hooks);
     m->lift = NULL;
@@ -76,6 +82,9 @@ void lift_add_table(Machine *m, const LiftedEntry *entries, int count)
     if (s->table_count >= MAX_TABLES)
         fatal("too many lifted-function tables");
     s->tables[s->table_count].entries = entries;
+    s->tables[s->table_count].stats = calloc((size_t)(count > 0 ? count : 1), sizeof(HookStats));
+    if (!s->tables[s->table_count].stats)
+        fatal("out of memory");
     s->tables[s->table_count].count = count;
     s->table_count++;
 }
@@ -96,7 +105,8 @@ bool lift_listed(const char *list, const char *name)
     return false;
 }
 
-static void arm(Machine *m, const LiftedEntry *e, uint16_t load_seg)
+static void arm(Machine *m, const LiftedEntry *e, HookStats *stats, uint16_t load_seg, uint16_t reloc_base,
+                bool overlay)
 {
     LiftState *s = lift_state(m);
     if (s->only && !lift_listed(s->only, e->name))
@@ -104,8 +114,39 @@ static void arm(Machine *m, const LiftedEntry *e, uint16_t load_seg)
     if (s->active_count >= MAX_ACTIVE)
         fatal("too many active lifted functions");
     uint32_t linear = real_addr((uint16_t)(load_seg + e->seg), e->off);
-    s->active[s->active_count++] = (ActiveHook){ .linear = linear, .load_seg = load_seg, .entry = e };
+    s->active[s->active_count++] = (ActiveHook){ .linear = linear, .load_seg = load_seg,
+                                                 .reloc_base = reloc_base, .entry = e, .overlay = overlay,
+                                                 .stats = stats };
+    stats->armed_once = true;
     lift_set_hook_bit(m, linear, true);
+}
+
+/* Arms every entry of module at load_seg, replacing whatever was hooked in its image. */
+static void arm_module(Machine *m, const char *module, uint16_t load_seg, uint32_t image_bytes,
+                       uint16_t reloc_base, bool overlay)
+{
+    LiftState *s = lift_state(m);
+    lift_module_unloaded(m, load_seg, (image_bytes + 15) / 16);
+    for (int t = 0; t < s->table_count; t++)
+        for (int i = 0; i < s->tables[t].count; i++)
+            if (!strcmp(s->tables[t].entries[i].module, module))
+                arm(m, &s->tables[t].entries[i], &s->tables[t].stats[i], load_seg, reloc_base, overlay);
+    qsort(s->active, (size_t)s->active_count, sizeof s->active[0], by_linear);
+}
+
+/* Drops the hooks of one module wherever they are armed. */
+static void disarm_module(Machine *m, const char *module)
+{
+    LiftState *s = lift_state(m);
+    int kept = 0;
+    for (int i = 0; i < s->active_count; i++) {
+        ActiveHook *h = &s->active[i];
+        if (!strcmp(h->entry->module, module))
+            lift_set_hook_bit(m, h->linear, false);
+        else
+            s->active[kept++] = *h;
+    }
+    s->active_count = kept;
 }
 
 static void remember_module(LiftState *s, const char *module, uint16_t load_seg)
@@ -139,12 +180,18 @@ void lift_module_loaded(Machine *m, const char *module, uint16_t load_seg, uint3
     remember_module(s, module, load_seg);
     if (m->trace)
         log_msg("lift: module %s at %04X (%u bytes)", module, load_seg, image_bytes);
-    lift_module_unloaded(m, load_seg, (image_bytes + 15) / 16);
-    for (int t = 0; t < s->table_count; t++)
-        for (int i = 0; i < s->tables[t].count; i++)
-            if (!strcmp(s->tables[t].entries[i].module, module))
-                arm(m, &s->tables[t].entries[i], load_seg);
-    qsort(s->active, (size_t)s->active_count, sizeof s->active[0], by_linear);
+    arm_module(m, module, load_seg, image_bytes, load_seg, false);
+}
+
+void lift_overlay_loaded(Machine *m, const char *module, uint16_t load_seg, uint32_t image_bytes,
+                         uint16_t reloc_base)
+{
+    if (!lift_state(m))
+        return;
+    if (m->trace)
+        log_msg("lift: overlay %s at %04X (%u bytes)", module, load_seg, image_bytes);
+    disarm_module(m, module);
+    arm_module(m, module, load_seg, image_bytes, reloc_base, true);
 }
 
 void lift_module_unloaded(Machine *m, uint16_t load_seg, uint32_t paragraphs)
@@ -156,11 +203,9 @@ void lift_module_unloaded(Machine *m, uint16_t load_seg, uint32_t paragraphs)
     int kept = 0;
     for (int i = 0; i < s->active_count; i++) {
         ActiveHook *h = &s->active[i];
-        if (h->linear >= lo && h->linear < hi) {
-            if (s->verify)
-                log_verify_line(h); /* the shutdown summary no longer sees it */
+        if (h->linear >= lo && h->linear < hi)
             lift_set_hook_bit(m, h->linear, false);
-        } else
+        else
             s->active[kept++] = *h;
     }
     s->active_count = kept;
@@ -177,29 +222,46 @@ static void expected_bytes(const ActiveHook *h, uint8_t out[LIFT_SIGNATURE_LEN],
 {
     const LiftedEntry *e = h->entry;
     memcpy(out, e->signature, LIFT_SIGNATURE_LEN);
-    memset(skip, 0, LIFT_SIGNATURE_LEN);
-    skip[0] = (e->reloc_mask & LIFT_RELOC_SPLIT_HEAD) != 0;
+    for (int i = 0; i < LIFT_SIGNATURE_LEN; i++)
+        skip[i] = (e->unknown_mask >> i & 1) != 0;
+    skip[0] |= (e->reloc_mask & LIFT_RELOC_SPLIT_HEAD) != 0;
     for (int i = 0; i < LIFT_SIGNATURE_LEN; i++) {
         if (!(e->reloc_mask >> i & 1))
             continue;
         uint16_t word = (uint16_t)(e->signature[i] | (i + 1 < LIFT_SIGNATURE_LEN ? e->signature[i + 1] << 8 : 0));
-        word = (uint16_t)(word + h->load_seg);
+        word = (uint16_t)(word + h->reloc_base);
         out[i] = (uint8_t)word;
         if (i + 1 < LIFT_SIGNATURE_LEN)
             out[i + 1] = (uint8_t)(word >> 8);
     }
 }
 
+static bool bytes_match(Machine *m, const ActiveHook *h)
+{
+    uint8_t expected[LIFT_SIGNATURE_LEN];
+    bool skip[LIFT_SIGNATURE_LEN];
+    expected_bytes(h, expected, skip);
+    for (int i = 0; i < LIFT_SIGNATURE_LEN; i++)
+        if (!skip[i] && mem_rd8(m, h->linear + (uint32_t)i) != expected[i])
+            return false;
+    return true;
+}
+
 static bool signature_matches(Machine *m, ActiveHook *h)
 {
+    if (h->overlay) {
+        /* The buffer is reused, and a manager may move code without a file read we would see. */
+        bool ok = bytes_match(m, h);
+        if (!ok && !h->absent_logged) {
+            h->absent_logged = true;
+            log_msg("lift: %s %s reached with other bytes at the entry; running the original",
+                    h->entry->module, h->entry->name);
+        }
+        return ok;
+    }
     if (!h->verified) {
         h->verified = true;
-        uint8_t expected[LIFT_SIGNATURE_LEN];
-        bool skip[LIFT_SIGNATURE_LEN];
-        expected_bytes(h, expected, skip);
-        for (int i = 0; i < LIFT_SIGNATURE_LEN; i++)
-            if (!skip[i] && mem_rd8(m, h->linear + (uint32_t)i) != expected[i])
-                h->rejected = true;
+        h->rejected = !bytes_match(m, h);
         if (h->rejected)
             log_msg("lift: %s %s bytes differ at the entry; running the original", h->entry->module,
                     h->entry->name);

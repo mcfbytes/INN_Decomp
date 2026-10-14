@@ -173,9 +173,9 @@ static long first_memory_difference(const uint8_t *a, const uint8_t *b, uint32_t
 
 static void report(Machine *m, ActiveHook *h, const char *why)
 {
-    h->shadow_mismatches++;
+    h->stats->shadow_mismatches++;
     verify(m)->mismatches++;
-    log_msg("verify: %s %s call %d: %s", h->entry->module, h->entry->name, h->shadow_calls, why);
+    log_msg("verify: %s %s call %d: %s", h->entry->module, h->entry->name, h->stats->shadow_calls, why);
 }
 
 /* Memory below hi_sp, down to 0x2000 below lo_sp but not below SS:0, is dead stack: a lift whose
@@ -302,11 +302,14 @@ bool lift_verify_call(Machine *m, ActiveHook *h)
 {
     LiftState *s = lift_state(m);
     VerifyState *v = s->verify;
-    if (!v || s->in_shadow || h->entry->no_shadow || h->shadow_calls >= v->calls_per_entry)
+    if (!v || s->in_shadow || h->entry->no_shadow || h->stats->shadow_calls >= v->calls_per_entry)
         return false;
     if (s->verify_skip && lift_listed(s->verify_skip, h->entry->name))
         return false;
-    h->shadow_calls++;
+    h->stats->shadow_calls++;
+    /* Loading an overlay during the runs re-sorts the active hooks under h. */
+    ActiveHook hook = *h;
+    h = &hook;
     s->in_shadow = true;
     s->shadow_of = h;
     m->irq_hold = true;

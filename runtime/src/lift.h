@@ -30,6 +30,7 @@ typedef struct LiftedEntry {
     uint16_t reloc_mask; /* bit i: a load-segment-relocated word starts at signature byte i */
     bool region;    /* LIFT_REGION: may leave at any instruction; see lift_verify.c */
     bool no_shadow; /* LIFT_NOSHADOW: hooked, never shadow-verified (device I/O, process exit) */
+    uint16_t unknown_mask; /* bit i: signature byte i is not compared (past the end of an overlay's code) */
 } LiftedEntry;
 
 /* reloc_mask bit 15: byte 0 is the high half of a relocated word starting before the entry. */
@@ -55,6 +56,10 @@ void lift_add_table(Machine *m, const LiftedEntry *entries, int count);
 void lift_module_loaded(Machine *m, const char *module, uint16_t load_seg, uint32_t image_bytes);
 /* Load segment of a module announced by lift_module_loaded, or 0 if it is not loaded. */
 uint16_t lift_module_base(Machine *m, const char *module);
+/* Overlay code "<PROGRAM>#<stub segment>" now sits at load_seg; its relocated words hold reloc_base +
+ * file value. Re-arms the overlay there and evicts what it replaced (docs/lifting.md, "Overlays"). */
+void lift_overlay_loaded(Machine *m, const char *module, uint16_t load_seg, uint32_t image_bytes,
+                         uint16_t reloc_base);
 /* Deactivates every hook inside [load_seg, load_seg + paragraphs). */
 void lift_module_unloaded(Machine *m, uint16_t load_seg, uint32_t paragraphs);
 

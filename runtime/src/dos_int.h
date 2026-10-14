@@ -8,6 +8,7 @@
 
 #include <sys/types.h>
 
+#include "borland_overlay.h"
 #include "dos.h"
 #include "machine.h"
 
@@ -103,6 +104,14 @@ typedef struct DosPath {
     DosDevice dev;   /* reserved device name (CON, NUL, ...) */
 } DosPath;
 
+/* The overlays of the last overlaid program whose own EXE was read (dos_modules.c). */
+enum { DOS_OVERLAYS_MAX = 160 };
+typedef struct DosOverlayCache {
+    char dos_path[DOS_PATH_MAX]; /* "" when empty */
+    int count;                    /* 0: the file has no overlays */
+    BorlandOverlay list[DOS_OVERLAYS_MAX];
+} DosOverlayCache;
+
 typedef struct DosState {
     char host_root[HOST_PATH_MAX];
     char cwd[DOS_PATH_MAX]; /* of C:, "\" or "\DIR\SUB" */
@@ -126,6 +135,7 @@ typedef struct DosState {
     char in_ready[258];   /* completed line waiting to be consumed by handle reads */
     int ready_len, ready_pos;
     time_t base_time;     /* host clock at init; DOS time advances with virtual_us */
+    DosOverlayCache overlays;
 } DosState;
 
 static inline DosState *dos_state(Machine *m) { return (DosState *)m->dos; }

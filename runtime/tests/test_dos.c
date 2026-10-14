@@ -9,7 +9,9 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "borland_overlay.h"
 #include "dos_int.h"
+#include "lift.h"
 #include "machine.h"
 
 static int failures;
@@ -550,6 +552,104 @@ static void test_psp_and_env(void)
     finish(m);
 }
 
+
+/* ---- Borland overlays: a program reads overlay code from its own EXE ---- */
+
+enum { OVX_HDR = 0x20, OVX_IMAGE = 0x400, OVX_NAME = 0x100, OVX_TABLE = 0x200, OVX_STUB_SEG = 0x30,
+       OVX_TRAILER = 16, OVX_DATA = 16, OVX_ORIGINAL = 5, OVX_LIFTED = 0x77 };
+
+/* The overlay's code: mov ax, OVX_ORIGINAL / retf. */
+static const uint8_t OVX_CODE[] = { 0xB8, OVX_ORIGINAL, 0x00, 0xCB };
+
+static void lifted_overlay_fn(Machine *m)
+{
+    AX = OVX_LIFTED;
+    lift_ret_far(m, 0);
+}
+
+static LiftedEntry overlay_entries[1];
+
+static void put16(uint8_t *at, unsigned v) { at[0] = (uint8_t)v; at[1] = (uint8_t)(v >> 8); }
+static void put32(uint8_t *at, uint32_t v) { put16(at, v & 0xFFFF); put16(at + 2, v >> 16); }
+
+/* OVL.EXE: opens itself, reads its one overlay into a fresh block, far-calls it, exits with AL. */
+static size_t write_overlaid_exe(uint8_t *exe, size_t cap)
+{
+    size_t module_end = OVX_HDR + OVX_IMAGE, overlay_off = module_end + OVX_TRAILER;
+    size_t len = overlay_off + OVX_DATA;
+    if (len > cap)
+        exit(1);
+    memset(exe, 0, len);
+    Prog p = {.org = 0};
+    e8(&p, 0x0E); e8(&p, 0x1F);                                  /* push cs / pop ds */
+    mov_imm(&p, R_DX, OVX_NAME); dos(&p, 0x3D00); ok(&p, 1);
+    mov_rr(&p, R_BX, R_AX);
+    mov_imm(&p, R_CX, (unsigned)(overlay_off >> 16)); mov_imm(&p, R_DX, overlay_off & 0xFFFF);
+    dos(&p, 0x4200); ok(&p, 2);
+    e8(&p, 0x53);                                                /* push bx */
+    mov_imm(&p, R_BX, 0x10); dos(&p, 0x4800); ok(&p, 3);
+    e8(&p, 0x5B);                                                /* pop bx */
+    mov_sreg(&p, SR_DS, R_AX);
+    mov_imm(&p, R_CX, sizeof OVX_CODE); mov_imm(&p, R_DX, 0); dos(&p, 0x3F00); ok(&p, 4);
+    e8(&p, 0x0E);                                                /* push cs */
+    e8(&p, 0xB8); uint16_t ret_imm = p.pc; e16(&p, 0);            /* mov ax, back */
+    e8(&p, 0x50); e8(&p, 0x1E);                                  /* push ax / push ds */
+    mov_imm(&p, R_AX, 0); e8(&p, 0x50); e8(&p, 0xCB);            /* push 0 / retf */
+    put16(p.b + ret_imm, p.pc);
+    e8(&p, 0xB4); e8(&p, 0x4C); int21(&p);                       /* back: exit with AL */
+    memcpy(exe + OVX_HDR, p.b, p.pc);
+    memcpy(exe + OVX_HDR + OVX_NAME, "OVL.EXE", 8);
+    uint8_t *row = exe + OVX_HDR + OVX_TABLE;                    /* segment table: one stub */
+    put16(row, OVX_STUB_SEG); put16(row + 2, 0x25); put16(row + 4, 3);
+    uint8_t *stub = exe + OVX_HDR + OVX_STUB_SEG * 16;
+    stub[0] = 0xCD; stub[1] = 0x3F;
+    put32(stub + 4, 0); put16(stub + 8, sizeof OVX_CODE); put16(stub + 10, 0); put16(stub + 12, 1);
+    memcpy(exe + module_end, "FBOV", 4);
+    put32(exe + module_end + 4, OVX_DATA); put32(exe + module_end + 8, OVX_HDR + OVX_TABLE);
+    put32(exe + module_end + 12, 1);
+    memcpy(exe + overlay_off, OVX_CODE, sizeof OVX_CODE);
+    const uint16_t hdr[] = {0x5A4D, module_end % 512, (module_end + 511) / 512, 0, OVX_HDR / 16, 0x20,
+                            0x20, 0x50, 0x100, 0, 0, 0, 0x1C, 0};
+    for (size_t i = 0; i < sizeof hdr / sizeof hdr[0]; i++)
+        put16(exe + i * 2, hdr[i]);
+    write_host("OVL.EXE", exe, len);
+    return len;
+}
+
+static int run_overlaid(bool with_lift)
+{
+    Machine *m = new_machine();
+    if (with_lift) {
+        overlay_entries[0] = (LiftedEntry){ .module = "OVL.EXE#0030", .fn = lifted_overlay_fn,
+                                            .name = "overlay_fn", .scratch_regs = LIFT_REG_FLAGS,
+                                            .unknown_mask = 0xFFF & ~0xFu }; /* past the code */
+        memcpy(overlay_entries[0].signature, OVX_CODE, sizeof OVX_CODE);
+        lift_add_table(m, overlay_entries, 1);
+    }
+    CHECK(dos_start_program(m, "C:\\OVL.EXE", NULL));
+    for (int i = 0; i < 100000 && !m->exit_requested; i++)
+        machine_step(m); /* dispatches hooks, which cpu_run alone leaves pending */
+    int code = m->exit_requested ? m->exit_code : -1;
+    dos_shutdown(m);
+    machine_destroy(m);
+    return code;
+}
+
+static void test_overlays(void)
+{
+    make_root("overlay");
+    static uint8_t exe[OVX_HDR + OVX_IMAGE + OVX_TRAILER + OVX_DATA];
+    size_t len = write_overlaid_exe(exe, sizeof exe);
+    BorlandOverlay list[4];
+    CHECK(borland_overlays_parse(exe, len, list, 4) == 1);
+    CHECK(list[0].stub_seg == OVX_STUB_SEG && list[0].file_off == OVX_HDR + OVX_IMAGE + OVX_TRAILER);
+    CHECK(list[0].code_bytes == sizeof OVX_CODE && list[0].fixup_bytes == 0);
+    CHECK(borland_overlays_parse(exe, OVX_HDR + OVX_IMAGE, list, 4) == 0); /* no trailer */
+    CHECK(run_overlaid(false) == OVX_ORIGINAL);
+    CHECK(run_overlaid(true) == OVX_LIFTED);
+    remove_tree(root);
+}
+
 int main(void)
 {
     test_allocator();
@@ -558,6 +658,7 @@ int main(void)
     test_journal();
     test_memory_program();
     test_exec();
+    test_overlays();
     if (failures)
         fprintf(stderr, "test_dos: %d failure(s)\n", failures);
     else

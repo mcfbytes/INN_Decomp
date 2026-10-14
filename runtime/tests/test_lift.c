@@ -84,6 +84,76 @@ static Run run_program(LiftedFn fn, uint16_t off, bool near, bool good_signature
     return run_program_ex(fn, off, near, good_signature, verify, false);
 }
 
+
+/* ---- overlays: code that an overlay manager reads into a reused buffer ---- */
+
+enum { OV_A = 0x3000, OV_B = 0x4000, OV_PROGRAM_SEG = 0x1200, OV_LIFTED = 0x9999 };
+
+/* mov ax, 0034h + program segment (a relocated word, as in the file) / retf */
+static const uint8_t OV_FILE_CODE[] = { 0xB8, 0x34, 0x00, 0xCB };
+
+static void lifted_overlay(Machine *m)
+{
+    AX = OV_LIFTED;
+    lift_ret_far(m, 0);
+}
+
+static void place_overlay(Machine *m, uint16_t seg, uint16_t program_seg)
+{
+    memcpy(m->mem + real_addr(seg, 0), OV_FILE_CODE, sizeof OV_FILE_CODE);
+    mem_wr16(m, real_addr(seg, 1), (uint16_t)(0x34 + program_seg)); /* the manager applies the fixup */
+}
+
+/* Far-calls seg:0 from a stub and returns AX. */
+static uint16_t call_overlay(Machine *m, uint16_t seg)
+{
+    const uint8_t stub[] = { 0x9A, 0x00, 0x00, (uint8_t)seg, (uint8_t)(seg >> 8), 0xF4 };
+    memcpy(m->mem + real_addr(CODE_SEG, 0), stub, sizeof stub);
+    cpu_set_seg(&m->cpu, S_CS, CODE_SEG);
+    cpu_set_seg(&m->cpu, S_SS, STACK_SEG);
+    SP = 0x100;
+    m->cpu.eip = 0;
+    m->cpu.halted = false;
+    AX = 0;
+    for (int i = 0; i < 100 && !m->cpu.halted; i++)
+        machine_step(m);
+    CHECK(m->cpu.halted && SP == 0x100, "overlay call returned");
+    return AX;
+}
+
+static void test_overlays(void)
+{
+    static LiftedEntry ov[1];
+    ov[0] = (LiftedEntry){ .module = "PROG.EXE#0010", .fn = lifted_overlay, .name = "ov", .scratch_regs = LIFT_REG_FLAGS,
+                           .reloc_mask = 1 << 1, .unknown_mask = 0xFFF & ~0xFu };
+    memcpy(ov[0].signature, OV_FILE_CODE, sizeof OV_FILE_CODE);
+    Machine *m = machine_create();
+    m->cpu.flags &= ~F_IF;
+    lift_add_table(m, ov, 1);
+    uint16_t original = 0x34 + OV_PROGRAM_SEG;
+
+    place_overlay(m, OV_A, OV_PROGRAM_SEG);
+    lift_overlay_loaded(m, "PROG.EXE#0010", OV_A, sizeof OV_FILE_CODE, OV_PROGRAM_SEG);
+    CHECK(call_overlay(m, OV_A) == OV_LIFTED, "overlay entry hooked where it was read");
+
+    place_overlay(m, OV_B, OV_PROGRAM_SEG);
+    lift_overlay_loaded(m, "PROG.EXE#0010", OV_B, sizeof OV_FILE_CODE, OV_PROGRAM_SEG);
+    CHECK(call_overlay(m, OV_A) == original, "reloading elsewhere disarms the old copy");
+    CHECK(call_overlay(m, OV_B) == OV_LIFTED, "and arms the new one");
+
+    mem_wr16(m, real_addr(OV_B, 1), 0x0055);
+    CHECK(call_overlay(m, OV_B) == 0x0055, "other bytes at the entry run the original");
+    place_overlay(m, OV_B, OV_PROGRAM_SEG);
+    CHECK(call_overlay(m, OV_B) == OV_LIFTED, "entry bytes are checked on every call");
+
+    lift_overlay_loaded(m, "PROG.EXE#0020", OV_B, 0x100, OV_PROGRAM_SEG);
+    CHECK(call_overlay(m, OV_B) == original, "another overlay read over it evicts it");
+
+    lift_overlay_loaded(m, "PROG.EXE#0010", OV_B, sizeof OV_FILE_CODE, OV_PROGRAM_SEG + 1);
+    CHECK(call_overlay(m, OV_B) == original, "fixups are checked against the program segment");
+    machine_destroy(m);
+}
+
 int main(void)
 {
     enum { ORIGINAL_RESULT = 5 * 2 + 1, LIFTED_F_RESULT = 5 * 3 + 1 + 100 };
@@ -107,6 +177,7 @@ int main(void)
     r = run_program(lifted_f, F_OFF, false, true, false);
     CHECK(r.ax == LIFTED_F_RESULT, "INN_LIFT_ONLY with the name hooks it (AX=%u)", r.ax);
     unsetenv("INN_LIFT_ONLY");
+    test_overlays();
     if (failures)
         fprintf(stderr, "%d check(s) failed\n", failures);
     return failures != 0;
