@@ -63,12 +63,23 @@ serial bytes both ways, received bytes queue in a growing inbox until the UART p
 (return 0) while connecting, and DCD/DSR/CTS follow the socket state as with the TCP link. `--com1` picks
 it for `ws://` and `wss://` specs; the native build returns an error for those.
 
+## The page
+
+`shell.html` and `page.js` are a single-page app around the canvas; the DOS screens themselves are
+unchanged. Setup is one card: drop the INN folder or a zip anywhere on the page (dropped folders are
+walked with `webkitGetAsEntry`), or use the folder and zip pickers, then Connect. While running, the
+app bar shows the COM1 state (taken from the runtime's `uart: websocket ...` log lines), mute (suspends
+SDL's `AudioContext`), full screen, and a settings drawer with the display mode, storage, and the log.
+When the client exits, an overlay offers to start again. Light and dark follow the system setting.
+
 ## Keyboard and screen
 
 SDL listens for keys on `#canvas` only (`SDL_HINT_EMSCRIPTEN_KEYBOARD_ELEMENT`), so the page's own fields
 keep working. The canvas takes focus at start and on mouse down, and a hint shows while it does not have
-focus. The canvas is 960x720 and CSS scales it at 4:3 to fit the window; right-click is the guest's right
-button, so the context menu is suppressed.
+focus. The canvas is 960x720 and CSS scales it at 4:3 to fit the window (container query units); right-click
+is the guest's right button, so the context menu is suppressed. Display modes: Sharp (nearest-neighbour),
+Smooth (browser filtering) and CRT (filtering plus a 200-line scanline overlay); the choice is kept in
+`localStorage`.
 
 ## Performance
 

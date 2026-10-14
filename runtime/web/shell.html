@@ -3,82 +3,285 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
 <title>ImagiNation Network</title>
-<link rel="icon" href="data:,">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23e8a33d'/%3E%3Cpath d='M9 22V10h3v12zm6 0V10h3l4 7v-7h2v12h-3l-4-7v7z' fill='%23231a10'/%3E%3C/svg%3E">
 <style>
-  :root { --bg: #14121a; --panel: #211e2b; --text: #e8e4f0; --muted: #a49db5; --accent: #3fb6a8;
-          --danger: #c0504d; --border: #3a3548; }
+  :root {
+    --bg: #0f0e13; --bg-2: #17151d; --surface: #1d1a25; --surface-2: #262230; --border: #322d3f;
+    --text: #ece8f4; --muted: #9d96ad; --faint: #6c6680;
+    --accent: #e8a33d; --accent-ink: #231a10; --accent-soft: rgba(232, 163, 61, .14);
+    --ok: #4cc38a; --warn: #e8a33d; --bad: #e5575b;
+    --radius: 14px; --shadow: 0 24px 60px -20px rgba(0, 0, 0, .7), 0 2px 6px rgba(0, 0, 0, .35);
+    --bar-h: 56px;
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --bg: #f4f1ea; --bg-2: #ebe6db; --surface: #ffffff; --surface-2: #f6f3ed; --border: #e0d9cb;
+      --text: #1f1b16; --muted: #6b6255; --faint: #9a9081; --accent-soft: rgba(232, 163, 61, .18);
+      --shadow: 0 24px 60px -24px rgba(60, 40, 10, .35), 0 2px 6px rgba(60, 40, 10, .08);
+    }
+  }
   * { box-sizing: border-box; }
-  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
-               font: 15px/1.45 system-ui, sans-serif; }
-  header { display: flex; align-items: baseline; gap: 16px; padding: 8px 16px; flex-wrap: wrap; }
-  header h1 { font-size: 17px; margin: 0; font-weight: 600; }
-  #status { color: var(--muted); font-size: 13px; }
-  main { padding: 0 16px 16px; }
-  #setup { max-width: 640px; margin: 24px auto; background: var(--panel); border: 1px solid var(--border);
-           border-radius: 8px; padding: 20px; }
-  #setup h2 { font-size: 16px; margin: 0 0 12px; }
-  #setup p { color: var(--muted); margin: 6px 0 14px; font-size: 14px; }
-  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 10px 0; }
-  label.pick { border: 1px dashed var(--border); border-radius: 6px; padding: 8px 12px; cursor: pointer; }
-  label.pick:hover { border-color: var(--accent); }
-  label.pick input { display: none; }
-  #com1 { flex: 1; min-width: 220px; background: var(--bg); color: var(--text);
-                     border: 1px solid var(--border); border-radius: 6px; padding: 7px 9px; font: inherit; }
-  button { background: var(--accent); color: #0b1514; border: 0; border-radius: 6px; padding: 8px 18px;
-           font: inherit; font-weight: 600; cursor: pointer; }
-  button:disabled { opacity: .4; cursor: default; }
-  button.quiet { background: transparent; color: var(--danger); border: 1px solid var(--danger); font-weight: 400; }
-  #install-state { font-size: 14px; }
-  #screen { display: none; position: relative; margin: 0 auto;
-            width: min(100%, calc((100vh - 60px) * 4 / 3)); aspect-ratio: 4 / 3; }
-  #canvas { display: block; width: 100%; height: 100%; background: #000; image-rendering: pixelated;
-            outline: none; }
-  #focus-hint { position: absolute; inset: auto 0 8px 0; text-align: center; pointer-events: none;
-                color: #fff; text-shadow: 0 1px 3px #000; font-size: 14px; display: none; }
-  #screen.blurred #focus-hint { display: block; }
-  details { max-width: 960px; margin: 12px auto 0; color: var(--muted); font-size: 13px; }
-  #log { max-height: 240px; overflow: auto; background: #0c0b10; padding: 8px; border-radius: 6px;
-         white-space: pre-wrap; margin: 6px 0 0; }
-  @media (max-width: 480px) { #setup { padding: 14px; margin: 12px 0; } }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: radial-gradient(1200px 600px at 50% -10%, var(--accent-soft), transparent 60%), var(--bg);
+    color: var(--text); font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  button, input { font: inherit; color: inherit; }
+  [hidden] { display: none !important; }
+
+  /* ---- app bar ---- */
+  .bar { height: var(--bar-h); flex: none; display: flex; align-items: center; gap: 12px; padding: 0 16px;
+         border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--bg) 82%, transparent);
+         backdrop-filter: blur(10px); }
+  .brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .logo { width: 30px; height: 30px; border-radius: 8px; flex: none; display: grid; place-items: center;
+          background: linear-gradient(135deg, #f3c068, var(--accent) 55%, #c9772a); color: var(--accent-ink);
+          font-weight: 800; font-size: 11px; letter-spacing: -.03em; box-shadow: inset 0 1px 0 rgba(255,255,255,.35); }
+  .brand-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.15; }
+  .brand-text b { font-size: 15px; font-weight: 650; letter-spacing: -.01em; white-space: nowrap; }
+  #status { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .spacer { flex: 1; }
+  .pill { display: inline-flex; align-items: center; gap: 7px; height: 28px; padding: 0 11px; border-radius: 999px;
+          font-size: 12.5px; color: var(--muted); background: var(--surface); border: 1px solid var(--border);
+          white-space: nowrap; }
+  .pill i { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); }
+  .pill[data-state="connecting"] i { background: var(--warn); animation: pulse 1.2s ease-in-out infinite; }
+  .pill[data-state="online"] i { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 25%, transparent); }
+  .pill[data-state="offline"] i { background: var(--bad); }
+  @keyframes pulse { 50% { opacity: .35; } }
+  .icon-btn { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 10px; border: 0;
+              background: transparent; color: var(--muted); cursor: pointer; flex: none; }
+  .icon-btn:hover { background: var(--surface-2); color: var(--text); }
+  .icon-btn:focus-visible, .btn:focus-visible, .seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .icon-btn svg { width: 20px; height: 20px; }
+  .icon-btn[aria-pressed="true"] { color: var(--accent); }
+
+  /* ---- main area ---- */
+  main { flex: 1; min-height: 0; position: relative; display: grid; place-items: center; padding: 20px 16px; overflow: auto; }
+
+  /* onboarding */
+  .card { width: min(560px, 100%); background: var(--surface); border: 1px solid var(--border);
+          border-radius: 20px; box-shadow: var(--shadow); padding: 28px; }
+  .card h1 { margin: 0 0 6px; font-size: 22px; letter-spacing: -.02em; font-weight: 700; }
+  .card .lede { margin: 0 0 22px; color: var(--muted); font-size: 14.5px; }
+  .drop { position: relative; border: 1.5px dashed var(--border); border-radius: var(--radius); padding: 26px 18px;
+          text-align: center; background: var(--surface-2); transition: border-color .15s, background .15s; }
+  .drop.over { border-color: var(--accent); background: var(--accent-soft); }
+  .drop svg { width: 36px; height: 36px; color: var(--accent); }
+  .drop .title { font-weight: 600; margin: 8px 0 2px; }
+  .drop .hint { font-size: 13px; color: var(--muted); margin: 0 0 14px; }
+  .drop-actions { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+  .install { display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-radius: var(--radius);
+             background: var(--surface-2); border: 1px solid var(--border); }
+  .install .check { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; flex: none;
+                    background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
+  .install .check svg { width: 18px; height: 18px; }
+  .install .what { flex: 1; min-width: 0; }
+  .install .what b { display: block; font-weight: 600; font-size: 14.5px; }
+  .install .what span { font-size: 13px; color: var(--muted); }
+  .field { margin-top: 18px; }
+  .field label { display: block; font-size: 12.5px; font-weight: 600; color: var(--muted); margin: 0 0 6px;
+                 text-transform: uppercase; letter-spacing: .05em; }
+  .input { width: 100%; height: 40px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--border);
+           background: var(--bg-2); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13.5px; }
+  .input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .toggle { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 16px;
+            font-size: 14px; cursor: pointer; }
+  .toggle small { display: block; color: var(--muted); font-size: 12.5px; }
+  .switch { position: relative; width: 40px; height: 24px; flex: none; }
+  .switch input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+  .switch span { position: absolute; inset: 0; border-radius: 999px; background: var(--border); transition: background .15s; pointer-events: none; }
+  .switch span::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%;
+                        background: #fff; transition: transform .15s; box-shadow: 0 1px 2px rgba(0,0,0,.3); }
+  .switch input:checked + span { background: var(--accent); }
+  .switch input:checked + span::after { transform: translateX(16px); }
+  .switch input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .switch input:disabled + span { opacity: .4; }
+  .btn { height: 38px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface);
+         font-weight: 600; font-size: 14px; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; }
+  .btn:hover { background: var(--surface-2); }
+  .btn.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+  .btn.primary:hover { filter: brightness(1.06); }
+  .btn.big { height: 46px; width: 100%; justify-content: center; font-size: 15.5px; margin-top: 22px; border-radius: 12px; }
+  .btn.danger { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, var(--border)); background: transparent; }
+  .btn:disabled { opacity: .45; cursor: default; filter: none; }
+  .btn svg { width: 16px; height: 16px; }
+  .fine { margin: 16px 0 0; font-size: 12.5px; color: var(--faint); text-align: center; }
+
+  /* game stage */
+  #stage { position: absolute; inset: 0; display: grid; place-items: center; padding: 20px; container-type: size; }
+  .frame { position: relative; width: min(100cqw, 100cqh * 4 / 3); aspect-ratio: 4 / 3; border-radius: 12px; overflow: hidden; background: #000; box-shadow: var(--shadow);
+           outline: 1px solid rgba(255,255,255,.06); }
+  #canvas { display: block; width: 100%; height: 100%; outline: none; image-rendering: pixelated; cursor: default; }
+  #stage[data-scale="smooth"] #canvas, #stage[data-scale="crt"] #canvas { image-rendering: auto; }
+  .crt { position: absolute; inset: 0; pointer-events: none; display: none;
+         background: repeating-linear-gradient(to bottom, rgba(0,0,0,0) 0, rgba(0,0,0,0) 50%, rgba(0,0,0,.22) 50%, rgba(0,0,0,.22) 100%) 0 0 / 100% calc(100% / 200),
+                     radial-gradient(ellipse at center, transparent 62%, rgba(0,0,0,.42) 100%); }
+  #stage[data-scale="crt"] .crt { display: block; }
+  #stage[data-scale="crt"] #canvas { filter: saturate(1.08) contrast(1.04); }
+  .chip { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); padding: 7px 14px; border-radius: 999px;
+          background: rgba(15, 14, 19, .78); color: #fff; font-size: 13px; pointer-events: none; backdrop-filter: blur(6px);
+          opacity: 0; transition: opacity .2s; white-space: nowrap; }
+  .frame.blurred .chip { opacity: 1; }
+  .overlay { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(10, 9, 13, .72);
+             backdrop-filter: blur(3px); text-align: center; color: #fff; padding: 20px; }
+  .overlay h2 { margin: 0 0 6px; font-size: 20px; }
+  .overlay p { margin: 0 0 16px; color: #c9c3d6; font-size: 14px; }
+  body.fullscreen .bar { display: none; }
+  body.fullscreen #stage { padding: 0; }
+  body.fullscreen .frame { border-radius: 0; box-shadow: none; outline: 0; }
+
+  /* settings drawer */
+  .scrim { position: fixed; inset: 0; background: rgba(0,0,0,.45); opacity: 0; pointer-events: none; transition: opacity .2s; z-index: 10; }
+  .drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(400px, 100%); z-index: 11; background: var(--surface);
+            border-left: 1px solid var(--border); box-shadow: var(--shadow); transform: translateX(102%);
+            transition: transform .22s cubic-bezier(.2,.8,.2,1); display: flex; flex-direction: column; }
+  body.drawer-open .scrim { opacity: 1; pointer-events: auto; }
+  body.drawer-open .drawer { transform: none; }
+  .drawer header { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px 14px 20px;
+                   border-bottom: 1px solid var(--border); }
+  .drawer header h2 { margin: 0; font-size: 16px; }
+  .drawer .body { flex: 1; overflow: auto; padding: 4px 20px 24px; }
+  .drawer section { padding: 16px 0; border-bottom: 1px solid var(--border); }
+  .drawer section:last-child { border-bottom: 0; }
+  .drawer h3 { margin: 0 0 10px; font-size: 12.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+  .drawer .note { font-size: 13px; color: var(--muted); margin: 8px 0 0; }
+  .seg { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 4px; background: var(--bg-2);
+         border: 1px solid var(--border); border-radius: 11px; }
+  .seg button { height: 32px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); cursor: pointer; font-size: 13.5px; }
+  .seg button[aria-checked="true"] { background: var(--surface); color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,.25); font-weight: 600; }
+  #log { margin: 0; height: 260px; overflow: auto; padding: 10px 12px; border-radius: 10px; background: #0a090d; color: #bdb6cc;
+         font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; word-break: break-word;
+         border: 1px solid var(--border); }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+
+  /* toasts */
+  #toasts { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); display: flex; flex-direction: column;
+            gap: 8px; z-index: 20; width: min(440px, calc(100% - 32px)); }
+  .toast { padding: 12px 14px; border-radius: 12px; background: var(--surface); border: 1px solid var(--border);
+           box-shadow: var(--shadow); font-size: 14px; display: flex; gap: 10px; align-items: flex-start;
+           animation: rise .2s ease-out; }
+  .toast i { width: 8px; height: 8px; border-radius: 50%; margin-top: 7px; flex: none; background: var(--accent); }
+  .toast.bad i { background: var(--bad); }
+  .toast.ok i { background: var(--ok); }
+  @keyframes rise { from { transform: translateY(8px); opacity: 0; } }
+
+  @media (max-width: 560px) {
+    .card { padding: 20px; border-radius: 16px; }
+    .brand-text #status, .pill span { display: none; }
+    .pill { padding: 0 9px; }
+    #stage { padding: 8px; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
 </style>
 </head>
 <body>
-<header>
-  <h1>ImagiNation Network</h1>
-  <span id="status">Loading the runtime...</span>
-</header>
-<main>
-  <section id="setup">
-    <h2>Your INN installation</h2>
-    <p>This page runs the original DOS client. It needs your own installed copy: pick a .zip of the
-       INN directory or the directory itself. The files stay in this browser.</p>
-    <div class="row">
-      <label class="pick">Choose .zip<input id="pick-zip" type="file" accept=".zip,application/zip"></label>
-      <label class="pick">Choose folder<input id="pick-dir" type="file" webkitdirectory multiple></label>
-    </div>
-    <div class="row" id="install-state">No installation loaded.</div>
-    <div class="row">
-      <label><input id="remember" type="checkbox" checked> Remember the installation and player files in this browser</label>
-    </div>
-    <div class="row">
-      <label for="com1">Server</label>
-      <input id="com1" type="text" spellcheck="false" autocomplete="off">
-    </div>
-    <div class="row">
-      <button id="start" disabled>Start</button>
-      <button id="forget" class="quiet" hidden>Forget saved installation</button>
-    </div>
-  </section>
-  <div id="screen">
-    <canvas id="canvas" tabindex="0"></canvas>
-    <div id="focus-hint">Click the screen to type</div>
+<header class="bar">
+  <div class="brand">
+    <div class="logo" aria-hidden="true">INN</div>
+    <div class="brand-text"><b>ImagiNation Network</b><span id="status">Loading the runtime...</span></div>
   </div>
-  <details>
-    <summary>Log</summary>
-    <pre id="log"></pre>
-  </details>
+  <div class="spacer"></div>
+  <div class="pill" id="link" data-state="idle" title="Connection to the server"><i></i><span id="link-text">Not connected</span></div>
+  <button class="icon-btn" id="sound" title="Mute sound" aria-label="Mute sound" aria-pressed="false" hidden>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H2v6h4l5 4z"/><path class="wave" d="M15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14"/><path class="mute" d="m22 9-6 6m0-6 6 6" hidden/></svg>
+  </button>
+  <button class="icon-btn" id="fullscreen" title="Full screen" aria-label="Full screen" hidden>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+  </button>
+  <button class="icon-btn" id="open-settings" title="Settings" aria-label="Settings" aria-controls="drawer">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21v-7m0-4V3m8 18v-9m0-4V3m8 18v-5m0-4V3M1 14h6m2-6h6m2 8h6"/></svg>
+  </button>
+</header>
+
+<main>
+  <section class="card" id="setup" aria-labelledby="setup-title">
+    <h1 id="setup-title">Welcome back to the Network</h1>
+    <p class="lede">This runs your own copy of the original INN client in the browser. Add your INN folder once; its files stay on this device.</p>
+
+    <div class="drop" id="drop">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 11v5m-2.5-2.5L12 11l2.5 2.5"/></svg>
+      <p class="title">Drop your INN folder or a .zip of it here</p>
+      <p class="hint">The folder that contains TSNEXEC.EXE</p>
+      <div class="drop-actions">
+        <label class="btn"><input id="pick-dir" type="file" webkitdirectory multiple hidden>Choose folder</label>
+        <label class="btn"><input id="pick-zip" type="file" accept=".zip,application/zip" hidden>Choose .zip</label>
+      </div>
+    </div>
+
+    <div class="install" id="install" hidden>
+      <div class="check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg></div>
+      <div class="what"><b>INN installation ready</b><span id="install-state"></span></div>
+      <button class="btn" id="change">Change</button>
+    </div>
+
+    <div class="field">
+      <label for="com1">Server</label>
+      <input class="input" id="com1" type="text" spellcheck="false" autocomplete="off" placeholder="ws://localhost:2316">
+    </div>
+    <label class="toggle">
+      <span>Remember on this device<small>Keeps the installation and your player files between visits</small></span>
+      <span class="switch"><input id="remember" type="checkbox" checked><span></span></span>
+    </label>
+
+    <button class="btn primary big" id="start" disabled>
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15a1 1 0 0 0 1.5.86l12.5-7.5a1 1 0 0 0 0-1.72L8.5 3.64A1 1 0 0 0 7 4.5z"/></svg>
+      Connect
+    </button>
+    <p class="fine">No Sierra files are included with this page.</p>
+  </section>
+
+  <div id="stage" hidden>
+    <div class="frame" id="frame">
+      <canvas id="canvas" tabindex="0" aria-label="INN screen"></canvas>
+      <div class="crt"></div>
+      <div class="chip">Click the screen to use the keyboard</div>
+      <div class="overlay" id="ended" hidden>
+        <div><h2>Session ended</h2><p id="ended-text">The client has exited.</p>
+          <button class="btn primary" id="restart">Start again</button></div>
+      </div>
+    </div>
+  </div>
 </main>
+
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer" aria-label="Settings" inert>
+  <header><h2>Settings</h2>
+    <button class="icon-btn" id="close-settings" aria-label="Close settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
+    </button>
+  </header>
+  <div class="body">
+    <section>
+      <h3>Display</h3>
+      <div class="seg" role="radiogroup" aria-label="Scaling" id="scale">
+        <button role="radio" data-scale="sharp" aria-checked="true">Sharp</button>
+        <button role="radio" data-scale="smooth" aria-checked="false">Smooth</button>
+        <button role="radio" data-scale="crt" aria-checked="false">CRT</button>
+      </div>
+      <p class="note">The picture keeps the original 4:3 shape at any window size. Sharp keeps hard pixel edges, Smooth softens them, and CRT adds scanlines like a period monitor.</p>
+    </section>
+    <section>
+      <h3>Connection</h3>
+      <div id="server-now" class="note" style="margin-top:0"></div>
+    </section>
+    <section>
+      <h3>Storage</h3>
+      <div class="note" id="storage-note" style="margin-top:0"></div>
+      <div class="row"><button class="btn danger" id="forget" hidden>Forget saved installation</button></div>
+    </section>
+    <section>
+      <h3>Log</h3>
+      <pre id="log"></pre>
+      <div class="row"><button class="btn" id="copy-log">Copy log</button></div>
+    </section>
+  </div>
+</aside>
+<div id="toasts" aria-live="polite"></div>
+
 <script src="zip.js"></script>
 <script src="page.js"></script>
 {{{ SCRIPT }}}
