@@ -142,6 +142,31 @@ current directory). Host file deletions, renames, creations and growth are journ
 between the two runs. Known limits: bytes written to host files are written by both runs and not restored; devices other than VGA (PIT, UART, OPL) see only the original run's I/O, which is the
 intended behaviour.
 
+## Semantic port comparison
+
+In a hybrid-hw build (`-DINN_NATIVE_HW=ON`) a converted driver function does not touch ports: its device
+backend calls `lift_semantic_event` / `lift_semantic_read` (`runtime/src/lift_semantic.h`). Shadow
+verification then compares by meaning (`INN_VERIFY_SEMANTIC=0` turns it off there; `=1` turns it on in a
+hybrid build, where it must agree with the raw comparison). Both runs are reduced to the same events:
+
+| Device | Port accesses | Event |
+|---|---|---|
+| OPL (388h, 228h, 220h, 222h) | index write, then the data write at the next port; status reads dropped | `SEM_OPL_WRITE` |
+| VGA DAC | 3C8h write sets the write index, every third 3C9h write; 3C7h write sets the read index, every third 3C9h read | `SEM_DAC_SET`, `SEM_DAC_GET` |
+| CRTC | 3D4h index 0Ch and 0Dh with their 3D5h data | one `SEM_CRTC_START` after both |
+| PIT | 43h control for channel 0 (lobyte/hibyte), two 40h writes | `SEM_PIT_DIVISOR` |
+| PIC | 20h/A0h write of 20h; 21h/A1h write (reads dropped) | `SEM_PIC_EOI`, `SEM_PIC_MASK` |
+| keyboard | 60h read; 61h read, write with bit 7 set, write with it clear | `SEM_KBD_DATA`, `SEM_KBD_ACK` |
+
+3DAh reads are dropped; every other access, and a lone 61h access, stays a raw port event. The
+original's side is canonicalised from the recorded port log; the lifted side canonicalises the ports
+it still performs and adds the events its host-API calls report. Raw events and semantic events are
+each compared in order. A difference is logged as `semantic event K: lifted <...>, original <...>` (or
+`port event K: ...`). Reads return the original's value: the n-th read of a kind, or the n-th read of a
+port for raw accesses; a read the original did not make is a mismatch. An unconverted function produces
+the same events on both sides, so it compares as before. Region-mode and device-replay entries keep
+their raw comparison.
+
 ## Device replay
 
 A plain shadow run holds interrupts and devices see only the original's I/O, so an original that waits
