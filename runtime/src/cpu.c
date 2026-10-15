@@ -1409,6 +1409,8 @@ static void trace_insn(Machine *m)
             (unsigned)c->flags & 0xFFFF);
 }
 
+uint32_t *dosrt_interp_profile; /* INN_INTERP_PROFILE: instructions run per 16-byte paragraph */
+
 uint64_t cpu_run(Machine *m, uint64_t budget)
 {
     Cpu *c = &m->cpu;
@@ -1437,6 +1439,8 @@ uint64_t cpu_run(Machine *m, uint64_t budget)
         }
         if (m->trace >= 2)
             trace_insn(m);
+        if (__builtin_expect(dosrt_interp_profile != NULL, 0))
+            dosrt_interp_profile[(linear & 0xFFFFF) >> 4]++;
         exec_one(m);
         done += 1 + c->stall;
         c->instructions += 1 + c->stall; /* kept current: machine_now_ns reads it mid-slice */

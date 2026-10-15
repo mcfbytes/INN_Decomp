@@ -44,6 +44,14 @@ void lift_init(Machine *m)
     const char *coverage = getenv("INN_COVERAGE");
     if (coverage && *coverage)
         lift_coverage_enable(m, coverage);
+    const char *direct = getenv("INN_DIRECT_CALLS");
+    bool direct_all = !direct || !*direct || *direct == '1';
+    lift_state(m)->direct = direct_all || (direct && *direct == '2');
+    lift_state(m)->direct_cb = direct_all || (direct && *direct == '3');
+    const char *prof = getenv("INN_INTERP_PROFILE");
+    if (prof && *prof) {
+        dosrt_interp_profile = calloc(MEM_ONE_MEG / 16, sizeof *dosrt_interp_profile);
+    }
     const char *synth = getenv("INN_SYNTH");
     if (synth && *synth)
         lift_synth_load(m, synth);
@@ -87,8 +95,39 @@ static void log_verify_summary(LiftState *s)
                 log_verify_line(&s->tables[t].entries[i], &s->tables[t].stats[i]);
 }
 
+/* Where the interpreter still ran, by 16-byte paragraph, with the modules' load segments. */
+static void write_direct_counts(FILE *f, const LiftState *s)
+{
+    fprintf(f, "direct %llu fallbacks %llu callbacks %llu thunks %llu returns %llu\n",
+            (unsigned long long)s->direct_calls, (unsigned long long)s->direct_fallbacks,
+            (unsigned long long)s->direct_callbacks, (unsigned long long)s->direct_thunks,
+            (unsigned long long)s->direct_returns);
+}
+
+static void write_interp_profile(Machine *m)
+{
+    const char *path = getenv("INN_INTERP_PROFILE");
+    if (!dosrt_interp_profile || !path)
+        return;
+    FILE *f = fopen(path, "w");
+    if (!f)
+        return;
+    LiftState *s = lift_state(m);
+    for (int i = 0; s && i < s->module_count; i++)
+        fprintf(f, "module %s %04X\n", s->modules[i].name, s->modules[i].load_seg);
+    if (s)
+        write_direct_counts(f, s);
+    for (uint32_t p = 0; p < MEM_ONE_MEG / 16; p++)
+        if (dosrt_interp_profile[p])
+            fprintf(f, "%05X %u\n", p, dosrt_interp_profile[p]);
+    fclose(f);
+}
+
 void lift_shutdown(Machine *m)
 {
+    write_interp_profile(m);
+    if (m->lift && getenv("INN_DIRECT_STATS"))
+        write_direct_counts(stderr, lift_state(m));
     lift_coverage_write(m);
     if (m->lift && lift_state(m)->verify)
         log_verify_summary(lift_state(m));
@@ -381,18 +420,213 @@ void lift_run_nested(Machine *m, uint32_t return_linear, uint16_t return_sp, boo
     s->nesting--;
 }
 
+/* An interrupt the CPU would take at the callee's first instruction boundary. */
+static bool irq_due(const Machine *m)
+{
+    return (m->cpu.flags & F_IF) && m->irq_pending && !m->irq_hold && !m->irq_gate;
+}
+
+/* Runs the lifted function at linear as a plain C call, as lift_dispatch would from the CPU loop;
+ * false when the target is not an active lifted entry (the CPU must run it). */
+static bool call_lifted_direct(Machine *m, LiftState *s, uint32_t linear)
+{
+    if (linear >= MEM_ONE_MEG || !lift_hooked(m, linear))
+        return false;
+    if (irq_due(m))
+        return false; /* the CPU takes it at the entry's instruction boundary, as before */
+    if (s->synth && !s->in_shadow)
+        lift_synth_reached(m, linear);
+    ActiveHook *h = find_hook(s, linear);
+    if (!h || !signature_matches(m, h))
+        return false;
+    s->direct_calls++;
+    /* The CPU path cost at least the hooked instruction and the return stub; a call that costs no
+     * time breaks scripts that time a loop (a speed test divides by the ticks it took). */
+    machine_charge_c(m, m->io_cost_ns);
+    if (!lift_verify_call(m, h))
+        lift_call_c(m, h->entry->fn);
+    return true;
+}
+
+static bool is_service_stub(const Machine *m, uint32_t linear)
+{
+    if (linear < callback_stub_addr(0) || linear >= callback_stub_addr(CALLBACK_MAX))
+        return false;
+    const uint8_t *b = m->mem + linear;
+    return b[0] == 0xFE && b[1] == 0x38 && (b[3] == 0xCF || b[3] == 0xCB);
+}
+
+/* A host service stub (FE 38 id CF/CB) called from lifted code runs its C directly. */
+static bool call_callback_direct(Machine *m, LiftState *s, uint32_t linear)
+{
+    if (!s->direct_cb || m->io_mode != IO_LIVE || m->irq_gate || m->trace)
+        return false;
+    /* The caller's IF is in the frame guest_int pushed; a due IRQ goes through the CPU path. */
+    uint16_t caller_flags = mem_rd16(m, m->cpu.seg_base[S_SS] + (uint16_t)(m->cpu.r[R_SP].w + 4));
+    if ((caller_flags & F_IF) && m->irq_pending && !m->irq_hold)
+        return false;
+    if (!is_service_stub(m, linear))
+        return false;
+    const uint8_t *b = m->mem + linear;
+    if (b[2] >= m->callback_count)
+        return false;
+    if ((int)b[2] == s->return_callback || !m->callbacks[b[2]])
+        return false;
+    machine_charge_c(m, m->io_cost_ns);
+    m->cpu.eip = (m->cpu.eip + 3) & 0xFFFF;
+    if (m->callbacks[b[2]](m) == CB_RETRY) {
+        m->cpu.eip = (m->cpu.eip - 3) & 0xFFFF; /* the CPU retries the stub */
+        return false;
+    }
+    s->direct_callbacks++;
+    uint16_t ip = cpu_pop16(m), cs = cpu_pop16(m);
+    if (b[3] == 0xCF) {
+        uint16_t flags = cpu_pop16(m);
+        m->cpu.flags = (m->cpu.flags & 0xFFFF0000u) | (flags & 0x7FD5u) | 2u;
+    }
+    cpu_set_seg(&m->cpu, S_CS, cs);
+    m->cpu.eip = ip;
+    return true;
+}
+
+/* Jump thunks (a driver's entry JMPs to the body) and bare returns are followed in C; ROM is not. */
+enum { MAX_THUNK_HOPS = 4, DIRECT_ROM_LIMIT = 0xF0000, THUNK_PEEK = 5 };
+
+typedef enum { TARGET_OTHER, TARGET_JUMP, TARGET_RETURN } TargetKind;
+
+/* What the bytes at linear are: a jump (dest set) or a trivial return, else other. */
+static TargetKind classify_target(Machine *m, uint32_t cs_base, uint16_t ip, uint32_t linear, uint32_t *dest_linear,
+                                  uint16_t *dest_cs)
+{
+    if (linear >= DIRECT_ROM_LIMIT)
+        return TARGET_OTHER;
+    uint8_t b[THUNK_PEEK];
+    for (int i = 0; i < THUNK_PEEK; i++)
+        b[i] = mem_rd8(m, linear + (uint32_t)i);
+    *dest_cs = (uint16_t)(cs_base >> 4);
+    uint16_t dest_ip;
+    switch (b[0]) {
+    case 0xE9:
+        dest_ip = (uint16_t)(ip + 3 + (uint16_t)(b[1] | b[2] << 8));
+        break;
+    case 0xEB:
+        dest_ip = (uint16_t)(ip + 2 + (int8_t)b[1]);
+        break;
+    case 0xEA:
+        dest_ip = (uint16_t)(b[1] | b[2] << 8);
+        *dest_cs = (uint16_t)(b[3] | b[4] << 8);
+        break;
+    case 0xC3: case 0xCB: case 0xC2: case 0xCA: case 0xCF:
+        return TARGET_RETURN;
+    default:
+        return TARGET_OTHER;
+    }
+    *dest_linear = ((uint32_t)*dest_cs << 4) + dest_ip;
+    return TARGET_JUMP;
+}
+
+/* Pops the return a trivial-return instruction at CS:IP performs. */
+static void apply_trivial_return(Machine *m, uint8_t op, uint16_t arg_bytes)
+{
+    uint16_t ip = cpu_pop16(m);
+    if (op == 0xCB || op == 0xCA || op == 0xCF) {
+        uint16_t cs = cpu_pop16(m);
+        cpu_set_seg(&m->cpu, S_CS, cs);
+    }
+    if (op == 0xCF) {
+        uint16_t flags = cpu_pop16(m);
+        m->cpu.flags = (m->cpu.flags & 0xFFFF0000u) | (flags & 0x7FD5u) | 2u;
+    }
+    m->cpu.eip = ip;
+    m->cpu.r[R_SP].w += arg_bytes;
+}
+
+typedef enum { THUNK_NONE, THUNK_MOVED, THUNK_RETURNED } ThunkResult;
+
+/* Follows jump thunks from CS:IP while the destination is hooked or again a thunk or return, then
+ * applies a trivial return found there. MOVED: CS:IP is the thunk's destination, which still has to
+ * run. RETURNED: the callee was a bare return and has returned. */
+static ThunkResult follow_thunks(Machine *m, LiftState *s)
+{
+    ThunkResult moved = THUNK_NONE;
+    for (int hop = 0; hop <= MAX_THUNK_HOPS; hop++) {
+        uint16_t ip = (uint16_t)m->cpu.eip;
+        uint32_t linear = m->cpu.seg_base[S_CS] + ip, dest_linear;
+        uint16_t dest_cs;
+        TargetKind kind = classify_target(m, m->cpu.seg_base[S_CS], ip, linear, &dest_linear, &dest_cs);
+        if (kind == TARGET_RETURN) {
+            uint8_t op = mem_rd8(m, linear);
+            uint16_t arg = (op == 0xC2 || op == 0xCA) ? mem_rd16(m, linear + 1) : 0;
+            machine_charge_c(m, m->io_cost_ns);
+            apply_trivial_return(m, op, arg);
+            s->direct_returns++;
+            return THUNK_RETURNED;
+        }
+        if (kind != TARGET_JUMP || hop == MAX_THUNK_HOPS)
+            return moved;
+        uint32_t ignore_linear;
+        uint16_t ignore_cs;
+        uint16_t dest_ip = (uint16_t)(dest_linear - ((uint32_t)dest_cs << 4));
+        if (dest_linear >= DIRECT_ROM_LIMIT)
+            return moved;
+        if (!lift_hooked(m, dest_linear) &&
+            classify_target(m, (uint32_t)dest_cs << 4, dest_ip, dest_linear, &ignore_linear, &ignore_cs) == TARGET_OTHER)
+            return moved;
+        machine_charge_c(m, m->io_cost_ns);
+        cpu_set_seg(&m->cpu, S_CS, dest_cs);
+        m->cpu.eip = dest_ip;
+        s->direct_thunks++;
+        moved = THUNK_MOVED;
+    }
+    return moved;
+}
+
+/* Dispatches the call whose callee is at CS:IP without the CPU where it can. True when something ran
+ * or moved CS:IP; the caller then checks whether the return address was reached. */
+static bool call_direct(Machine *m, LiftState *s)
+{
+    if (s->hooks_off)
+        return false;
+    ThunkResult thunks = THUNK_NONE;
+    if (s->direct && !irq_due(m))
+        thunks = follow_thunks(m, s);
+    if (thunks == THUNK_RETURNED)
+        return true;
+    uint32_t linear = m->cpu.seg_base[S_CS] + (m->cpu.eip & 0xFFFF);
+    if (s->direct && call_lifted_direct(m, s, linear))
+        return true;
+    if (call_callback_direct(m, s, linear))
+        return true;
+    if (s->direct && s->unresolved && !irq_due(m) && !is_service_stub(m, linear) && s->unresolved(m, linear))
+        return true;
+    /* The charge for a followed jump can make an interrupt due; the CPU then takes it at the
+     * destination, which is not a failed direct call. */
+    return thunks == THUNK_MOVED && !irq_due(m);
+}
+
+void lift_set_unresolved(Machine *m, LiftUnresolvedFn fn)
+{
+    lift_state(m)->unresolved = fn;
+}
+
 void guest_call_far(Machine *m, uint16_t seg, uint16_t off)
 {
     LiftState *s = lift_state(m);
     uint16_t saved_cs = m->cpu.seg[S_CS], saved_ip = (uint16_t)m->cpu.eip;
     uint32_t stub = callback_stub_addr(s->return_callback);
+    uint16_t stub_off = (uint16_t)(stub - real_addr(CALLBACK_SEG, 0));
     cpu_push16(m, CALLBACK_SEG);
-    cpu_push16(m, (uint16_t)(stub - real_addr(CALLBACK_SEG, 0)));
+    cpu_push16(m, stub_off);
     uint16_t sp_after_return = (uint16_t)(m->cpu.r[R_SP].w + 4);
     cpu_set_seg(&m->cpu, S_CS, seg);
     m->cpu.eip = off;
     lift_coverage_hit(m, LIFT_COVERAGE_CALL);
-    lift_run_nested(m, UINT32_MAX, sp_after_return, false); /* the sentinel callback ends it */
+    bool direct = call_direct(m, s);
+    bool back = m->cpu.seg[S_CS] == CALLBACK_SEG && (uint16_t)m->cpu.eip == stub_off;
+    if (direct && !back)
+        s->direct_fallbacks++;
+    if (!direct || !back)
+        lift_run_nested(m, UINT32_MAX, sp_after_return, false); /* the sentinel callback ends it */
     cpu_set_seg(&m->cpu, S_CS, saved_cs);
     m->cpu.eip = saved_ip;
 }
@@ -415,6 +649,37 @@ void guest_call_near(Machine *m, uint16_t off)
     uint16_t sp_after_return = (uint16_t)(m->cpu.r[R_SP].w + 2);
     m->cpu.eip = off;
     lift_coverage_hit(m, LIFT_COVERAGE_CALL);
-    lift_run_nested(m, entry_linear, sp_after_return, false);
+    LiftState *s = lift_state(m);
+    bool direct = call_direct(m, s);
+    bool back = m->cpu.seg_base[S_CS] + (m->cpu.eip & 0xFFFF) == entry_linear && m->cpu.r[R_SP].w == sp_after_return;
+    if (direct && !back)
+        s->direct_fallbacks++;
+    if (!direct || !back) /* a call to the caller's own address looks returned before it ran */
+        lift_run_nested(m, entry_linear, sp_after_return, false);
     m->cpu.eip = entry_ip;
+}
+
+/* Current address of a table entry in a loaded module; overlays have none that is fixed. */
+static uint16_t entry_segment(Machine *m, const LiftedEntry *e)
+{
+    if (strchr(e->module, '#'))
+        fatal("lift: %s %s is an overlay entry; it has no fixed address", e->module, e->name);
+    uint16_t base = lift_module_base(m, e->module);
+    if (!base)
+        fatal("lift: %s %s called while %s is not loaded", e->module, e->name, e->module);
+    return (uint16_t)(base + e->seg);
+}
+
+void lift_call_entry_far(Machine *m, const LiftedEntry *e)
+{
+    guest_call_far(m, entry_segment(m, e), e->off);
+}
+
+void lift_call_entry_near(Machine *m, const LiftedEntry *e)
+{
+    uint16_t seg = entry_segment(m, e);
+    if (m->cpu.seg[S_CS] != seg)
+        fatal("lift: near call to %s %s from CS=%04X, its segment is %04X", e->module, e->name,
+              m->cpu.seg[S_CS], seg);
+    guest_call_near(m, e->off);
 }

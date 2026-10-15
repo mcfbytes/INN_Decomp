@@ -118,6 +118,10 @@ void lift_irq_boundary(Machine *m);
  * frames, take input and pace against the wall clock; never during shadow verification. */
 void lift_set_nested_yield(Machine *m, void (*fn)(Machine *m));
 
+/* INN_INTERP_PROFILE: NULL, or one counter per 16-byte paragraph of the 1 MB image that cpu_run
+ * increments for every instruction it executes; written to the file at lift_shutdown. */
+extern uint32_t *dosrt_interp_profile;
+
 /* Runs original code at seg:off as a far call and returns when it returns. */
 void guest_call_far(Machine *m, uint16_t seg, uint16_t off);
 /* Waits for the next interrupt as STI; HLT would, with the caller's flags restored: emulated time
@@ -127,6 +131,18 @@ void lift_idle(Machine *m);
 
 /* Runs original code at CS:off as a near call. */
 void guest_call_near(Machine *m, uint16_t off);
+
+/* Direct calls (docs/lifting.md): a target that no lifted entry, service stub or trivial return
+ * resolves is offered to this hook before the CPU runs it. Returning true means the hook ran it and
+ * left CS:IP at the return address. NULL (the default) interprets the target. */
+typedef bool (*LiftUnresolvedFn)(Machine *m, uint32_t linear);
+void lift_set_unresolved(Machine *m, LiftUnresolvedFn fn);
+
+/* Calls a lifted entry of a loaded module by table entry, as guest_call_far / guest_call_near would
+ * with its address: for call sites that name the entry. Fatal when the module is not loaded or the
+ * entry is an overlay's; the near form also requires CS to be the entry's segment. */
+void lift_call_entry_far(Machine *m, const LiftedEntry *e);
+void lift_call_entry_near(Machine *m, const LiftedEntry *e);
 
 static inline void lift_ret_far(Machine *m, uint16_t arg_bytes)
 {

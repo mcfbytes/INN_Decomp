@@ -295,3 +295,35 @@ Lifted C runs no instructions, so two things keep its waits working:
   through an indirect call are listed in CMakeLists.txt. Headless runs have no hook and stay
   deterministic.
 
+
+## Direct calls
+
+`guest_call_far`, `guest_call_near` and `guest_int` run their target as a C call when it is one of:
+
+- an active lifted entry whose signature bytes match (through shadow verification when it is on);
+- a jump thunk (`JMP` near, short or far) whose destination is hooked or again a thunk or bare return,
+  followed up to four hops (a driver's entry jumps to its body);
+- a bare return (`RET`, `RETF`, `RET n`, `RETF n`, `IRET`), applied in C;
+- a host service stub (`FE 38 id CF/CB`), whose callback runs and whose `IRET` or `RETF` is applied in C.
+
+Anything else, and anything that does not return to the pushed return address, runs on the CPU as
+before. Nothing is followed while a shadow run has the hooks off or at 0F0000h and above (the BIOS
+ROM). `lift_set_unresolved` registers a hook that is offered a target resolved to nothing.
+
+The CPU path costs at least a hooked instruction and the return stub; a direct call costs no
+instructions, so each one (and each followed jump or applied return) charges `io_cost_ns` through
+`machine_charge_c`. Without it a loop that polls INT 1Ah never sees the tick change, and a script that
+times a loop divides by zero ticks.
+
+A lifted entry is called directly only when no interrupt is due (`IF` set and a request pending), so
+the ISR runs first, on the CPU, at the callee's first instruction boundary as before. A service stub
+is called directly only in live I/O mode, outside device replay and tracing, and when the caller's
+pushed `IF` and a pending request do not call for an interrupt. A callback that returns `CB_RETRY`
+puts the stub back and the CPU retries it.
+
+Environment: `INN_DIRECT_CALLS` unset or `1` enables everything, `0` nothing, `2` lifted entries,
+thunks and returns only, `3` service stubs only. `INN_DIRECT_STATS=1` prints the counters at exit.
+`INN_INTERP_PROFILE=<file>` counts the instructions the interpreter runs per 16-byte paragraph and
+writes them with the modules' load segments and the line `direct <calls> fallbacks <n> callbacks <n>
+thunks <n> returns <n>` (`tools/m9_profile.py` summarises it). A fallback is a direct call that did
+not end at its return address.

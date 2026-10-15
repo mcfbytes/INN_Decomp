@@ -249,6 +249,9 @@ enum { TICK_SLICE_US = 100 };
 /* Emulated time in ns, refined inside a slice by the instructions already run, so devices that
  * are polled in tight loops (OPL timers) and sample-accurate audio see time pass. */
 uint64_t machine_now_ns(const Machine *m);
+/* Time passes for work lifted C does without port I/O (a direct guest call, a service called from C):
+ * ns of bus time, handled as a port access is. Callers pass m->io_cost_ns. */
+void machine_charge_c(Machine *m, uint32_t ns);
 
 void log_msg(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 _Noreturn void fatal(const char *fmt, ...) __attribute__((format(printf, 1, 2)));

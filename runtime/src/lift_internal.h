@@ -59,6 +59,9 @@ typedef struct LiftState {
     struct Synth *synth;     /* INN_SYNTH: synthetic call lists (lift_synth.c), NULL when off */
     uint64_t nested_budget;  /* nonzero: nested runs stop once cpu.instructions reaches it */
     bool nested_abort;       /* set when the budget ran out; every nested run then unwinds */
+    bool direct, direct_cb; /* INN_DIRECT_CALLS: lifted entries, thunks and returns / service stubs skip the CPU */
+    uint64_t direct_calls, direct_fallbacks, direct_callbacks, direct_thunks, direct_returns;
+    LiftUnresolvedFn unresolved; /* lift_set_unresolved */
 } LiftState;
 
 struct VerifyState;
