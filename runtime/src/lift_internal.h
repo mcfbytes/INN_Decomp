@@ -12,6 +12,7 @@ typedef struct HookStats {
     bool armed_once;
     int shadow_calls, shadow_mismatches;
     int result_diffs; /* calls whose AX or DX differed although scratch: a possible wrong return value */
+    int synth_calls, synth_mismatches, synth_result_diffs; /* the same for synthetic calls (lift_synth.c) */
 } HookStats;
 
 typedef struct ActiveHook {
@@ -52,6 +53,9 @@ typedef struct LiftState {
     struct VerifyState *verify;
     struct { char name[16]; uint16_t load_seg; } modules[16];
     int module_count;
+    struct Synth *synth;     /* INN_SYNTH: synthetic call lists (lift_synth.c), NULL when off */
+    uint64_t nested_budget;  /* nonzero: nested runs stop once cpu.instructions reaches it */
+    bool nested_abort;       /* set when the budget ran out; every nested run then unwinds */
 } LiftState;
 
 struct VerifyState;
@@ -67,5 +71,22 @@ bool lift_listed(const char *list, const char *name);
 void lift_call_c(Machine *m, LiftedFn fn);
 /* Shadow-verifies one call of h; returns false when verification does not apply. */
 bool lift_verify_call(Machine *m, ActiveHook *h);
+/* Whether the bytes at h's entry are the entry's signature (with relocations applied). */
+bool lift_entry_bytes_match(Machine *m, const ActiveHook *h);
+
+/* ---- synthetic calls (lift_synth.c, docs/lifting.md "Synthetic calls") ---- */
+typedef struct SynthResult {
+    bool returned, mismatch;
+    uint16_t ax, dx;
+    uint8_t at_result[24]; /* the original's bytes at DX:AX, when DX:AX points into the HMA buffers */
+    bool has_bytes;
+} SynthResult;
+/* Verifies the call the machine is set up for (CS:IP at h's entry, return address pushed) and leaves
+ * the machine in that state again; label names the call list line; budget caps the original run. */
+SynthResult lift_verify_synthetic(Machine *m, ActiveHook *h, const char *label, uint64_t budget);
+void lift_synth_module(Machine *m, const char *module, uint16_t load_seg);
+void lift_synth_unloaded(Machine *m, uint32_t lo, uint32_t hi);
+void lift_synth_reached(Machine *m, uint32_t linear);
+void lift_synth_shutdown(Machine *m);
 
 #endif

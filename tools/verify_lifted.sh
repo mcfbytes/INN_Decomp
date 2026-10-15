@@ -10,6 +10,7 @@
 # 'INN\TSNEXEC.EXE DEFAULT'); for Red Baron see docs/redbaron.md. The port then only names the run.
 # INN_COVERAGE=1 writes the call coverage (docs/lifting.md, "Coverage") to <output dir>/coverage.txt;
 # any other value is used as the file name.
+# INN_SYNTH=<call lists> adds synthetic calls (docs/lifting.md, "Synthetic calls"); the environment passes it.
 set -euo pipefail
 BUILD=$1
 PORT=$2

@@ -79,6 +79,10 @@ static inline bool lift_hooked(const Machine *m, uint32_t linear)
 void lift_verify_enable(Machine *m, int calls_per_entry);
 int lift_verify_mismatches(const Machine *m);
 
+/* Synthetic calls (docs/lifting.md, "Synthetic calls"): INN_SYNTH=<file>[,<file>...] lists calls of
+ * lifted entries that are shadow-verified when a trigger is reached, then undone. */
+void lift_synth_load(Machine *m, const char *paths);
+
 /* Call coverage (docs/lifting.md, "Coverage"): INN_COVERAGE=<file> records call and interrupt targets
  * per module; the CPU calls lift_coverage_hit with CS:IP at the target. */
 enum { LIFT_COVERAGE_CALL = 1, LIFT_COVERAGE_INT = 2 };

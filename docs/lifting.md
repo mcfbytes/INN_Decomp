@@ -140,6 +140,73 @@ current directory). Host file deletions, renames, creations and growth are journ
 between the two runs. Known limits: bytes written to host files are written by both runs and not restored; devices other than VGA (PIT, UART, OPL) see only the original run's I/O, which is the
 intended behaviour.
 
+## Synthetic calls
+
+A lifted function that no scenario reaches can still be shadow-verified: a call list names the entry
+and the arguments of each call, and the runtime makes those calls itself on top of a realistic
+machine state, verifies each one exactly as a live call (original first, then the lifted C from the
+same snapshot, the same comparison, DX:AX notes and `*_RET_AX` rules), and puts the machine back.
+`INN_SYNTH=<file>[,<file>...]` loads call lists (`runtime/src/lift_synth.c`); it turns verification
+on with 0 live calls per entry when `INN_VERIFY_LIFTED` is not set. `tools/verify_lifted.sh` passes
+the variables through.
+
+```
+dgroup LSCITV.EXE 2074                       # DGROUP of the module: image segment, load base added
+after LSCITV.EXE lsci_kGetEvent 20            # fire the following calls at the 20th entry of it
+call LSCITV.EXE lsci_kSqrt words(1, 144) DS=DGROUP
+call LSCITV.EXE lsci_strncat buf(64,"abc") "xy" 3 DS=DGROUP
+call TSNEXEC.EXE tsn_memcpy let a=buf(32,"abcdefgh") a+2 a 5
+call TSNEXEC.EXE tsn_long_shift_left DX:AX=long(0x12345678) CX=4
+```
+
+- **Triggers.** `after <module> <entry> [n] [near|far]` takes the snapshot the n-th time (default
+  1) live code reaches the entry: a lifted entry by name, or any address as `seg:off` relative to the
+  module's load segment (overlays: `PROG.EXE#stub`). `near` says how `arg(n)` finds the trigger's own
+  arguments at an address (named entries know). The calls after an `after` line belong to it. Entries
+  reached inside shadow runs do not count. A trigger that never fires is reported at exit.
+- **Calls.** `call <module> <entry> <items...>`; the entry is a name or `seg:off`. Items are separated
+  by spaces; an argument item is pushed as the original's caller pushes cdecl arguments: the first item
+  at the lowest address. A word is one item; a pointer pushes offset then segment, a `long()` low word
+  then high word. Callee-popped (Pascal) functions take their arguments in the same layout.
+  Registers: `AX= BX= CX= DX= SI= DI= BP= DS= ES=` and pairs `DX:AX= ES:DI= ES:SI= ES:BX= DS:SI= DS:DI=
+  DS:DX= DS:BX= CX:BX=` (high:low, from a pointer or a long). Registers not named keep their trigger
+  values; `DS=DGROUP` uses the module's `dgroup` line, or the trigger's DS when there is none.
+- **Values.** Numbers (`12`, `-1`, `0x7FFF`, `'a'`); `long(n)`; `"text"` (a fresh NUL-terminated copy);
+  `buf(size, "text", 1, 2, fill=0xCC)` (a fresh buffer, zero-filled unless `fill=`, initial bytes as
+  listed, no implied NUL); `words(a, b, ...)`, `bytes(a, b, ...)` (fresh buffers holding them; a
+  pointer in `words` takes two words); `far(SEG, off)`; `null`; `off(p)`, `seg(p)`; memory as it is at
+  the trigger: `[SEG:off]` (word), `farat[SEG:off]`, `longat[SEG:off]`, where SEG is `DS ES SS CS
+  DGROUP` or a number; the trigger's arguments `arg(n)`, `argptr(n)` (word n, and the far pointer at
+  words n, n+1). `p+n` and `p-n` move a pointer (no spaces around the operator). `name=value` pushes a
+  value and names it, `let name=value` only names it, for later items such as `name+2`.
+- **Buffers** live in the HMA (FFFF:0010 to FFFF:FFFF, 16-byte aligned, 16 zero bytes after each), with
+  A20 enabled for the call: no DOS program here uses the HMA and the runtime has no XMS, so the area is
+  free and inside the snapshot. They are compared like any memory, so what a function writes into its
+  buffers is checked, including writes past their end (into the gaps).
+- **Restoring.** The trigger state is saved (CPU, the first 1 MB + 64 KB of memory, VGA, DOS handles,
+  hook bitmap, emulated time and pending interrupts, A20). Each call is set up on top of it, verified
+  (host file deletions, renames, creations and growth journaled and undone after both runs, as for live
+  calls), and the trigger state is loaded again before the next call and before the run continues.
+  During the calls the time slice is stretched so no device ticker runs, interrupts are held and call
+  coverage is off. `INN_SYNTH_CHECK=1` saves the state again after each restore and stops with an
+  error if the CPU, memory, VGA, DOS state, hook bitmap, time, interrupts, A20 or I/O mode differ.
+  Not restorable, so not for synthetic calls: bytes written into host files, port I/O to devices
+  other than VGA, loading an overlay or module, ending the process. A call whose original does not
+  return within 50 million instructions, or that ends the process, is reported as a mismatch and the
+  lifted C is not run; avoid calls the lift turns into `fatal()` (a zero divisor) or loops forever on.
+- **Results** are counted apart from live calls: mismatches are logged as
+  `verify: MOD name synthetic call N (file:line): ...` and the summary adds
+  `verify: MOD name: N calls checked, M mismatches (synthetic)` (with `DX:AX differs in N` as for live
+  calls). Each trigger logs where it fired (`synth: file:line after ... fired at CS:IP SS:SP DS: N calls
+  checked, M mismatched`). `INN_SYNTH_LOG=1` logs every call's original DX:AX, and the text there when
+  it points into a buffer, for reviewing what the cases did.
+
+`tools/synth_args.py MODULE ENTRY TEMPLATE --var NAME=SPEC ...` writes call lines from a template with
+`{NAME}` placeholders, as the product of the variables' values (or `--zip`): edge sets (`edges16`,
+`edges32`), ranges, seeded random numbers, longs and strings, string lists and files
+(`tools/synth_args.py --help`). Call lists that spell out Sierra functions' arguments belong in
+`private/lifted/synth/`.
+
 ## Coverage
 
 `INN_COVERAGE=<file>` records every distinct guest address that is the target of a CALL, a far CALL,

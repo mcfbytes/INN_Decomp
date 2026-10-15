@@ -43,6 +43,9 @@ void lift_init(Machine *m)
     const char *coverage = getenv("INN_COVERAGE");
     if (coverage && *coverage)
         lift_coverage_enable(m, coverage);
+    const char *synth = getenv("INN_SYNTH");
+    if (synth && *synth)
+        lift_synth_load(m, synth);
 }
 
 static void log_verify_line(const LiftedEntry *e, const HookStats *st)
@@ -51,20 +54,26 @@ static void log_verify_line(const LiftedEntry *e, const HookStats *st)
         log_msg("verify: %s %s: not shadowed (LIFT_NOSHADOW)", e->module, e->name);
         return;
     }
-    if (st->result_diffs)
+    if (st->armed_once && st->result_diffs)
         log_msg("verify: %s %s: %d calls checked, %d mismatches, DX:AX differs in %d", e->module, e->name,
                 st->shadow_calls, st->shadow_mismatches, st->result_diffs);
-    else
+    else if (st->armed_once)
         log_msg("verify: %s %s: %d calls checked, %d mismatches", e->module, e->name, st->shadow_calls,
                 st->shadow_mismatches);
+    if (st->synth_calls && st->synth_result_diffs)
+        log_msg("verify: %s %s: %d calls checked, %d mismatches, DX:AX differs in %d (synthetic)", e->module,
+                e->name, st->synth_calls, st->synth_mismatches, st->synth_result_diffs);
+    else if (st->synth_calls)
+        log_msg("verify: %s %s: %d calls checked, %d mismatches (synthetic)", e->module, e->name,
+                st->synth_calls, st->synth_mismatches);
 }
 
-/* Every entry that was armed at some point, loaded now or not. */
+/* Every entry that was armed at some point, loaded now or not, and every one called synthetically. */
 static void log_verify_summary(LiftState *s)
 {
     for (int t = 0; t < s->table_count; t++)
         for (int i = 0; i < s->tables[t].count; i++)
-            if (s->tables[t].stats[i].armed_once)
+            if (s->tables[t].stats[i].armed_once || s->tables[t].stats[i].synth_calls)
                 log_verify_line(&s->tables[t].entries[i], &s->tables[t].stats[i]);
 }
 
@@ -73,6 +82,8 @@ void lift_shutdown(Machine *m)
     lift_coverage_write(m);
     if (m->lift && lift_state(m)->verify)
         log_verify_summary(lift_state(m));
+    if (m->lift)
+        lift_synth_shutdown(m);
     if (m->lift) {
         free(lift_state(m)->verify);
         for (int t = 0; t < lift_state(m)->table_count; t++)
@@ -190,6 +201,7 @@ void lift_module_loaded(Machine *m, const char *module, uint16_t load_seg, uint3
         log_msg("lift: module %s at %04X (%u bytes)", module, load_seg, image_bytes);
     arm_module(m, module, load_seg, image_bytes, load_seg, false);
     lift_coverage_module(m, module, load_seg, image_bytes, false);
+    lift_synth_module(m, module, load_seg);
 }
 
 void lift_overlay_loaded(Machine *m, const char *module, uint16_t load_seg, uint32_t image_bytes,
@@ -202,6 +214,7 @@ void lift_overlay_loaded(Machine *m, const char *module, uint16_t load_seg, uint
     disarm_module(m, module);
     arm_module(m, module, load_seg, image_bytes, reloc_base, true);
     lift_coverage_module(m, module, load_seg, image_bytes, true);
+    lift_synth_module(m, module, load_seg);
 }
 
 void lift_module_unloaded(Machine *m, uint16_t load_seg, uint32_t paragraphs)
@@ -220,6 +233,7 @@ void lift_module_unloaded(Machine *m, uint16_t load_seg, uint32_t paragraphs)
             s->active[kept++] = *h;
     }
     s->active_count = kept;
+    lift_synth_unloaded(m, lo, hi);
 }
 
 static ActiveHook *find_hook(LiftState *s, uint32_t linear)
@@ -247,7 +261,7 @@ static void expected_bytes(const ActiveHook *h, uint8_t out[LIFT_SIGNATURE_LEN],
     }
 }
 
-static bool bytes_match(Machine *m, const ActiveHook *h)
+bool lift_entry_bytes_match(Machine *m, const ActiveHook *h)
 {
     uint8_t expected[LIFT_SIGNATURE_LEN];
     bool skip[LIFT_SIGNATURE_LEN];
@@ -262,7 +276,7 @@ static bool signature_matches(Machine *m, ActiveHook *h)
 {
     if (h->overlay) {
         /* The buffer is reused, and a manager may move code without a file read we would see. */
-        bool ok = bytes_match(m, h);
+        bool ok = lift_entry_bytes_match(m, h);
         if (!ok && !h->absent_logged) {
             h->absent_logged = true;
             log_msg("lift: %s %s reached with other bytes at the entry; running the original",
@@ -272,7 +286,7 @@ static bool signature_matches(Machine *m, ActiveHook *h)
     }
     if (!h->verified) {
         h->verified = true;
-        h->rejected = !bytes_match(m, h);
+        h->rejected = !lift_entry_bytes_match(m, h);
         if (h->rejected)
             log_msg("lift: %s %s bytes differ at the entry; running the original", h->entry->module,
                     h->entry->name);
@@ -301,6 +315,8 @@ bool lift_dispatch(Machine *m, uint32_t linear)
         return true;
     if (s->hooks_off)
         return false;
+    if (s->synth && !s->in_shadow)
+        lift_synth_reached(m, linear);
     ActiveHook *h = find_hook(s, linear);
     if (!h || !signature_matches(m, h))
         return false;
@@ -336,8 +352,10 @@ void lift_run_nested(Machine *m, uint32_t return_linear, uint16_t return_sp, boo
     uint64_t start = m->cpu.instructions, stall_report = start + SHADOW_STALL_INSNS;
     int c_depth = s->c_depth;
     s->c_depth = 0;
-    while (!n->returned && !m->exit_requested) {
+    while (!n->returned && !m->exit_requested && !s->nested_abort) {
         machine_step(m);
+        if (s->nested_budget && m->cpu.instructions >= s->nested_budget)
+            s->nested_abort = true;
         if (s->nested_yield && !s->in_shadow)
             s->nested_yield(m);
         if (s->shadow_of && m->cpu.instructions >= stall_report) {

@@ -27,6 +27,7 @@ typedef struct VerifyState {
     IoEvent log[IO_LOG_MAX];
     int log_len, replay_pos;
     bool io_diverged;
+    const char *synth_label; /* set while a synthetic call (lift_synth.c) is verified: its call list line */
 } VerifyState;
 
 static VerifyState *verify(Machine *m) { return lift_state(m)->verify; }
@@ -173,8 +174,15 @@ static long first_memory_difference(const uint8_t *a, const uint8_t *b, uint32_t
 
 static void report(Machine *m, ActiveHook *h, const char *why)
 {
+    VerifyState *v = verify(m);
+    v->mismatches++;
+    if (v->synth_label) {
+        h->stats->synth_mismatches++;
+        log_msg("verify: %s %s synthetic call %d (%s): %s", h->entry->module, h->entry->name,
+                h->stats->synth_calls, v->synth_label, why);
+        return;
+    }
     h->stats->shadow_mismatches++;
-    verify(m)->mismatches++;
     log_msg("verify: %s %s call %d: %s", h->entry->module, h->entry->name, h->stats->shadow_calls, why);
 }
 
@@ -189,6 +197,13 @@ static void note_result_difference(Machine *m, ActiveHook *h)
     bool dx = (scratch & LIFT_REG_DX) && a->r[R_DX].w != b->r[R_DX].w;
     if (!ax && !dx)
         return;
+    if (verify(m)->synth_label) {
+        if (h->stats->synth_result_diffs++ == 0)
+            log_msg("verify: %s %s synthetic call %d (%s): result DX:AX lifted %04X:%04X original %04X:%04X "
+                    "(scratch)", h->entry->module, h->entry->name, h->stats->synth_calls, verify(m)->synth_label,
+                    a->r[R_DX].w, a->r[R_AX].w, b->r[R_DX].w, b->r[R_AX].w);
+        return;
+    }
     if (h->stats->result_diffs++ == 0)
         log_msg("verify: %s %s call %d: result DX:AX lifted %04X:%04X original %04X:%04X (scratch)",
                 h->entry->module, h->entry->name, h->stats->shadow_calls, a->r[R_DX].w, a->r[R_AX].w, b->r[R_DX].w,
@@ -369,4 +384,63 @@ bool lift_verify_call(Machine *m, ActiveHook *h)
     s->in_shadow = false;
     s->shadow_of = NULL;
     return true;
+}
+
+/* A synthetic call (lift_synth.c): the machine is set up with CS:IP at h's entry and the return
+ * address pushed. Both runs start from that state, are compared as a live call is, and the machine
+ * is left in that start state again, host file changes undone. */
+SynthResult lift_verify_synthetic(Machine *m, ActiveHook *h, const char *label, uint64_t budget)
+{
+    LiftState *s = lift_state(m);
+    VerifyState *v = s->verify;
+    SynthResult r = { 0 };
+    h->stats->synth_calls++;
+    v->synth_label = label;
+    s->in_shadow = true;
+    s->shadow_of = h;
+    m->irq_hold = true;
+    uint16_t entry_sp = m->cpu.r[R_SP].w;
+    save(m, &v->cpu_before, v->mem_before, v->vga_before, v->dos_before);
+    dos_journal_begin(m);
+    v->log_len = 0;
+    v->io_diverged = false;
+    int before = v->mismatches;
+
+    s->nested_budget = m->cpu.instructions + budget;
+    run_original(m, h);
+    s->nested_budget = 0;
+    bool ended = m->exit_requested, returned = !s->nested_abort && !ended;
+    s->nested_abort = false;
+    save(m, &v->cpu_original, v->mem_original, v->vga_original, v->dos_original);
+    r.ax = v->cpu_original.r[R_AX].w;
+    r.dx = v->cpu_original.r[R_DX].w;
+    uint32_t at = real_addr(r.dx, r.ax);
+    if (r.dx == 0xFFFF && at >= MEM_ONE_MEG && at + sizeof r.at_result <= SNAPSHOT_BYTES) {
+        memcpy(r.at_result, v->mem_original + at, sizeof r.at_result);
+        r.has_bytes = true;
+    }
+    restore(m, &v->cpu_before, v->mem_before, v->vga_before, v->dos_before);
+    dos_journal_undo(m);
+    m->exit_requested = false;
+    if (returned) {
+        run_lifted(m, h);
+        compare(m, h, entry_sp, entry_sp);
+    } else {
+        char why[96];
+        snprintf(why, sizeof why, "the original did not return (%s)",
+                 ended ? "the process ended" : "instruction budget spent");
+        report(m, h, why);
+    }
+    r.returned = returned;
+    r.mismatch = v->mismatches != before;
+    m->exit_requested = false;
+    restore(m, &v->cpu_before, v->mem_before, v->vga_before, v->dos_before);
+    dos_journal_undo(m);
+    dos_journal_end(m);
+    m->cpu.stop = false;
+    m->irq_hold = false;
+    s->in_shadow = false;
+    s->shadow_of = NULL;
+    v->synth_label = NULL;
+    return r;
 }
