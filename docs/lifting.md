@@ -321,6 +321,20 @@ Lifted C runs no instructions, so two things keep its waits working:
   deterministic.
 
 
+## Native-only tables and dumps
+
+A lifted directory whose `module.txt` has a third line `native` holds code written for native program
+control (docs/native.md section 8). The generator sets `LiftedEntry.native_only` on its entries and
+`arm()` skips them unless `m->native` was set when a module was armed or `INN_NATIVE_CONTROL=1`, so a
+plain hybrid build never runs them. `native_exec` (`runtime/src/native/native_exec.c`) loads a child
+through the DOS loader and runs it as C when its start address is a lifted entry, otherwise on the
+emulator; termination unwinds to it through the DOS terminate hook.
+
+`INN_DUMP_AT=<point>:<n>[,...]` with `INN_DUMP_DIR=<dir>` writes `<point>-<n>.bin` (memory 0 to
+10FFEFh) and `.txt` (registers, MCB chain, IVT, DOS handles, current directory, PSP) the n-th time the
+point is reached; points are `exec` (AH=4Bh AL=0 or `native_exec`), `start` (a program is entered) and
+`kernel`. `tools/m9_dump_diff.py` compares two dumps.
+
 ## Direct calls
 
 `guest_call_far`, `guest_call_near` and `guest_int` run their target as a C call when it is one of:

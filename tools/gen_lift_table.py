@@ -2,8 +2,9 @@
 """Generates the lifted-function registration tables from LIFTED(...) markers.
 
 Each module directory under the lifted tree holds module.txt (two lines: the module name as the
-loader announces it, e.g. LSCITV.EXE, and the path of the unpacked original) and C files whose
-lifted functions are marked with
+loader announces it, e.g. LSCITV.EXE, and the path of the unpacked original; an optional third line
+`native` marks every entry of the directory native-only, armed only for native program control)
+and C files whose lifted functions are marked with
     LIFTED(0x07D1, 0x00FC, lsci_kAbs, LIFT_FAR, LSCI_KERNEL_SCRATCH)
 The entry signatures are read from the original at generation time, so no original bytes are
 ever stored in source. Usage: gen_lift_table.py <lifted_dir> <out.c>
@@ -69,7 +70,8 @@ def read_module(module_dir):
     exe_path = pathlib.Path(exe)
     if not exe_path.is_absolute():
         exe_path = module_dir / exe_path
-    return (name, *image_of(exe_path))
+    native = len(lines) > 2 and lines[2].strip() == 'native'
+    return (name, native, *image_of(exe_path))
 
 
 def reloc_mask(start, relocs):
@@ -80,7 +82,7 @@ def reloc_mask(start, relocs):
     return mask
 
 
-def entries_of(module_dir, name, image, relocs, overlays):
+def entries_of(module_dir, name, native, image, relocs, overlays):
     for source in sorted(module_dir.glob('*.c')):
         for match in MARKER.finditer(source.read_text()):
             seg, off = int(match[1], 16), int(match[2], 16)
@@ -103,18 +105,18 @@ def entries_of(module_dir, name, image, relocs, overlays):
                 sys.exit(f'{source}: {match[3]} lies outside the image')
             kind = match[4]
             yield (module, seg, off, match[3], kind.startswith('LIFT_NEAR'), match[5], signature, mask,
-                   kind == 'LIFT_REGION', kind.endswith('_NOSHADOW'), unknown, kind.endswith('_REPLAY'))
+                   kind == 'LIFT_REGION', kind.endswith('_NOSHADOW'), unknown, kind.endswith('_REPLAY'), native)
 
 
 def emit_module(out, index, entries):
     for _, _, _, fn, *_ in entries:
         out.append(f'void {fn}(Machine *m);')
     out.append(f'static const LiftedEntry module_{index}[] = {{')
-    for module, seg, off, fn, near, scratch, signature, mask, region, no_shadow, unknown, replay in entries:
+    for module, seg, off, fn, near, scratch, signature, mask, region, no_shadow, unknown, replay, native in entries:
         sig = ', '.join(f'0x{b:02X}' for b in signature)
         out.append(f'    {{ "{module}", 0x{seg:04X}, 0x{off:04X}, {fn}, "{fn}", {str(near).lower()}, '
                    f'{scratch}, {{ {sig} }}, 0x{mask:04X}, {str(region).lower()}, {str(no_shadow).lower()}, '
-                   f'0x{unknown:04X}, {str(replay).lower()} }},')
+                   f'0x{unknown:04X}, {str(replay).lower()}, {str(native).lower()} }},')
     out.append('};')
 
 
@@ -124,8 +126,8 @@ def main():
            '#include "lift.h"', '#include "lifted_conventions.h"', '']
     modules = []
     for module_dir in sorted(p for p in lifted_dir.iterdir() if (p / 'module.txt').exists()):
-        name, image, relocs, overlays = read_module(module_dir)
-        entries = list(entries_of(module_dir, name, image, relocs, overlays))
+        name, native, image, relocs, overlays = read_module(module_dir)
+        entries = list(entries_of(module_dir, name, native, image, relocs, overlays))
         if entries:
             emit_module(out, len(modules), entries)
             modules.append(len(entries))

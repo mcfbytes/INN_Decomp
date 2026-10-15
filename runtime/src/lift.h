@@ -32,6 +32,7 @@ typedef struct LiftedEntry {
     bool no_shadow; /* LIFT_NOSHADOW: hooked, never shadow-verified (device I/O, process exit) */
     uint16_t unknown_mask; /* bit i: signature byte i is not compared (past the end of an overlay's code) */
     bool replay;    /* LIFT_*_REPLAY: shadow-verified with time and interrupts flowing (device replay) */
+    bool native_only; /* from a directory whose module.txt says `native`: armed only for native control */
 } LiftedEntry;
 
 /* reloc_mask bit 15: byte 0 is the high half of a relocated word starting before the entry. */

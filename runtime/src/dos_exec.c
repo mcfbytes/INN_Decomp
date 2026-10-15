@@ -7,6 +7,7 @@
 
 #include "dos_int.h"
 #include "lift.h"
+#include "native/native_exec.h"
 
 enum {
     MZ_LAST_PAGE = 0x02, MZ_PAGES = 0x04, MZ_NRELOC = 0x06, MZ_HDR_PARAS = 0x08,
@@ -349,6 +350,8 @@ CallbackResult dos_exec(Machine *m)
     uint8_t mode = AL;
     if (mode != EXEC_LOAD_RUN && mode != EXEC_LOAD_ONLY && mode != EXEC_OVERLAY)
         return dos_fail(m, DE_FUNCTION);
+    if (mode == EXEC_LOAD_RUN)
+        native_dump_point(m, "exec");
     char name[DOS_PATH_MAX];
     dos_read_name(m, DS, DX, name);
     Program p;
@@ -412,6 +415,7 @@ bool dos_start_program(Machine *m, const char *dos_path, const char *args)
     uint16_t ax = (uint16_t)(fcb_drive_status(a.fcb1) | fcb_drive_status(a.fcb2) << 8);
     enter_program(m, e, psp, ax, false);
     log_exec(m, p.dos_path, a.tail);
+    native_dump_point(m, "start");
     return true;
 }
 
@@ -455,4 +459,5 @@ void dos_exec_enter(Machine *m, const DosExecImage *img)
 {
     Entry e = {.cs = img->cs, .ip = img->ip, .ss = img->ss, .sp = img->sp};
     enter_program(m, e, img->psp, img->ax, false);
+    native_dump_point(m, "start");
 }
