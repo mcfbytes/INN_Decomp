@@ -9,7 +9,7 @@ function name, so every summary of a key is added: a uniq -c prefix weights
 that line, and a line with no prefix counts as one. FAIL when a status leaves
 ok, a key's mismatch count rises, or a key that checked calls in the base has
 none in the new run (coverage lost). --allow skips the coverage check for
-those keys. <base_dir>/FLAKY, one key per line, turns that key's failures into
+those keys. <base_dir>/FLAKY, one key (or <scenario>:<key>) per line, turns that key's failures into
 warnings. Checked counts that fall but stay above zero, and keys only in the
 new run, are warnings. Exit status is 1 when any FAIL remains.
 """
@@ -90,7 +90,7 @@ def main(argv):
 
     def add(kind, scenario, message, key=None):
         nonlocal fails, warns
-        if key and key in flaky and kind == 'FAIL':
+        if key and kind == 'FAIL' and (key in flaky or '%s:%s' % (scenario, key) in flaky):
             kind = 'WARN'
             message += ' (flaky)'
         print('%s %s: %s' % (kind, scenario, message))

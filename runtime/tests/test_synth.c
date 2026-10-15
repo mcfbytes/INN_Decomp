@@ -102,11 +102,21 @@ static Run run(LiftedFn f, const char *list, uint16_t f_scratch)
     CHECK(mem_rd16(m, real_addr(DATA_SEG, 0x200)) == 5, "memory written by calls is restored");
     CHECK(!m->a20, "A20 is restored");
     LiftState *s = lift_state(m);
-    Run r = { .mismatches = lift_verify_mismatches(m), .result_diffs = s->tables[0].stats[0].synth_result_diffs };
+    /* builds with a lifted tree register its tables first */
+    int t = 0;
+    while (t < s->table_count && s->tables[t].entries != entries)
+        t++;
+    CHECK(t < s->table_count, "the test table is registered");
+    if (t == s->table_count) {
+        machine_destroy(m);
+        return (Run){ 0 };
+    }
+    HookStats *stats = s->tables[t].stats;
+    Run r = { .mismatches = lift_verify_mismatches(m), .result_diffs = stats[0].synth_result_diffs };
     for (int i = 0; i < 3; i++) {
-        r.synth_calls[i] = s->tables[0].stats[i].synth_calls;
-        r.synth_mismatches[i] = s->tables[0].stats[i].synth_mismatches;
-        CHECK(s->tables[0].stats[i].shadow_calls == 0, "no live call was verified");
+        r.synth_calls[i] = stats[i].synth_calls;
+        r.synth_mismatches[i] = stats[i].synth_mismatches;
+        CHECK(stats[i].shadow_calls == 0, "no live call was verified");
     }
     machine_destroy(m);
     return r;
