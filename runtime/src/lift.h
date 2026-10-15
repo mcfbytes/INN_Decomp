@@ -79,6 +79,20 @@ static inline bool lift_hooked(const Machine *m, uint32_t linear)
 void lift_verify_enable(Machine *m, int calls_per_entry);
 int lift_verify_mismatches(const Machine *m);
 
+/* Call coverage (docs/lifting.md, "Coverage"): INN_COVERAGE=<file> records call and interrupt targets
+ * per module; the CPU calls lift_coverage_hit with CS:IP at the target. */
+enum { LIFT_COVERAGE_CALL = 1, LIFT_COVERAGE_INT = 2 };
+void lift_coverage_enable(Machine *m, const char *path);
+void lift_coverage_note(Machine *m, int via);
+void lift_coverage_module(Machine *m, const char *module, uint16_t load_seg, uint32_t bytes, bool overlay);
+void lift_coverage_unloaded(Machine *m, uint16_t load_seg, uint32_t paragraphs);
+void lift_coverage_write(Machine *m);
+static inline void lift_coverage_hit(Machine *m, int via)
+{
+    if (__builtin_expect(m->coverage != NULL, 0))
+        lift_coverage_note(m, via);
+}
+
 /* Port I/O taps used while verifying; machine.c calls them according to m->io_mode. */
 void lift_io_record(Machine *m, uint16_t port, int size, uint32_t value, bool is_out);
 uint32_t lift_io_replay_in(Machine *m, uint16_t port, int size);

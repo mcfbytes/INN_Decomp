@@ -76,6 +76,20 @@ runs it at about four times real speed natively. Nothing unhandled shows up: no 
 call, no invalid opcode, no unhandled port; the only device it needed that dosrt did not model
 explicitly was the game port, which now reports nothing attached (FFh).
 
+## Verifying lifts
+
+`tools/verify_lifted.sh` runs RB alone against the stand-in instead of INN against a server:
+
+```
+INN_DRIVE=$PWD/work/baron-c INN_TSN_HOST=$PWD/private/lifted/scenarios/rb_host.txt \
+    INN_PROGRAM='INN\BARON\RB.EXE -C..\LSCI.CFG' \
+    tools/verify_lifted.sh build-<area> <port> 24000 20 private/lifted/scenarios/rb_fly.txt
+```
+
+`rb_fly.txt` presses a few keys, moves the mouse and takes screenshots (`g1`-`g4.ppm` in the output directory);
+the whole run takes a few seconds. `INN_COVERAGE=1` works the same way ([lifting.md](lifting.md),
+"Coverage").
+
 ## Host requirements
 
 `innkeeperd` (2026-10-14) does none of the Red Baron-specific steps. A host needs, in order:

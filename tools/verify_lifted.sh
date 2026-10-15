@@ -5,6 +5,11 @@
 # The script (input_script format) replaces the logon one; @OUT@ in it becomes the output directory.
 # INN_ARGS adds frontend options, e.g. INN_ARGS='--conv-kb 520'. INN_DRIVE picks the C: drive to copy
 # (default work/inn-c; the Yserbius scenarios need one with \INN\YSERBIUS, docs/yserbius.md).
+# INN_TSN_HOST=<rules> runs without a server: dosrt's TSN host stand-in plays the host
+# (docs/runtime.md), and INN_PROGRAM names the program and its arguments (default
+# 'INN\TSNEXEC.EXE DEFAULT'); for Red Baron see docs/redbaron.md. The port then only names the run.
+# INN_COVERAGE=1 writes the call coverage (docs/lifting.md, "Coverage") to <output dir>/coverage.txt;
+# any other value is used as the file name.
 set -euo pipefail
 BUILD=$1
 PORT=$2
@@ -28,12 +33,22 @@ fi
 DRIVE=$ROOT/work/verify-drive/$PORT
 mkdir -p "$DRIVE"
 rsync -a --delete --delete-excluded --exclude 'VMF/*' "${INN_DRIVE:-$ROOT/work/inn-c}/" "$DRIVE/"
-"$SERVER" --bind 127.0.0.1:"$PORT" --no-int14h --no-capture > "$OUT/server.log" 2>&1 &
-SERVER_PID=$!
-trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
-sleep 1
-INN_VERIFY_LIFTED=$CALLS timeout 900 "$BUILD/inn" ${INN_ARGS:-} --headless --run-ms "$RUN_MS" --script "$OUT/play.txt" \
-    --com1 127.0.0.1:"$PORT" "$DRIVE" 'INN\TSNEXEC.EXE' DEFAULT > "$OUT/client.log" 2>&1 || true
+read -r -a PROGRAM <<< "${INN_PROGRAM:-INN\\TSNEXEC.EXE DEFAULT}"
+if [ -n "${INN_TSN_HOST:-}" ]; then
+    HOST_ARGS=(--tsn-host "$INN_TSN_HOST")
+else
+    "$SERVER" --bind 127.0.0.1:"$PORT" --no-int14h --no-capture > "$OUT/server.log" 2>&1 &
+    SERVER_PID=$!
+    trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
+    sleep 1
+    HOST_ARGS=(--com1 127.0.0.1:"$PORT")
+fi
+COVERAGE=${INN_COVERAGE:-}
+[ "$COVERAGE" = 1 ] && COVERAGE=$OUT/coverage.txt
+INN_COVERAGE=$COVERAGE INN_VERIFY_LIFTED=$CALLS timeout 900 "$BUILD/inn" ${INN_ARGS:-} --headless \
+    --run-ms "$RUN_MS" --script "$OUT/play.txt" "${HOST_ARGS[@]}" "$DRIVE" "${PROGRAM[@]}" \
+    > "$OUT/client.log" 2>&1 || true
 python3 -I "$ROOT/tools/ppm2png.py" "$OUT/map.ppm" "$OUT/map.png" 2>/dev/null || true
 grep -E '^verify:' "$OUT/client.log" | sort | uniq -c | sort -rn | head -200 || true
+[ -n "$COVERAGE" ] && echo "coverage: $COVERAGE"
 echo "logs and the map screenshot: $OUT"

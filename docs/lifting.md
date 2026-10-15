@@ -132,11 +132,45 @@ hooked but never shadows them, for a call that only works with interrupts flowin
 that finds its IRQ by waiting for one).
 
 Enable it with `INN_VERIFY_LIFTED=<calls per function>`; `tools/verify_lifted.sh` runs the logon
-scenario against a local server and prints the per-function summary. Snapshots cover guest
+scenario against a local server and prints the per-function summary. With `INN_TSN_HOST=<rules>` it
+runs without a server, the program named by `INN_PROGRAM` against dosrt's TSN host stand-in (Red Baron:
+[redbaron.md](redbaron.md), "Verifying lifts"). Snapshots cover guest
 memory, the VGA device (registers, DAC, planes) and host-side DOS state (open files, positions,
 current directory). Host file deletions, renames, creations and growth are journaled and undone
 between the two runs. Known limits: bytes written to host files are written by both runs and not restored; devices other than VGA (PIT, UART, OPL) see only the original run's I/O, which is the
 intended behaviour.
+
+## Coverage
+
+`INN_COVERAGE=<file>` records every distinct guest address that is the target of a CALL, a far CALL,
+an interrupt (INT n, IRQ, fault) or a guest call from lifted code, and writes them with their call
+counts when the run ends. Each place is named relative to the innermost announced module that holds
+it: `DARKSTRT.EXE:08C7:0032` (segment relative to the load segment, as the CALL named it),
+`DARKSTRT.EXE#1E34:003C` (an overlay: stub segment and offset in its code). Targets outside every
+announced module (BIOS stubs, code loaded by other means) are left out. Off, the CPU pays one
+not-taken test per call instruction; the interpreter's instruction loop is untouched.
+
+VROOMM enters an overlay function by a far jump from the stub's INT 3Fh thunk, so a call to an
+overlay function is recorded at the thunk (`DARKSTRT.EXE:1E56:002F`); calls inside an overlay are
+recorded at the overlay code.
+
+`tools/verify_lifted.sh` passes it through: `INN_COVERAGE=1` writes `coverage.txt` into the run's
+output directory (`work/verify/<port>/`). `tools/coverage_report.py` turns one or more coverage files
+into a work list against a Ghidra export: each reached function with its size, call count, whether it
+is a leaf (no callees), and whether it is lifted or staged in the given lifted trees. Thunk calls are
+credited to the overlay function they load (the thunks are read from the EXE `module.txt` names).
+
+```
+INN_DRIVE=$PWD/work/yserbius-c INN_COVERAGE=1 tools/verify_lifted.sh build-x 2591 196000 20 \
+    private/lifted/scenarios/ys_dungeon.txt
+tools/coverage_report.py work/verify/2591/coverage.txt --ghidra private/ghidra/DARKSTRT.EXE \
+    --lifted private/lifted --todo --leaf
+```
+
+`--todo` keeps functions neither lifted nor staged, `--leaf` only leaves, `--unknown` also lists
+targets that are no Ghidra function (functions inside overlays Ghidra did not find, code past the
+image such as loaded drivers), `--tsv` prints tab-separated columns. Several coverage files (one per
+scenario) merge.
 
 ## Waiting in lifted code
 

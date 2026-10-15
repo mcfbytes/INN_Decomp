@@ -40,6 +40,9 @@ void lift_init(Machine *m)
     const char *verify_calls = getenv("INN_VERIFY_LIFTED");
     if (verify_calls && atoi(verify_calls) > 0)
         lift_verify_enable(m, atoi(verify_calls));
+    const char *coverage = getenv("INN_COVERAGE");
+    if (coverage && *coverage)
+        lift_coverage_enable(m, coverage);
 }
 
 static void log_verify_line(const LiftedEntry *e, const HookStats *st)
@@ -67,6 +70,7 @@ static void log_verify_summary(LiftState *s)
 
 void lift_shutdown(Machine *m)
 {
+    lift_coverage_write(m);
     if (m->lift && lift_state(m)->verify)
         log_verify_summary(lift_state(m));
     if (m->lift) {
@@ -185,6 +189,7 @@ void lift_module_loaded(Machine *m, const char *module, uint16_t load_seg, uint3
     if (m->trace)
         log_msg("lift: module %s at %04X (%u bytes)", module, load_seg, image_bytes);
     arm_module(m, module, load_seg, image_bytes, load_seg, false);
+    lift_coverage_module(m, module, load_seg, image_bytes, false);
 }
 
 void lift_overlay_loaded(Machine *m, const char *module, uint16_t load_seg, uint32_t image_bytes,
@@ -196,6 +201,7 @@ void lift_overlay_loaded(Machine *m, const char *module, uint16_t load_seg, uint
         log_msg("lift: overlay %s at %04X (%u bytes)", module, load_seg, image_bytes);
     disarm_module(m, module);
     arm_module(m, module, load_seg, image_bytes, reloc_base, true);
+    lift_coverage_module(m, module, load_seg, image_bytes, true);
 }
 
 void lift_module_unloaded(Machine *m, uint16_t load_seg, uint32_t paragraphs)
@@ -203,6 +209,7 @@ void lift_module_unloaded(Machine *m, uint16_t load_seg, uint32_t paragraphs)
     LiftState *s = lift_state(m);
     if (!s)
         return;
+    lift_coverage_unloaded(m, load_seg, paragraphs);
     uint32_t lo = real_addr(load_seg, 0), hi = lo + paragraphs * 16;
     int kept = 0;
     for (int i = 0; i < s->active_count; i++) {
@@ -355,6 +362,7 @@ void guest_call_far(Machine *m, uint16_t seg, uint16_t off)
     uint16_t sp_after_return = (uint16_t)(m->cpu.r[R_SP].w + 4);
     cpu_set_seg(&m->cpu, S_CS, seg);
     m->cpu.eip = off;
+    lift_coverage_hit(m, LIFT_COVERAGE_CALL);
     lift_run_nested(m, UINT32_MAX, sp_after_return, false); /* the sentinel callback ends it */
     cpu_set_seg(&m->cpu, S_CS, saved_cs);
     m->cpu.eip = saved_ip;
@@ -377,6 +385,7 @@ void guest_call_near(Machine *m, uint16_t off)
     cpu_push16(m, entry_ip);
     uint16_t sp_after_return = (uint16_t)(m->cpu.r[R_SP].w + 2);
     m->cpu.eip = off;
+    lift_coverage_hit(m, LIFT_COVERAGE_CALL);
     lift_run_nested(m, entry_linear, sp_after_return, false);
     m->cpu.eip = entry_ip;
 }

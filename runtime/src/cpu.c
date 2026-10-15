@@ -438,6 +438,7 @@ void cpu_interrupt(Machine *m, uint8_t vector)
     c->flags &= ~(F_IF | F_TF);
     far_jump(m, seg, off);
     c->halted = false;
+    lift_coverage_hit(m, LIFT_COVERAGE_INT);
 }
 
 static void raise_fault(Machine *m, const Insn *in, uint8_t vector)
@@ -892,6 +893,7 @@ static void group_ff(Machine *m, Insn *in, int size)
         v = read_rm(m, size, &op);
         push_op(m, in, c->eip);
         c->eip = v & 0xFFFF;
+        lift_coverage_hit(m, LIFT_COVERAGE_CALL);
         break;
     case 3:
         if (op.is_reg) { invalid_opcode(m, in, 0xFF); return; }
@@ -899,6 +901,7 @@ static void group_ff(Machine *m, Insn *in, int size)
         push_op(m, in, c->seg[S_CS]);
         push_op(m, in, c->eip);
         far_jump(m, mem_rd16(m, operand_part(in, &op, (uint32_t)size)), v);
+        lift_coverage_hit(m, LIFT_COVERAGE_CALL);
         break;
     case 4:
         c->eip = read_rm(m, size, &op) & 0xFFFF;
@@ -1188,6 +1191,7 @@ static void exec_one(Machine *m)
         push_op(m, &in, c->seg[S_CS]);
         push_op(m, &in, c->eip);
         far_jump(m, (uint16_t)w, v);
+        lift_coverage_hit(m, LIFT_COVERAGE_CALL);
         return;
     case 0x9B:
         if (m->fpu_present)
@@ -1345,6 +1349,7 @@ static void exec_one(Machine *m)
         v = in.op32 ? fetch32(m) : fetch16(m);
         push_op(m, &in, c->eip);
         c->eip = (c->eip + v) & 0xFFFF;
+        lift_coverage_hit(m, LIFT_COVERAGE_CALL);
         return;
     case 0xE9:
         v = in.op32 ? fetch32(m) : fetch16(m);

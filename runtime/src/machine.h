@@ -96,6 +96,7 @@ struct Machine {
     IoMode io_mode;      /* shadow verification records or replays port I/O */
     bool irq_hold;       /* no interrupt delivery while a shadow run compares two paths */
     void *lift;
+    void *coverage;      /* INN_COVERAGE: call targets seen (lift_coverage.c); NULL when off */
 
     void *dos, *bios, *pic, *pit, *vga, *kbd, *mouse, *uart, *ems, *xms, *frontend;
     void *audio, *opl, *speaker, *dma, *sb;
