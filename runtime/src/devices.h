@@ -84,6 +84,7 @@ void kbd_host_key(Machine *m, uint16_t set1_scancode, bool down);
 /* ---- INT 33h mouse driver ---- */
 
 void mouse_init(Machine *m);
+void gameport_init(Machine *m);
 /* Absolute position in the pixels of the frame vga_render produces (w x h of that frame). */
 void mouse_host_motion(Machine *m, int x, int y, int frame_w, int frame_h);
 /* Button 0 left, 1 right, 2 middle. */

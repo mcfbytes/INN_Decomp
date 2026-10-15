@@ -15,6 +15,8 @@ void mem_wr8_slow(Machine *m, uint32_t linear, uint8_t v) { m->mem[linear] = v; 
 uint32_t port_in(Machine *m, uint16_t port, int size) { return size == 1 ? 0xFF : size == 2 ? 0xFFFF : 0xFFFFFFFFu; }
 void port_out(Machine *m, uint16_t port, uint32_t value, int size) {}
 int pic_acknowledge(Machine *m) { return -1; }
+void pic_raise_irq(Machine *m, int irq) {}
+void pic_lower_irq(Machine *m, int irq) {}
 bool lift_dispatch(Machine *m, uint32_t linear) { return false; } /* no hooks: exec_hooks stays NULL */
 void log_msg(const char *fmt, ...) {}
 void fatal(const char *fmt, ...)

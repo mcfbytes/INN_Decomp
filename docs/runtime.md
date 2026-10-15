@@ -43,9 +43,36 @@ capped at 50 ms, from `frame_step`, which Emscripten's main loop drives ([web.md
 
 ## FPU
 
-The interpreter has no x87: escape opcodes decode their operand and do nothing, so `FNINIT` /
-`FNSTSW` probes report no coprocessor and Borland programs fall back to their linked emulator.
-Red Baron is the first title that may need real x87 support (milestone M8).
+`fpu.c` is a 387: every D8-DF escape and FWAIT, with the state (`Fpu`: eight registers, control,
+status and tag words, last instruction and operand pointers) inside `Cpu`, so snapshots and shadow
+verification carry it. `Machine.fpu_present` (default on; `--no-fpu` turns it off) decides whether
+escapes execute or only decode their operand as before, and sets bit 1 of the BIOS equipment word.
+CR0 already reports ET (387 present).
+
+| Topic | Choice |
+|---|---|
+| Precision | Registers are host `long double`s rounded to a 64-bit significand after each operation: exact x87 extended precision on x86 hosts (where `long double` is the 80-bit format), and binary128 rounded to 64 bits under Emscripten. 80-bit memory operands are packed and unpacked bit by bit, so `FLD`/`FSTP m80` round-trip on both |
+| Rounding | Precision control (24, 53, 64 bits) applies to `+ - * /` and `FSQRT` as on a 387. Rounding control applies to integer and BCD stores, `FRNDINT`, real stores and precision-reduced results; extended-precision arithmetic itself always rounds to nearest |
+| Transcendentals | `FSIN`, `FCOS`, `FSINCOS`, `FPTAN`, `FPATAN`, `F2XM1`, `FYL2X`, `FYL2XP1` use libm (may differ from a 387 in the last bit); operands of 2^63 or more set C2 and are left alone, as on the 387 |
+| Exceptions | `FNINIT` gives CW 037Fh (all masked), the DOS default. IE (invalid, stack overflow/underflow with SF and C1), ZE, OE and UE are detected; PE and DE are not reported. Masked responses store the indefinite, infinity or integer indefinite. An unmasked exception sets ES and B, skips the store, and the next waiting instruction (or `FWAIT`) requests IRQ 13; the BIOS default handler only EOIs |
+| Not modelled | NaN payloads and signalling NaNs (every NaN becomes the quiet indefinite with its sign), unsupported 80-bit encodings (read as NaN), the 8087's FENI/FDISI (no-ops as on a 387), P6 instructions (FCOMI, FCMOV) |
+
+Detection: `FNINIT; FNSTSW` stores 0 and `FNSTCW` stores 037Fh, so the Intel/Borland probes find a
+coprocessor; with `--no-fpu` nothing is stored and they find none.
+
+Unit tests: `runtime/tests/test_fpu.c` runs instruction bytes through the interpreter (probes, loads and
+stores in every format, rounding and precision control, compares, `FXAM`, transcendentals, stack
+faults, masked and unmasked exceptions, `FSTENV`/`FSAVE`/`FRSTOR` layouts); it also passes when built
+with Emscripten and run under Node.
+
+Users: Red Baron has no floating point at all (its math is fixed point, `s\util\amath.c`). GOLF links
+Borland's emulator: its code holds `INT 34h`-`3Dh` sequences (2581 in the image) that the emulator's
+handlers either interpret in software (no FPU) or patch in place into `FWAIT` + x87 opcodes (FPU present).
+Both run under dosrt: with the FPU on, GOLF reaches the first tee executing real x87 instructions
+(D8-DF with memory operands of every size, `FCOMPP`, `FSTSW`, the arithmetic-and-pop forms). For lifting
+GOLF later: verification must compare `Cpu.fpu` (registers and status) as it compares the CPU
+registers, and lifted C replacing emulator sequences must reproduce the patched or unpatched bytes the
+original leaves in memory.
 
 ## Port I/O costs bus time
 
@@ -103,6 +130,8 @@ system block, as resident software would take it. Use it to drive LSCITV into sw
 11000 click 285 59               # move, press and release the left button (frame pixels)
 12000 move 100 50
 13000 key 1C                     # set-1 make code, pressed and released
+13500 down 48                    # held until the matching "up" (flight controls)
+13900 up 48
 14000 type guybrush\n            # US layout, \n is Enter
 ```
 
@@ -116,11 +145,37 @@ build/inn --headless --run-ms 95000 --script play.txt --com1 127.0.0.1:2314 work
 The C: drive is a copy of the installed client with the program under `\INN`, as `LSCI.CFG`
 expects. The frontend starts each program in its own directory.
 
+## TSN host stand-in
+
+`tsn_hle.c` replaces TSNEXEC for running one DOS game client alone: INT 14h returns a 17-entry export
+table of callbacks (each stub `FE 38 id CB` ends in `RETF`, since the exports are far cdecl calls).
+Messages travel whole, without the link layer: Send dereferences the client's handle through its own
+callbacks (nested guest calls, as TSNEXEC makes them) and hands the bytes to a hook; Receive allocates and
+fills a handle for the oldest queued host message. GetStatus reports connected (`8003h`), GetLineRate
+2400, the tick-counter pointer is `0000:04F0`, the shared block (256 bytes) and the previous-program name
+live in the ROM area.
+
+The frontend's `--tsn-host rules.txt` (`runtime/frontend/tsn_script.c`) answers from a rule file:
+
+```
+shared 80 02 00 01 03 05            # shared block bytes at a hex offset ("text" also allowed)
+previous SierraLand                 # GetPreviousProgram
+reply 11 00 .. .. .. .. 09 00 => 0d 00 01 04 00 00 09 00 01 02
+reply 24 02 => 24 02 T              # T: host time (year-1900, month, day, hour, minute, second)
+reply 1c => 02 00 @1 @2 @1 @2 @9-   # @N: request byte N; @N-: the request from byte N on
+```
+
+Every rule whose pattern (hex, `..` any byte) prefixes a client message queues its reply. Run the game
+itself, not `TSNEXEC.EXE`: `inn --tsn-host rules.txt <drive> 'INN\BARON\RB.EXE' '-C..\LSCI.CFG'`
+([redbaron.md](redbaron.md)).
+
 ## Devices
 
 - **Mouse (INT 33h, HLE).** User event handlers (AX=0Ch/14h) run from IRQ12: host events queue,
   IRQ12 enters a ROM trampoline that saves registers, far-calls the handler with the event in
   AX/BX/CX/DX/SI/DI, restores, EOIs and IRETs. One queued event per call.
+- **Game port (201h).** Nothing attached: reads return FFh (no one-shot ever fires, no button),
+  writes are ignored. Red Baron polls it every frame.
 - **VGA.** B8000h is the text buffer; the A0000h window is routed through `vga_mem_read/write`.
 - **8237 DMA (`dma.c`).** Channels 0-3: address/count with the flip-flop, mode, single and all-channel
   masks, status (TC bits, cleared on read), master clear, page registers 87h/83h/81h/82h. Devices pull

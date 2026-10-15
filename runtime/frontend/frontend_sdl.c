@@ -14,6 +14,8 @@
 #include "devices.h"
 #include "frame_clock.h"
 #include "input_script.h"
+#include "tsn_hle.h"
+#include "tsn_script.h"
 #include "machine.h"
 #if __has_include("dos.h")
 #include "dos.h"
@@ -42,6 +44,8 @@ typedef struct Options {
     const char *script;
     const char *wav;
     unsigned conv_kb;
+    bool no_fpu;
+    const char *tsn_host;
     const char *c_dir, *program;
     char args[ARGS_MAX];
 } Options;
@@ -375,7 +379,7 @@ static int run_headless(Frontend *f, const Options *o)
 
 static void usage(void)
 {
-    fprintf(stderr, "usage: inn [--trace N] [--ips N] [--com1 host:port|ws://host:port] [--perf] [--wav out.wav] [--conv-kb N] "
+    fprintf(stderr, "usage: inn [--trace N] [--ips N] [--com1 host:port|ws://host:port] [--perf] [--wav out.wav] [--conv-kb N] [--no-fpu] [--tsn-host rules.txt] "
                     "[--headless --run-ms N --screenshot out.ppm --script input.txt] <c-drive-dir> <program> [args]\n");
 }
 
@@ -387,6 +391,7 @@ static int parse_args(int argc, char **argv, Options *o)
         const char *a = argv[i], *next = i + 1 < argc ? argv[i + 1] : NULL;
         if (!strcmp(a, "--headless")) { o->headless = true; continue; }
         if (!strcmp(a, "--perf")) { o->perf = true; continue; }
+        if (!strcmp(a, "--no-fpu")) { o->no_fpu = true; continue; }
         if (!next)
             return -1;
         if (!strcmp(a, "--trace")) o->trace = atoi(next);
@@ -396,6 +401,7 @@ static int parse_args(int argc, char **argv, Options *o)
         else if (!strcmp(a, "--screenshot")) o->screenshot = next;
         else if (!strcmp(a, "--script")) o->script = next;
         else if (!strcmp(a, "--wav")) o->wav = next;
+        else if (!strcmp(a, "--tsn-host")) o->tsn_host = next;
         else if (!strcmp(a, "--conv-kb")) o->conv_kb = (unsigned)strtoul(next, NULL, 10);
         else return -1;
         i++;
@@ -425,9 +431,19 @@ static int attach_com1(Machine *m, const char *spec)
     return uart_attach_tcp(m, UART_COM1, host, atoi(colon + 1));
 }
 
+static TsnScript *tsn_host;
+
 static int boot(Machine *m, const Options *o)
 {
     bios_init(m);
+    if (o->tsn_host) {
+        tsn_hle_install(m, NULL, NULL);
+        if (!(tsn_host = tsn_script_load(m, o->tsn_host))) {
+            fprintf(stderr, "cannot load TSN host rules %s\n", o->tsn_host);
+            return -1;
+        }
+        tsn_hle_set_send_hook(m, tsn_script_on_send, tsn_host);
+    }
     if (o->com1 && attach_com1(m, o->com1) != 0) {
         fprintf(stderr, "cannot connect COM1 to %s\n", o->com1);
         return -1;
@@ -466,6 +482,7 @@ int main(int argc, char **argv)
     f.m->trace = o.trace;
     if (o.ips)
         f.m->ips = o.ips;
+    f.m->fpu_present = !o.no_fpu;
     int rc = boot(f.m, &o);
     if (rc == 0)
         rc = o.headless ? run_headless(&f, &o) : run_windowed(&f, &o);
@@ -475,6 +492,10 @@ int main(int argc, char **argv)
 #ifdef HAVE_DOS
     dos_shutdown(f.m);
 #endif
+    if (f.m->tsn) {
+        tsn_hle_shutdown(f.m);
+        tsn_script_free(tsn_host);
+    }
     bios_shutdown(f.m);
     machine_destroy(f.m);
     return exit_code;

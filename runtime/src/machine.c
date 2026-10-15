@@ -176,6 +176,7 @@ Machine *machine_create(void)
     memset(m->mem + 0xC0000, 0xFF, MEM_ONE_MEG - 0xC0000);
     m->ips = 20000000;
     m->io_cost_ns = 1000;
+    m->fpu_present = true;
     cpu_reset(m);
     lift_init(m);
     return m;

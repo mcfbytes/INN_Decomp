@@ -11,7 +11,7 @@
 enum {
     IVT_VECTORS = 256,
     TICKS_PER_DAY = 0x1800B0,
-    EQUIP_FLOPPY = 0x0001, EQUIP_MOUSE = 0x0004, EQUIP_VIDEO_COLOR80 = 0x0020,
+    EQUIP_FLOPPY = 0x0001, EQUIP_FPU = 0x0002, EQUIP_MOUSE = 0x0004, EQUIP_VIDEO_COLOR80 = 0x0020,
     EQUIP_SERIAL_SHIFT = 9, SERIAL_PORTS = 2,
     CONVENTIONAL_KB = 640,
     COM1_BASE = 0x3F8, COM2_BASE = 0x2F8,
@@ -249,7 +249,7 @@ static void install_bda(Machine *m)
     bda_wr16(m, BDA_COM_PORTS, COM1_BASE);
     bda_wr16(m, BDA_COM_PORTS + 2, COM2_BASE);
     bda_wr16(m, BDA_EQUIPMENT, EQUIP_FLOPPY | EQUIP_MOUSE | EQUIP_VIDEO_COLOR80 |
-                                   SERIAL_PORTS << EQUIP_SERIAL_SHIFT);
+                                   (m->fpu_present ? EQUIP_FPU : 0) | SERIAL_PORTS << EQUIP_SERIAL_SHIFT);
     bda_wr16(m, BDA_MEMORY_KB, CONVENTIONAL_KB);
     uint32_t ticks = ticks_since_midnight();
     bda_wr16(m, BDA_TICKS, (uint16_t)ticks);
@@ -281,6 +281,7 @@ void bios_init(Machine *m)
     bios_video_init(m);
     bios_kbd_init(m);
     mouse_init(m);
+    gameport_init(m);
     uart_init(m);
     audio_init(m);
     opl_init(m);

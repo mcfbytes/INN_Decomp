@@ -83,6 +83,8 @@ static int parse_line(InputScript *s, char *line)
     unsigned code;
     if (!strcmp(verb, "key") && sscanf(rest, "%x", &code) == 1) {
         add_keystroke(s, at, (uint16_t)code);
+    } else if ((!strcmp(verb, "down") || !strcmp(verb, "up")) && sscanf(rest, "%x", &code) == 1) {
+        add_event(s, at, verb[0] == 'd' ? EV_KEY_DOWN : EV_KEY_UP, (int)(code & 0xFFFF), 0);
     } else if (!strcmp(verb, "type")) {
         for (const char *p = rest; *p; p++, at += TYPE_GAP_US) {
             uint16_t c = p[0] == '\\' && p[1] == 'n' ? (p++, 0x1C) : ascii_to_set1(*p);

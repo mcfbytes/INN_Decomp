@@ -1,5 +1,5 @@
-/* 386 real-mode interpreter: the reference semantics for every execution tier.
- * No x87: escape opcodes decode their operand and do nothing, so FPU probes report "absent". */
+/* 386 real-mode interpreter, the reference semantics for every execution tier. Escapes go to the 387
+ * (fpu.c); with Machine.fpu_present off they only decode their operand, so probes find no FPU. */
 #include <stdio.h>
 #include <string.h>
 
@@ -1190,6 +1190,8 @@ static void exec_one(Machine *m)
         far_jump(m, (uint16_t)w, v);
         return;
     case 0x9B:
+        if (m->fpu_present)
+            fpu_wait(m);
         return;
     case 0x9C: push_op(m, &in, c->flags & (in.op32 ? 0x00FCFFFFu : 0xFFFF)); return;
     case 0x9D: write_flags(c, pop_op(m, &in), in.op32); return;
@@ -1299,9 +1301,18 @@ static void exec_one(Machine *m)
         v = in.addr32 ? c->r[R_BX].e + c->r[R_AX].b.l : (uint16_t)(c->r[R_BX].w + c->r[R_AX].b.l);
         c->r[R_AX].b.l = mem_rd8(m, seg_base_for(m, &in, S_DS) + v);
         return;
-    case 0xD8: case 0xD9: case 0xDA: case 0xDB: case 0xDC: case 0xDD: case 0xDE: case 0xDF:
-        decode_modrm(m, &in);
+    case 0xD8: case 0xD9: case 0xDA: case 0xDB: case 0xDC: case 0xDD: case 0xDE: case 0xDF: {
+        uint8_t modrm = mem_rd8(m, c->seg_base[S_CS] + (c->eip & 0xFFFF));
+        Operand op = decode_modrm(m, &in);
+        if (!m->fpu_present)
+            return;
+        uint32_t base = op.addr - op.off;
+        FpuInsn fi = {.opcode = opcode, .modrm = modrm, .is_reg = op.is_reg, .addr = op.addr,
+                      .seg = (uint16_t)(base >> 4), .off = (uint16_t)op.off, .op32 = in.op32,
+                      .cs = c->seg[S_CS], .ip = in.start_eip};
+        fpu_exec(m, &fi);
         return;
+    }
     case 0xE0: case 0xE1: case 0xE2: case 0xE3: {
         int8_t rel = (int8_t)fetch8(m);
         uint32_t count = count_reg(m, &in);
@@ -1431,6 +1442,7 @@ void cpu_reset(Machine *m)
     memset(c, 0, sizeof *c);
     c->flags = 2 | F_IF;
     c->hook_skip = UINT32_MAX;
+    fpu_init(&c->fpu);
     for (int s = 0; s < 6; s++)
         cpu_set_seg(c, s, 0);
 }

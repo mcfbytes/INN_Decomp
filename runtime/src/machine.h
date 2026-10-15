@@ -7,6 +7,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "fpu.h"
+
 enum {
     MEM_CONVENTIONAL_END = 0xA0000,
     MEM_VGA_BASE = 0xA0000,
@@ -44,6 +46,7 @@ typedef struct Cpu {
     bool irq_inhibit; /* one-instruction shadow after mov ss / pop ss / sti */
     uint64_t instructions;
     uint32_t stall; /* extra instruction slots consumed by slow bus cycles (port I/O) */
+    Fpu fpu;        /* x87 state; used when Machine.fpu_present */
 } Cpu;
 
 typedef struct Machine Machine;
@@ -96,9 +99,11 @@ struct Machine {
 
     void *dos, *bios, *pic, *pit, *vga, *kbd, *mouse, *uart, *ems, *xms, *frontend;
     void *audio, *opl, *speaker, *dma, *sb;
+    void *tsn; /* TSNEXEC stand-in (tsn_hle.c), when a frontend installs one */
     bool exit_requested;
     int exit_code;
     int trace; /* 0 off, 1 interrupts and DOS calls, 2 every instruction */
+    bool fpu_present; /* a 387 answers escape opcodes; otherwise they decode and do nothing */
 };
 
 /* ---- memory ---- */
