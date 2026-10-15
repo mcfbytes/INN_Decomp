@@ -17,7 +17,7 @@ Recon (2026-10-14) found code that a one-shot static decompile cannot cover:
 | TSNEXEC | TSR that hooks INT 14h and EXECs every other program; drives the UART directly |
 | YSERBIUS, TWINION | Borland VROOMM overlays (INT 3Fh): code loaded into an overlay buffer at run time |
 | GOLF | Borland FPU emulator (INT 34h..3Dh), which patches itself into x87 opcodes; 386 instructions |
-| BARON | x87, direct VGA/PIT/PIC programming |
+| BARON | direct VGA/PIT/PIC programming, code overlays loaded from its volume archive (no x87, despite first guesses) |
 
 ## 2. Architecture: one machine, three ways to run its code
 
@@ -81,7 +81,13 @@ produces the game.
       Status 2026-10-14: from the INN map, `CGENN` and `DARKSTRT` run under the interpreter to the town and
       the dungeon with music, `TWGENN` and `FATES` to the town, given three host additions ([yserbius.md](yserbius.md)). Per-overlay
       registration done ([lifting.md](lifting.md), "Overlays").
-- [ ] **M8** Golf, Red Baron (x87), Shoppers Advantage.
+- [ ] **M8** Golf, Red Baron, Shoppers Advantage. Status 2026-10-14: the interpreter has a 387
+      ([runtime.md](runtime.md), "FPU"; Red Baron turned out to have no floating point, GOLF's Borland
+      emulator patches itself into x87 code and runs either way). `--tsn-host` runs a game client without
+      INN against a scripted host: Red Baron boots and flies, GOLF reaches the first tee. From INN, Red
+      Baron is reached through SierraLand's Waiting Room with 2-4 players; `innkeeperd` has no Red Baron
+      service or queue yet ([redbaron.md](redbaron.md)). Red Baron census and lifting plan done (private
+      `BARON-PLAN.md`).
 - [ ] **M9** Web-native port (goal set 2026-10-14). Once a program is fully lifted, its video, sound,
       timer and serial code talks to the host directly: frames to a canvas, music and effects to
       WebAudio, the link to a WebSocket, with no emulated VGA, OPL, PIT or UART behind it. Lifted
