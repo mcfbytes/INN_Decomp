@@ -7,6 +7,8 @@
 #include "audio.h"
 #include "bios_internal.h"
 #include "font.h"
+#include "lift.h"
+#include "native.h"
 
 enum {
     IVT_VECTORS = 256,
@@ -19,12 +21,22 @@ enum {
     VEC_EQUIPMENT = 0x11, VEC_MEMORY = 0x12, VEC_DISK = 0x13, VEC_SYSTEM = 0x15,
     VEC_PRINTER = 0x17, VEC_TIME = 0x1A, VEC_USER_TICK = 0x1C, VEC_FONT_HIGH = 0x1F,
     VEC_FONT_GRAPHICS = 0x43,
+    ROM_IRQ_MAX = 8, CALLBACK_TRAP_LEN = 3, NO_CALLBACK = -1,
     PRINTER_READY = 0x90,
     ERR_UNSUPPORTED = 0x86, DISK_ERR_BAD_COMMAND = 0x01,
 };
 
+/* An IRQ routine in ROM (callback, [INT 1Ch,] EOI, IRET) and what its native C equivalent does. */
+typedef struct RomIrq {
+    uint16_t entry;
+    int callback; /* NO_CALLBACK: EOI and IRET only */
+    bool slave, user_tick;
+} RomIrq;
+
 typedef struct Bios {
     uint16_t rom_next;
+    RomIrq rom_irq[ROM_IRQ_MAX];
+    int rom_irq_count;
     uint16_t config_table_off;
     uint64_t wait_until_us; /* INT 15h AH=86h in progress; 0 when idle */
 } Bios;
@@ -65,11 +77,56 @@ static uint16_t emit_eoi_iret(Machine *m, bool slave)
     return slave ? bios_rom_emit(m, SLAVE, sizeof SLAVE) : bios_rom_emit(m, MASTER, sizeof MASTER);
 }
 
+/* ---- native equivalents of the ROM's IRQ routines (docs/native.md section 6) ---- */
+
+static void rom_irq_native(Machine *m)
+{
+    Bios *b = bios_state(m);
+    uint16_t entry = (uint16_t)m->cpu.eip;
+    const RomIrq *r = b->rom_irq;
+    while (r < b->rom_irq + b->rom_irq_count && r->entry != entry)
+        r++;
+    if (r == b->rom_irq + b->rom_irq_count)
+        fatal("native: no ROM IRQ routine at %04X:%04X", BIOS_SEG, entry);
+    if (r->callback != NO_CALLBACK) {
+        m->cpu.eip = (uint16_t)(entry + CALLBACK_TRAP_LEN); /* where the CPU has IP when it calls back */
+        while (m->callbacks[r->callback](m) == CB_RETRY)
+            native_idle(m);
+    }
+    if (r->user_tick)
+        native_int(m, VEC_USER_TICK);
+    if (r->slave)
+        native_pic_eoi(m, 1, -1);
+    native_pic_eoi(m, 0, -1);
+    lift_ret_iret(m);
+}
+
+static void rom_iret_native(Machine *m)
+{
+    lift_ret_iret(m);
+}
+
+static void register_rom_irq(Machine *m, uint16_t entry, int callback, bool slave, bool user_tick, const char *name)
+{
+    Bios *b = bios_state(m);
+    if (b->rom_irq_count == ROM_IRQ_MAX)
+        fatal("BIOS: too many ROM IRQ routines (%s)", name);
+    b->rom_irq[b->rom_irq_count++] = (RomIrq){ entry, callback, slave, user_tick };
+    native_rom_lift(m, BIOS_SEG, entry, rom_irq_native, name);
+}
+
+/* The callback id of the trap bios_rom_callback just emitted at entry. */
+static int trap_callback(Machine *m, uint16_t entry)
+{
+    return m->mem[real_addr(BIOS_SEG, entry) + 2];
+}
+
 void bios_irq_handler(Machine *m, int vector, const char *name, CallbackFn fn, bool slave)
 {
     uint16_t entry = bios_rom_callback(m, name, fn);
     emit_eoi_iret(m, slave);
     bios_set_vector(m, vector, BIOS_SEG, entry);
+    register_rom_irq(m, entry, trap_callback(m, entry), slave, false, name);
 }
 
 CallbackResult bios_block(Machine *m)
@@ -100,6 +157,7 @@ static void install_timer(Machine *m)
     bios_rom_emit(m, CALL_1C, sizeof CALL_1C);
     emit_eoi_iret(m, false);
     bios_set_vector(m, VEC_TIMER, BIOS_SEG, entry);
+    register_rom_irq(m, entry, trap_callback(m, entry), false, true, "int08");
 }
 
 /* ---- small services ---- */
@@ -232,6 +290,9 @@ static void install_default_vectors(Machine *m)
         bios_set_vector(m, v, BIOS_SEG, master);
     for (int v = VEC_IRQ8; v <= VEC_IRQ15; v++)
         bios_set_vector(m, v, BIOS_SEG, slave);
+    register_rom_irq(m, master, NO_CALLBACK, false, false, "default IRQ");
+    register_rom_irq(m, slave, NO_CALLBACK, true, false, "default slave IRQ");
+    native_rom_lift(m, BIOS_SEG, ROM_DUMMY_IRET_OFF, rom_iret_native, "iret");
     bios_set_vector(m, VEC_FONT_HIGH, BIOS_SEG, ROM_FONT8_HIGH_OFF);
     bios_set_vector(m, VEC_FONT_GRAPHICS, BIOS_SEG, ROM_FONT8_OFF);
 }

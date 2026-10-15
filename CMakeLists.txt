@@ -11,10 +11,36 @@ elseif(NOT CMAKE_BUILD_TYPE)
 endif()
 add_compile_options(-Wall -Wextra -Wno-unused-parameter)
 
-# The machine and its services; frontends live in runtime/frontend.
-file(GLOB DOSRT_SOURCES CONFIGURE_DEPENDS runtime/src/*.c)
+# Build configurations (docs/native.md section 10). INN_NATIVE_HW: drivers call the host APIs;
+# INN_NATIVE: the native INN client, which implies it.
+option(INN_NATIVE "Native INN client: no CPU interpretation while INN runs" OFF)
+option(INN_NATIVE_HW "Lifted drivers reach devices through the host APIs" OFF)
+if(INN_NATIVE)
+  set(INN_NATIVE_HW ON)
+endif()
+if(EMSCRIPTEN)
+  set(INN_WEB_SUSPEND "ASYNCIFY" CACHE STRING "How lifted code yields to the browser: ASYNCIFY or JSPI")
+  if(INN_NATIVE)
+    # The native C stack is suspended whole (JSPI) and unwound by longjmp at process exit; JavaScript
+    # longjmp would put invoke_* frames on it, which JSPI cannot suspend across.
+    if(NOT INN_WEB_SUSPEND STREQUAL "JSPI")
+      message(FATAL_ERROR "INN_NATIVE in the browser requires -DINN_WEB_SUSPEND=JSPI")
+    endif()
+    add_compile_options(-fwasm-exceptions -sSUPPORT_LONGJMP=wasm)
+    add_link_options(-fwasm-exceptions -sSUPPORT_LONGJMP=wasm)
+  endif()
+endif()
+
+# The machine and its services; frontends live in runtime/frontend. The native core is compiled in
+# every configuration so hybrid builds keep it building; only INN_NATIVE boots through it.
+file(GLOB DOSRT_SOURCES CONFIGURE_DEPENDS runtime/src/*.c runtime/src/native/*.c)
 add_library(dosrt STATIC ${DOSRT_SOURCES})
-target_include_directories(dosrt PUBLIC runtime/src)
+target_include_directories(dosrt PUBLIC runtime/src runtime/src/native)
+if(INN_NATIVE)
+  target_compile_definitions(dosrt PUBLIC INN_NATIVE=1 INN_NATIVE_HW=1)
+elseif(INN_NATIVE_HW)
+  target_compile_definitions(dosrt PUBLIC INN_NATIVE_HW=1)
+endif()
 
 # Lifted (hand-decompiled) sources live in the private tree; the public build runs without them.
 set(INN_LIFTED_DIR "${CMAKE_SOURCE_DIR}/private/lifted" CACHE PATH "Lifted sources (private tree)")
@@ -56,7 +82,6 @@ if(EMSCRIPTEN)
   # but instruments the call path. With Asyncify, indirect calls are ignored, so the functions that
   # reach a sleep through one are listed; the interpreter loop is not on that path (lifted code is
   # dispatched from machine_step, into which lift_dispatch may be inlined, so both are named).
-  set(INN_WEB_SUSPEND "ASYNCIFY" CACHE STRING "How lifted code yields to the browser: ASYNCIFY or JSPI")
   target_compile_definitions(inn PRIVATE INN_ASYNCIFY=1)
   target_link_options(inn PRIVATE -sSTACK_SIZE=1048576)
   if(INN_WEB_SUSPEND STREQUAL "JSPI")
@@ -78,6 +103,20 @@ if(EMSCRIPTEN)
   foreach(script page.js zip.js saves.js)
     configure_file(runtime/web/${script} ${CMAKE_BINARY_DIR}/${script} COPYONLY)
   endforeach()
+  if(INN_NATIVE)
+    # The JSPI proof (docs/native.md section 4): test_native under Node, suspending inside setjmp.
+    enable_testing()
+    add_executable(test_native runtime/tests/test_native.c)
+    target_link_libraries(test_native dosrt)
+    target_link_options(test_native PRIVATE -sJSPI -sENVIRONMENT=node -sEXIT_RUNTIME=1
+      -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=64MB -sSTACK_SIZE=1048576)
+    if(CMAKE_CROSSCOMPILING_EMULATOR)
+      set(INN_NODE ${CMAKE_CROSSCOMPILING_EMULATOR})
+    else()
+      find_program(INN_NODE NAMES node nodejs REQUIRED)
+    endif()
+    add_test(NAME test_native COMMAND ${INN_NODE} --experimental-wasm-jspi ${CMAKE_BINARY_DIR}/test_native.js)
+  endif()
 else()
   find_package(SDL2 REQUIRED)
   add_executable(inn ${INN_FRONTEND_SOURCES})

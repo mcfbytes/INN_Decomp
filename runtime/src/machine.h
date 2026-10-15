@@ -103,6 +103,11 @@ struct Machine {
     void *dos, *bios, *pic, *pit, *vga, *kbd, *mouse, *uart, *ems, *xms, *frontend;
     void *audio, *opl, *speaker, *dma, *sb;
     void *exec_stub; /* TSNEXEC stand-in (exec_stub.c), when a frontend installs one */
+    /* Native mode (docs/native.md): INN code runs as C; no device tickers, no port I/O, interrupts from
+     * the native core (runtime/src/native). Cleared while a game runs on the emulator. */
+    bool native;
+    bool native_video; /* A0000-BFFFF are plain memory read by the host video */
+    void *native_state;
     bool exit_requested;
     int exit_code;
     int trace; /* 0 off, 1 interrupts and DOS calls, 2 every instruction */

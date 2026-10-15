@@ -1,6 +1,7 @@
 /* SDL2 frontend: input into the machine, frames and sound out. Per-frame work is in frame_step so
  * the browser build can drive it from emscripten_set_main_loop; --headless needs no display. */
 #include <SDL.h>
+#include <setjmp.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,6 +21,12 @@
 #if __has_include("dos.h")
 #include "dos.h"
 #define HAVE_DOS 1
+#endif
+#ifdef INN_NATIVE
+#include "host_input.h"
+#include "host_platform.h"
+#include "host_video.h"
+#include "native.h"
 #endif
 
 enum {
@@ -52,6 +59,10 @@ typedef struct Options {
 
 typedef struct Frontend {
     Machine *m;
+    const Options *o;
+    InputScript *script;        /* headless runs */
+    uint64_t end_us;            /* headless runs end at this emulated time (--run-ms) */
+    uint64_t script_due_us;     /* a nested wait applies the script once past the current chunk */
     SDL_Window *window;
     SDL_Renderer *renderer;
     SDL_Texture *texture;
@@ -129,7 +140,14 @@ static int to_guest_button(uint8_t sdl_button)
 /* Window coordinates are logical (WINDOW_W x WINDOW_H) thanks to SDL_RenderSetLogicalSize. */
 static void mouse_to_guest(Frontend *f, int wx, int wy)
 {
-    mouse_host_motion(f->m, wx * f->frame_w / WINDOW_W, wy * f->frame_h / WINDOW_H, f->frame_w, f->frame_h);
+    int x = wx * f->frame_w / WINDOW_W, y = wy * f->frame_h / WINDOW_H;
+#ifdef INN_NATIVE
+    if (f->m->native) {
+        host_input_mouse_motion(f->m, x, y, f->frame_w, f->frame_h);
+        return;
+    }
+#endif
+    mouse_host_motion(f->m, x, y, f->frame_w, f->frame_h);
 }
 
 static void handle_event(Frontend *f, const SDL_Event *e)
@@ -138,6 +156,12 @@ static void handle_event(Frontend *f, const SDL_Event *e)
     case SDL_QUIT: f->quit = true; break;
     case SDL_KEYDOWN: case SDL_KEYUP: {
         uint16_t sc = to_set1(e->key.keysym.scancode);
+#ifdef INN_NATIVE
+        if (sc && f->m->native) {
+            host_input_key(f->m, sc, e->type == SDL_KEYDOWN);
+            break;
+        }
+#endif
         if (sc)
             kbd_host_key(f->m, sc, e->type == SDL_KEYDOWN);
         break;
@@ -145,6 +169,12 @@ static void handle_event(Frontend *f, const SDL_Event *e)
     case SDL_MOUSEMOTION: mouse_to_guest(f, e->motion.x, e->motion.y); break;
     case SDL_MOUSEBUTTONDOWN: case SDL_MOUSEBUTTONUP:
         mouse_to_guest(f, e->button.x, e->button.y);
+#ifdef INN_NATIVE
+        if (f->m->native) {
+            host_input_mouse_button(f->m, to_guest_button(e->button.button), e->type == SDL_MOUSEBUTTONDOWN);
+            break;
+        }
+#endif
         mouse_host_button(f->m, to_guest_button(e->button.button), e->type == SDL_MOUSEBUTTONDOWN);
         break;
     default: break;
@@ -173,16 +203,22 @@ static void draw_cursor_overlay(Frontend *f)
         }
 }
 
-static void present(Frontend *f)
+/* f->frame holds the rendered frame. */
+static void show_frame(Frontend *f)
 {
-    f->last_present_us = frame_clock_now_us();
-    vga_render(f->m, f->frame, &f->frame_w, &f->frame_h);
     draw_cursor_overlay(f);
     SDL_Rect src = { 0, 0, f->frame_w, f->frame_h };
     SDL_UpdateTexture(f->texture, &src, f->frame, f->frame_w * (int)sizeof f->frame[0]);
     SDL_RenderClear(f->renderer);
     SDL_RenderCopy(f->renderer, f->texture, &src, NULL);
     SDL_RenderPresent(f->renderer);
+}
+
+static void present(Frontend *f)
+{
+    f->last_present_us = frame_clock_now_us();
+    vga_render(f->m, f->frame, &f->frame_w, &f->frame_h);
+    show_frame(f);
 }
 
 /* ---- main loop ---- */
@@ -315,7 +351,7 @@ static void close_window(Frontend *f)
     SDL_Quit();
 }
 
-static int run_windowed(Frontend *f, const Options *o)
+static int start_windowed(Frontend *f, const Options *o)
 {
     if (open_window(f) != 0) {
         fprintf(stderr, "window: %s\n", SDL_GetError());
@@ -327,6 +363,11 @@ static int run_windowed(Frontend *f, const Options *o)
     frame_clock_start(&f->clock, f->m, o->perf);
     f->perf = o->perf;
     g_frontend = f;
+    return 0;
+}
+
+static int run_windowed(Frontend *f)
+{
     lift_set_nested_yield(f->m, frontend_nested_yield);
 #if defined(INN_ASYNCIFY)
     /* A plain loop rather than emscripten_set_main_loop: lifted code may sleep inside a frame. */
@@ -348,32 +389,190 @@ static int run_windowed(Frontend *f, const Options *o)
     return 0;
 }
 
-static int run_headless(Frontend *f, const Options *o)
+static int finish_run(Frontend *f, int rc);
+
+/* Applies the input script due by now and ends the run once --run-ms has passed, from wherever the
+ * machine waits: a session that never returns from C still ends with its summary. */
+static void headless_wait_point(Machine *m)
 {
-    uint64_t end = f->m->virtual_us + o->run_ms * 1000;
-    InputScript *script = NULL;
-    if (o->script && !(script = input_script_load(o->script))) {
+    Frontend *f = g_frontend;
+    if (m->virtual_us >= f->end_us)
+        exit(finish_run(f, 0));
+    if (f->script)
+        input_script_apply(f->script, m);
+    frontend_audio_pump(m);
+}
+
+/* A nested wait that outlasts the current chunk (a native start running inside the hybrid build)
+ * gets the script at the chunk rate of the headless loop. */
+static void headless_nested_yield(Machine *m)
+{
+    Frontend *f = g_frontend;
+    if (m->virtual_us < f->script_due_us && m->virtual_us < f->end_us)
+        return;
+    f->script_due_us = m->virtual_us + HEADLESS_CHUNK_US;
+    headless_wait_point(m);
+}
+
+static int start_headless(Frontend *f, const Options *o)
+{
+    f->end_us = f->m->virtual_us + o->run_ms * 1000;
+    if (o->script && !(f->script = input_script_load(o->script))) {
         fprintf(stderr, "cannot load script %s\n", o->script);
         return -1;
     }
     if (o->wav && frontend_audio_open(f->m, false, o->wav) != 0)
         return -1;
-    while (f->m->virtual_us < end && !f->m->exit_requested) {
-        if (script)
-            input_script_apply(script, f->m);
+    g_frontend = f;
+    return 0;
+}
+
+static int run_headless(Frontend *f)
+{
+    lift_set_nested_yield(f->m, headless_nested_yield);
+    while (f->m->virtual_us < f->end_us && !f->m->exit_requested) {
+        if (f->script)
+            input_script_apply(f->script, f->m);
+        f->script_due_us = f->m->virtual_us + HEADLESS_CHUNK_US;
         machine_run_for(f->m, HEADLESS_CHUNK_US);
         frontend_audio_pump(f->m);
     }
-    if (script)
-        input_script_free(script);
-    if (frontend_audio_close(f->m) != 0)
-        return -1;
-    if (o->screenshot && vga_write_ppm(f->m, o->screenshot) != 0) {
-        fprintf(stderr, "cannot write %s\n", o->screenshot);
-        return -1;
-    }
     return 0;
 }
+
+#ifdef INN_NATIVE
+/* ---- native boot (docs/native.md section 4): the program drives ---- */
+
+enum { NATIVE_NO_START = -1 };
+
+static uint64_t platform_now_us(void *ctx)
+{
+    return frame_clock_now_us();
+}
+
+#ifdef __EMSCRIPTEN__
+/* A zero-delay turn of the browser's event loop: a MessageChannel message avoids the 4 ms clamp of
+ * nested setTimeout. The whole C stack is suspended meanwhile (JSPI). */
+EM_ASYNC_JS(void, browser_turn, (void), {
+    await new Promise(resolve => {
+        const channel = new MessageChannel();
+        channel.port1.onmessage = () => resolve();
+        channel.port2.postMessage(0);
+    });
+});
+#endif
+
+static void platform_sleep_us(void *ctx, uint64_t us)
+{
+    Frontend *f = ctx;
+    f->yields++;
+#ifdef __EMSCRIPTEN__
+    if (us < 1000)
+        browser_turn();
+    else
+        emscripten_sleep((unsigned)(us / 1000));
+#else
+    SDL_Delay((uint32_t)(us / 1000));
+#endif
+}
+
+static void end_windowed(Frontend *f)
+{
+#ifdef __EMSCRIPTEN__
+    report_exit(f);
+#else
+    frontend_audio_close(f->m);
+    close_window(f);
+#endif
+}
+
+static void platform_poll_events(void *ctx, Machine *m)
+{
+    Frontend *f = ctx;
+    SDL_Event e;
+    while (SDL_PollEvent(&e))
+        handle_event(f, &e);
+    if (f->quit) {
+        end_windowed(f);
+        exit(finish_run(f, 0));
+    }
+}
+
+static void platform_present(void *ctx, const uint32_t *argb, int w, int h)
+{
+    Frontend *f = ctx;
+    f->last_present_us = frame_clock_now_us();
+    f->frame_w = w, f->frame_h = h;
+    memcpy(f->frame, argb, (size_t)w * (size_t)h * sizeof f->frame[0]);
+    show_frame(f);
+}
+
+static void platform_audio_pump(void *ctx, Machine *m)
+{
+    frontend_audio_pump(m);
+}
+
+static bool platform_quit_requested(void *ctx)
+{
+    return ((Frontend *)ctx)->quit;
+}
+
+/* M9 stand-in until package 10a (native_run_top): enters the top program at its native start and
+ * returns its exit code once it terminates, or NATIVE_NO_START when it has none. */
+static jmp_buf top_terminated_jmp;
+
+static void top_terminated(Machine *m, uint8_t code)
+{
+    if (m->exit_requested)
+        longjmp(top_terminated_jmp, 1);
+}
+
+static int native_run_top(Machine *m)
+{
+    uint32_t start = m->cpu.seg_base[S_CS] + (m->cpu.eip & 0xFFFF);
+    if (!lift_hooked(m, start)) {
+        native_set_active(m, false);
+        return NATIVE_NO_START;
+    }
+    native_set_active(m, true);
+#ifdef HAVE_DOS
+    dos_set_terminate_hook(m, top_terminated);
+#endif
+    if (!setjmp(top_terminated_jmp))
+        lift_dispatch_far_at(m, m->cpu.seg[S_CS], (uint16_t)m->cpu.eip);
+#ifdef HAVE_DOS
+    dos_set_terminate_hook(m, NULL);
+#endif
+    native_set_active(m, false);
+    return m->exit_code;
+}
+
+/* Runs the program natively; without a native start it runs on the emulator as in the hybrid build. */
+static int run_native(Frontend *f)
+{
+    static HostPlatform platform;
+    platform = (HostPlatform){ .ctx = f, .now_us = platform_now_us, .sleep_us = platform_sleep_us,
+                               .poll_events = platform_poll_events, .present = platform_present,
+                               .audio_pump = platform_audio_pump, .quit_requested = platform_quit_requested };
+    Machine *m = f->m;
+    uint16_t cs = m->cpu.seg[S_CS], ip = (uint16_t)m->cpu.eip;
+    if (f->o->headless) {
+        native_set_platform(m, NULL);
+        native_set_headless_hook(m, headless_wait_point);
+    } else {
+        g_frontend = f;
+        native_set_platform(m, &platform);
+    }
+    if (native_run_top(m) != NATIVE_NO_START) {
+        if (!f->o->headless)
+            end_windowed(f);
+        return 0;
+    }
+    log_msg("native: %s has no native start at %04X:%04X; it runs on the emulator", f->o->program, cs, ip);
+    native_set_platform(m, NULL);
+    return f->o->headless ? run_headless(f) : run_windowed(f);
+}
+#endif
 
 /* ---- command line ---- */
 
@@ -470,14 +669,55 @@ static int boot(Machine *m, const Options *o)
     return 0;
 }
 
+/* The end of every run, also from inside a wait that never returns: script, audio and screenshot of a
+ * headless run, then the machine, whose destruction prints the verification summary and writes
+ * coverage and the profile. Returns the process exit code. */
+static int finish_run(Frontend *f, int rc)
+{
+    Machine *m = f->m;
+    if (f->o->headless && rc == 0) {
+        if (frontend_audio_close(m) != 0) {
+            rc = -1;
+        } else if (f->o->screenshot) {
+#ifdef INN_NATIVE
+            int shot = m->native_video ? host_video_write_ppm(m, f->o->screenshot) : vga_write_ppm(m, f->o->screenshot);
+#else
+            int shot = vga_write_ppm(m, f->o->screenshot);
+#endif
+            if (shot != 0) {
+                fprintf(stderr, "cannot write %s\n", f->o->screenshot);
+                rc = -1;
+            }
+        }
+    }
+    if (f->script)
+        input_script_free(f->script);
+    f->script = NULL;
+    int exit_code = rc != 0 ? 1 : m->exit_code;
+    if (m->exit_requested)
+        fprintf(stderr, "program exited with code %d\n", m->exit_code);
+#ifdef HAVE_DOS
+    dos_shutdown(m);
+#endif
+    if (m->exec_stub) {
+        exec_stub_shutdown(m);
+        host_rules_free(host_rules);
+    }
+    bios_shutdown(m);
+    machine_destroy(m);
+    f->m = NULL;
+    return exit_code;
+}
+
 int main(int argc, char **argv)
 {
-    Options o;
+    static Options o;
     if (parse_args(argc, argv, &o) != 0) {
         usage();
         return 2;
     }
     static Frontend f;
+    f.o = &o;
     f.m = machine_create();
     f.m->trace = o.trace;
     if (o.ips)
@@ -485,18 +725,13 @@ int main(int argc, char **argv)
     f.m->fpu_present = !o.no_fpu;
     int rc = boot(f.m, &o);
     if (rc == 0)
-        rc = o.headless ? run_headless(&f, &o) : run_windowed(&f, &o);
-    int exit_code = rc != 0 ? 1 : f.m->exit_code;
-    if (f.m->exit_requested)
-        fprintf(stderr, "program exited with code %d\n", f.m->exit_code);
-#ifdef HAVE_DOS
-    dos_shutdown(f.m);
+        rc = o.headless ? start_headless(&f, &o) : start_windowed(&f, &o);
+#ifdef INN_NATIVE
+    if (rc == 0)
+        rc = run_native(&f);
+#else
+    if (rc == 0)
+        rc = o.headless ? run_headless(&f) : run_windowed(&f);
 #endif
-    if (f.m->exec_stub) {
-        exec_stub_shutdown(f.m);
-        host_rules_free(host_rules);
-    }
-    bios_shutdown(f.m);
-    machine_destroy(f.m);
-    return exit_code;
+    return finish_run(&f, rc);
 }

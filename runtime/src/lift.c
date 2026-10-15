@@ -6,6 +6,7 @@
 
 #include "bios_internal.h"
 #include "lift_internal.h"
+#include "native.h"
 
 void lift_set_hook_bit(Machine *m, uint32_t linear, bool on)
 {
@@ -232,6 +233,19 @@ static void remember_module(LiftState *s, const char *module, uint16_t load_seg)
     s->modules[i].load_seg = load_seg;
 }
 
+const char *lift_module_owning(Machine *m, uint16_t seg, uint16_t *load_seg)
+{
+    LiftState *s = lift_state(m);
+    const char *best = NULL;
+    *load_seg = 0;
+    for (int i = 0; s && i < s->module_count; i++)
+        if (s->modules[i].load_seg <= seg && (!best || s->modules[i].load_seg > *load_seg)) {
+            best = s->modules[i].name;
+            *load_seg = s->modules[i].load_seg;
+        }
+    return best;
+}
+
 uint16_t lift_module_base(Machine *m, const char *module)
 {
     LiftState *s = lift_state(m);
@@ -406,7 +420,9 @@ void lift_run_nested(Machine *m, uint32_t return_linear, uint16_t return_sp, boo
         machine_step(m);
         if (s->nested_budget && m->cpu.instructions >= s->nested_budget)
             s->nested_abort = true;
-        if (s->nested_yield && !s->in_shadow)
+        if (m->native) /* the non-strict fallback: interrupts and yields come from the native core */
+            native_safepoint(m);
+        else if (s->nested_yield && !s->in_shadow)
             s->nested_yield(m);
         if (s->shadow_of && m->cpu.instructions >= stall_report) {
             /* Interrupts are held during a shadow run, so code that waits on a timer tick spins. */
@@ -420,10 +436,20 @@ void lift_run_nested(Machine *m, uint32_t return_linear, uint16_t return_sp, boo
     s->nesting--;
 }
 
-/* An interrupt the CPU would take at the callee's first instruction boundary. */
+/* An interrupt the CPU would take at the callee's first instruction boundary. Native mode delivers
+ * interrupts at the safe point instead. */
 static bool irq_due(const Machine *m)
 {
-    return (m->cpu.flags & F_IF) && m->irq_pending && !m->irq_hold && !m->irq_gate;
+    return !m->native && (m->cpu.flags & F_IF) && m->irq_pending && !m->irq_hold && !m->irq_gate;
+}
+
+/* The CPU path cost at least the hooked instruction and the return stub; a call that costs no time
+ * breaks scripts that time a loop (a speed test divides by the ticks it took). Native mode charges
+ * at the safe point. */
+static void charge_direct(Machine *m)
+{
+    if (!m->native)
+        machine_charge_c(m, m->io_cost_ns);
 }
 
 /* Runs the lifted function at linear as a plain C call, as lift_dispatch would from the CPU loop;
@@ -440,9 +466,7 @@ static bool call_lifted_direct(Machine *m, LiftState *s, uint32_t linear)
     if (!h || !signature_matches(m, h))
         return false;
     s->direct_calls++;
-    /* The CPU path cost at least the hooked instruction and the return stub; a call that costs no
-     * time breaks scripts that time a loop (a speed test divides by the ticks it took). */
-    machine_charge_c(m, m->io_cost_ns);
+    charge_direct(m);
     if (!lift_verify_call(m, h))
         lift_call_c(m, h->entry->fn);
     return true;
@@ -459,11 +483,13 @@ static bool is_service_stub(const Machine *m, uint32_t linear)
 /* A host service stub (FE 38 id CF/CB) called from lifted code runs its C directly. */
 static bool call_callback_direct(Machine *m, LiftState *s, uint32_t linear)
 {
-    if (!s->direct_cb || m->io_mode != IO_LIVE || m->irq_gate || m->trace)
+    if (m->io_mode != IO_LIVE || m->irq_gate)
+        return false;
+    if (!m->native && (!s->direct_cb || m->trace))
         return false;
     /* The caller's IF is in the frame guest_int pushed; a due IRQ goes through the CPU path. */
     uint16_t caller_flags = mem_rd16(m, m->cpu.seg_base[S_SS] + (uint16_t)(m->cpu.r[R_SP].w + 4));
-    if ((caller_flags & F_IF) && m->irq_pending && !m->irq_hold)
+    if (!m->native && (caller_flags & F_IF) && m->irq_pending && !m->irq_hold)
         return false;
     if (!is_service_stub(m, linear))
         return false;
@@ -472,11 +498,14 @@ static bool call_callback_direct(Machine *m, LiftState *s, uint32_t linear)
         return false;
     if ((int)b[2] == s->return_callback || !m->callbacks[b[2]])
         return false;
-    machine_charge_c(m, m->io_cost_ns);
+    charge_direct(m);
     m->cpu.eip = (m->cpu.eip + 3) & 0xFFFF;
-    if (m->callbacks[b[2]](m) == CB_RETRY) {
-        m->cpu.eip = (m->cpu.eip - 3) & 0xFFFF; /* the CPU retries the stub */
-        return false;
+    while (m->callbacks[b[2]](m) == CB_RETRY) {
+        if (!m->native) {
+            m->cpu.eip = (m->cpu.eip - 3) & 0xFFFF; /* the CPU retries the stub */
+            return false;
+        }
+        native_idle(m); /* a blocked service waits for the next interrupt, then asks again */
     }
     s->direct_callbacks++;
     uint16_t ip = cpu_pop16(m), cs = cpu_pop16(m);
@@ -557,7 +586,7 @@ static ThunkResult follow_thunks(Machine *m, LiftState *s)
         if (kind == TARGET_RETURN) {
             uint8_t op = mem_rd8(m, linear);
             uint16_t arg = (op == 0xC2 || op == 0xCA) ? mem_rd16(m, linear + 1) : 0;
-            machine_charge_c(m, m->io_cost_ns);
+            charge_direct(m);
             apply_trivial_return(m, op, arg);
             s->direct_returns++;
             return THUNK_RETURNED;
@@ -572,7 +601,7 @@ static ThunkResult follow_thunks(Machine *m, LiftState *s)
         if (!lift_hooked(m, dest_linear) &&
             classify_target(m, (uint32_t)dest_cs << 4, dest_ip, dest_linear, &ignore_linear, &ignore_cs) == TARGET_OTHER)
             return moved;
-        machine_charge_c(m, m->io_cost_ns);
+        charge_direct(m);
         cpu_set_seg(&m->cpu, S_CS, dest_cs);
         m->cpu.eip = dest_ip;
         s->direct_thunks++;
@@ -581,12 +610,29 @@ static ThunkResult follow_thunks(Machine *m, LiftState *s)
     return moved;
 }
 
+/* Native mode (docs/native.md sections 6 and 7): the call is a safe point, and what no lifted entry,
+ * thunk, return or service stub resolves is a ROM lift, the unresolved hook, or an error. */
+static bool call_native(Machine *m, LiftState *s)
+{
+    native_safepoint(m);
+    if (follow_thunks(m, s) == THUNK_RETURNED)
+        return true;
+    uint32_t linear = m->cpu.seg_base[S_CS] + (m->cpu.eip & 0xFFFF);
+    if (call_lifted_direct(m, s, linear) || call_callback_direct(m, s, linear))
+        return true;
+    if (s->unresolved && !is_service_stub(m, linear) && s->unresolved(m, linear))
+        return true;
+    return native_unresolved(m, linear);
+}
+
 /* Dispatches the call whose callee is at CS:IP without the CPU where it can. True when something ran
  * or moved CS:IP; the caller then checks whether the return address was reached. */
 static bool call_direct(Machine *m, LiftState *s)
 {
     if (s->hooks_off)
         return false;
+    if (m->native)
+        return call_native(m, s);
     ThunkResult thunks = THUNK_NONE;
     if (s->direct && !irq_due(m))
         thunks = follow_thunks(m, s);
@@ -609,10 +655,9 @@ void lift_set_unresolved(Machine *m, LiftUnresolvedFn fn)
     lift_state(m)->unresolved = fn;
 }
 
-void guest_call_far(Machine *m, uint16_t seg, uint16_t off)
+void lift_dispatch_far_at(Machine *m, uint16_t seg, uint16_t off)
 {
     LiftState *s = lift_state(m);
-    uint16_t saved_cs = m->cpu.seg[S_CS], saved_ip = (uint16_t)m->cpu.eip;
     uint32_t stub = callback_stub_addr(s->return_callback);
     uint16_t stub_off = (uint16_t)(stub - real_addr(CALLBACK_SEG, 0));
     cpu_push16(m, CALLBACK_SEG);
@@ -627,6 +672,12 @@ void guest_call_far(Machine *m, uint16_t seg, uint16_t off)
         s->direct_fallbacks++;
     if (!direct || !back)
         lift_run_nested(m, UINT32_MAX, sp_after_return, false); /* the sentinel callback ends it */
+}
+
+void guest_call_far(Machine *m, uint16_t seg, uint16_t off)
+{
+    uint16_t saved_cs = m->cpu.seg[S_CS], saved_ip = (uint16_t)m->cpu.eip;
+    lift_dispatch_far_at(m, seg, off);
     cpu_set_seg(&m->cpu, S_CS, saved_cs);
     m->cpu.eip = saved_ip;
 }
@@ -635,6 +686,10 @@ void lift_idle(Machine *m)
 {
     static const uint8_t IDLE[] = { 0x9C, 0xFB, 0xF4, 0x9D, 0xCB };
     LiftState *s = lift_state(m);
+    if (m->native) {
+        native_idle(m);
+        return;
+    }
     if (!s->idle_off)
         s->idle_off = bios_rom_emit(m, IDLE, sizeof IDLE);
     guest_call_far(m, BIOS_SEG, s->idle_off);

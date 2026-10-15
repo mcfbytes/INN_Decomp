@@ -6,17 +6,20 @@
 
 #include "lift.h"
 #include "machine.h"
+#include "native.h"
 
 uint8_t mem_rd8_slow(Machine *m, uint32_t linear)
 {
-    if (mem_is_vga(linear))
+    if (mem_is_vga(linear) && !m->native_video)
         return vga_mem_read(m, linear);
     return m->mem[linear];
 }
 
 void mem_wr8_slow(Machine *m, uint32_t linear, uint8_t v)
 {
-    if (mem_is_vga(linear))
+    if (mem_is_vga(linear) && m->native_video)
+        m->mem[linear] = v;
+    else if (mem_is_vga(linear))
         vga_mem_write(m, linear, v);
     /* Option ROM and BIOS space is read-only. */
 }
@@ -95,6 +98,10 @@ static void end_slice(Machine *m);
  * retrace, UART and timer state change; shadow runs keep time still (lift_verify.c). */
 void machine_charge_c(Machine *m, uint32_t ns)
 {
+    if (m->native) {
+        native_charge(m, ns);
+        return;
+    }
     if (m->io_mode != IO_LIVE || !lift_in_c(m)) {
         m->cpu.stall += (uint32_t)(m->ips * ns / 1000000000u);
         return;
@@ -144,6 +151,8 @@ static void device_out(Machine *m, uint16_t port, uint32_t value, int size)
 
 uint32_t port_in(Machine *m, uint16_t port, int size)
 {
+    if (__builtin_expect(m->native, 0))
+        native_port_fatal(m, false, port);
     charge_io(m);
     if (m->io_mode == IO_REPLAY) {
         if (vga_port(port)) /* VGA state is part of the snapshot, so the lifted run drives it too */
@@ -158,6 +167,8 @@ uint32_t port_in(Machine *m, uint16_t port, int size)
 
 void port_out(Machine *m, uint16_t port, uint32_t value, int size)
 {
+    if (__builtin_expect(m->native, 0))
+        native_port_fatal(m, true, port);
     charge_io(m);
     if (m->io_mode == IO_REPLAY) {
         lift_io_replay_out(m, port, value, size);
@@ -183,12 +194,14 @@ Machine *machine_create(void)
     m->io_cost_ns = 1000;
     m->fpu_present = true;
     cpu_reset(m);
+    native_init(m, NULL);
     lift_init(m);
     return m;
 }
 
 void machine_destroy(Machine *m)
 {
+    native_shutdown(m); /* reports per module, so before the lifted modules are forgotten */
     lift_shutdown(m);
     free(m->mem);
     free(m);
@@ -203,6 +216,12 @@ void machine_add_ticker(Machine *m, TickFn fn)
 
 static void end_slice(Machine *m)
 {
+    if (m->native) { /* the non-strict fallback: time passes, devices stay suspended */
+        m->slice_left = m->ips * TICK_SLICE_US / 1000000;
+        m->slice_start_insn = m->cpu.instructions;
+        native_interp_time(m, TICK_SLICE_US);
+        return;
+    }
     if (m->ticks_frozen) { /* the replayed run must not move devices or pull bytes from a link */
         m->slice_left = m->ips * TICK_SLICE_US / 1000000;
         m->slice_start_insn = m->cpu.instructions;
@@ -246,6 +265,8 @@ void machine_run_for(Machine *m, uint64_t us)
 uint64_t machine_now_ns(const Machine *m)
 {
     enum { SLICE_NS = TICK_SLICE_US * 1000 };
+    if (m->native)
+        return m->virtual_us * 1000;
     uint64_t insn = m->cpu.instructions - m->slice_start_insn;
     uint64_t ns = m->ips ? insn * 1000000000u / m->ips : 0;
     return m->virtual_us * 1000 + (ns < SLICE_NS ? ns : SLICE_NS);

@@ -124,6 +124,9 @@ extern uint32_t *dosrt_interp_profile;
 
 /* Runs original code at seg:off as a far call and returns when it returns. */
 void guest_call_far(Machine *m, uint16_t seg, uint16_t off);
+/* guest_call_far without restoring CS:IP: pushes the far-return sentinel and dispatches seg:off until
+ * it returns there (native_int pushes FLAGS first; a native start is entered this way). */
+void lift_dispatch_far_at(Machine *m, uint16_t seg, uint16_t off);
 /* Waits for the next interrupt as STI; HLT would, with the caller's flags restored: emulated time
  * moves to the next timer tick or device IRQ and its handler runs. The way for lifted code to wait
  * for ticks: a busy loop of short guest calls advances time by a few instructions per pass. */

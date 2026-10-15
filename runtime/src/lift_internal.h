@@ -80,6 +80,10 @@ bool lift_verify_call(Machine *m, ActiveHook *h);
 /* Whether the bytes at h's entry are the entry's signature (with relocations applied). */
 bool lift_entry_bytes_match(Machine *m, const ActiveHook *h);
 
+/* ---- native core (runtime/src/native, docs/native.md) ---- */
+/* The announced module with the highest load segment not above seg, or NULL; *load_seg is its base. */
+const char *lift_module_owning(Machine *m, uint16_t seg, uint16_t *load_seg);
+
 /* ---- device replay (lift_replay.c, docs/lifting.md "Device replay") ---- */
 bool lift_replay_active(const Machine *m);
 /* The original's run: interrupts flow, gated to the instruction after an event; events are logged. */

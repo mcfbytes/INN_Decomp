@@ -5,6 +5,7 @@
 
 #include "lift.h"
 #include "machine.h"
+#include "native.h"
 
 typedef struct Insn {
     uint32_t start_eip;
@@ -1417,12 +1418,14 @@ uint64_t cpu_run(Machine *m, uint64_t budget)
     uint64_t done = 0;
     c->yielded = false;
     c->stop = false;
+    if (__builtin_expect(m->native, 0))
+        native_cpu_entry(m); /* interrupts come from the native core's safe points, not from here */
     while (done < budget && !m->exit_requested) {
         if (c->irq_inhibit) {
             c->irq_inhibit = false;
         } else if ((c->flags & F_IF) && __builtin_expect(m->irq_gate, 0)) {
             lift_irq_boundary(m);
-        } else if ((c->flags & F_IF) && m->irq_pending && !m->irq_hold) {
+        } else if ((c->flags & F_IF) && m->irq_pending && !m->irq_hold && !m->native) {
             int vector = pic_acknowledge(m);
             if (vector >= 0)
                 cpu_interrupt(m, (uint8_t)vector);

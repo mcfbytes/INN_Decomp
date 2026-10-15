@@ -119,6 +119,10 @@ full-instrumentation Asyncify stays a possible fallback for other browsers, to b
 the VM's Restart kernel) must use WebAssembly exception handling (`-fwasm-exceptions
 -sSUPPORT_LONGJMP=wasm`): Emscripten's JavaScript-based longjmp routes calls through JS `invoke_*`
 frames, and JSPI cannot suspend across JS frames.
+Proved 2026-10-15: `test_native` built with `-sJSPI -fwasm-exceptions -sSUPPORT_LONGJMP=wasm` suspends
+100 times with `emscripten_sleep(1)` in a lifted entry reached through the dispatcher, inside a `setjmp`
+scope, then longjmps out and dispatches again (Node 24 with `--experimental-wasm-jspi`; the same
+pattern passes in headless Chromium 153).
 
 **Natively (SDL2)** the same waits call `SDL_Delay` and pump SDL events. **Headless** runs use a
 deterministic virtual clock (section 5) and no platform at all: waits jump the clock, the input
@@ -537,3 +541,6 @@ Detailed briefs are private. Order and groups (packages in one step touch disjoi
 | 3 | **3** program control; **4** video; **5** sound; **6** input; **7** link |
 | 4 | **10b** mixed mode: device hand-off, games from the native build |
 | 5 | **9c** final verification campaign, browser checks, documentation |
+
+Status: package 11 done (native core, `INN_NATIVE` and `INN_NATIVE_HW`, platform, JSPI proof). Until
+package 3 adds native starts, the native build reports that TSNEXEC has none and runs it on the emulator.
