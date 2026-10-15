@@ -137,6 +137,8 @@ typedef struct DosState {
     int ready_len, ready_pos;
     time_t base_time;     /* host clock at init; DOS time advances with virtual_us */
     DosOverlayCache overlays;
+    /* Native terminate learns the child is gone; the hook may longjmp and not return. */
+    void (*terminate_hook)(Machine *m, uint8_t code);
 } DosState;
 
 static inline DosState *dos_state(Machine *m) { return (DosState *)m->dos; }

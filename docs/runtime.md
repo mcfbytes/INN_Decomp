@@ -121,6 +121,27 @@ Sinks, in `runtime/frontend/audio_sdl.c`:
 system block, as resident software would take it. Use it to drive LSCITV into swapping (it needs about
 500 KB to start). There is no EMS or XMS.
 
+## Program load and exit
+
+`dos_exec_load` loads a child as EXEC function 0 does and leaves the CPU registers unchanged. The
+environment is copied from `env_seg`, or from the parent when that is 0. The command tail is a length
+byte, text and CR; the two FCBs are parsed from the text. The child becomes the current process, and
+the EXEC frame recorded for it makes terminate restore the parent. The child's terminate address, in
+its PSP and in vector 22h, is the value vector 22h already holds, so a caller can install its own
+handler first. `dos_exec_enter` then sets the registers, segments, SS:SP and CS:IP as DOS does when it
+starts the program.
+
+`dos_last_exit_status` reads the word AH=4Dh returns (AL the exit code, AH the termination type) and
+leaves it stored. `dos_set_terminate_hook` runs once terminate has freed the child and made the parent
+current, and also when the top program sets `exit_requested`.
+
+With `INN_EXEC_LOG=1`, each load logs `exec: <path> tail=<text> cwd=<directory>` and each terminate
+logs `exit: <psp> code=<al> type=<ah>`. With `INN_DOS_AUDIT=1`, INT 21h calls are counted per AH (and
+per AL for 44h, 4Bh, 57h, 58h and 5Ah-5Dh) and logged at process exit.
+
+INT 67h returns AH=84h for every function. INT 2Fh AX=4300h returns AL=0. Opening `EMMXXXX0` fails
+with file not found.
+
 ## Input scripts
 
 `inn --headless --script FILE` replays timed input. One event per line, times in emulated ms:

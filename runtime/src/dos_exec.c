@@ -183,6 +183,53 @@ static uint8_t fcb_drive_status(const uint8_t *fcb)
     return fcb[0] == 0 || fcb[0] == DOS_DRIVE_C + 1 ? 0 : 0xFF;
 }
 
+static bool exec_log_on(void)
+{
+    const char *v = getenv("INN_EXEC_LOG");
+    return v && strcmp(v, "1") == 0;
+}
+
+/* INN_EXEC_LOG=1: one line per load, so a native run can be compared with a hybrid run. */
+static void log_exec(Machine *m, const char *dos_path, const uint8_t *tail)
+{
+    if (!exec_log_on())
+        return;
+    unsigned n = tail[0] > 126 ? 126 : tail[0];
+    char text[127];
+    unsigned o = 0;
+    for (unsigned i = 0; i < n; i++) {
+        char c = (char)tail[1 + i];
+        if (c == '\r' || c == '\n' || c == 0)
+            break;
+        text[o++] = c;
+    }
+    text[o] = 0;
+    const DosState *d = dos_state(m);
+    log_msg("exec: %s tail=%s cwd=%c:%s", dos_path, text, 'A' + d->cur_drive, d->cwd);
+}
+
+/* tail is a length byte, text and CR. FCBs are parsed from the text, as COMMAND.COM does. */
+static void exec_args_from_tail(ExecArgs *a, const uint8_t *tail, uint16_t env_src)
+{
+    memset(a, 0, sizeof *a);
+    a->env_src = env_src;
+    unsigned n = tail ? tail[0] : 0;
+    if (n > sizeof a->tail - 2)
+        n = (unsigned)(sizeof a->tail - 2);
+    a->tail[0] = (uint8_t)n;
+    if (n)
+        memcpy(a->tail + 1, tail + 1, n);
+    a->tail[n + 1] = '\r';
+    char text[sizeof a->tail];
+    memcpy(text, a->tail + 1, n);
+    text[n] = 0;
+    uint8_t result;
+    memset(a->fcb1 + 1, ' ', 11);
+    memset(a->fcb2 + 1, ' ', 11);
+    int used = dos_parse_name_fcb(text, 1, a->fcb1, &result);
+    dos_parse_name_fcb(text + used, 1, a->fcb2, &result);
+}
+
 /* Loads p as a new process. On success *psp and *entry describe it; memory is owned by it. */
 static int create_process(Machine *m, const Program *p, const ExecArgs *a, uint16_t *psp, Entry *entry)
 {
@@ -283,6 +330,7 @@ static CallbackResult exec_process(Machine *m, const Program *p, uint8_t mode)
         return dos_fail(m, DE_NO_MEMORY);
     }
     switch_to_child(m, psp, ret_cs, ret_ip);
+    log_exec(m, p->dos_path, a.tail);
     if (mode == EXEC_LOAD_ONLY) {
         e.sp = (uint16_t)(e.sp - 2);
         mem_wr16(m, real_addr(e.ss, e.sp), ax);
@@ -363,5 +411,48 @@ bool dos_start_program(Machine *m, const char *dos_path, const char *args)
     switch_to_child(m, psp, mem_rd16(m, 0x22 * 4 + 2), mem_rd16(m, 0x22 * 4));
     uint16_t ax = (uint16_t)(fcb_drive_status(a.fcb1) | fcb_drive_status(a.fcb2) << 8);
     enter_program(m, e, psp, ax, false);
+    log_exec(m, p.dos_path, a.tail);
     return true;
+}
+
+int dos_exec_load(Machine *m, const char *dos_path, const uint8_t *tail, uint16_t env_seg,
+                  DosExecImage *out)
+{
+    Program p;
+    int err = read_program(m, dos_path, &p);
+    if (err)
+        return err;
+    ExecArgs a;
+    exec_args_from_tail(&a, tail, env_seg);
+    uint16_t psp;
+    Entry e;
+    err = create_process(m, &p, &a, &psp, &e);
+    if (!err) {
+        uint16_t ax = (uint16_t)(fcb_drive_status(a.fcb1) | fcb_drive_status(a.fcb2) << 8);
+        if (!push_frame(m, psp, false)) {
+            dos_mem_free_owner(m, psp);
+            err = DE_NO_MEMORY;
+        } else {
+            /* Vector 22h is whatever the caller installed; AH=4Bh uses the INT 21h return instead. */
+            uint16_t ret_ip = mem_rd16(m, 0x22 * 4), ret_cs = mem_rd16(m, 0x22 * 4 + 2);
+            switch_to_child(m, psp, ret_cs, ret_ip);
+            if (out) {
+                out->psp = psp;
+                out->cs = e.cs;
+                out->ip = e.ip;
+                out->ss = e.ss;
+                out->sp = e.sp;
+                out->ax = ax;
+            }
+            log_exec(m, p.dos_path, a.tail);
+        }
+    }
+    free(p.data);
+    return err;
+}
+
+void dos_exec_enter(Machine *m, const DosExecImage *img)
+{
+    Entry e = {.cs = img->cs, .ip = img->ip, .ss = img->ss, .sp = img->sp};
+    enter_program(m, e, img->psp, img->ax, false);
 }

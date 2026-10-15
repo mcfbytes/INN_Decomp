@@ -17,6 +17,26 @@ void dos_init(Machine *m, const char *c_drive_host_dir);
  * terminates, m->exit_requested is set and m->exit_code holds its return code. */
 bool dos_start_program(Machine *m, const char *dos_path, const char *args);
 
+typedef struct DosExecImage {
+    uint16_t psp;            /* the child's PSP; its image starts at psp + 10h */
+    uint16_t cs, ip, ss, sp; /* entry and stack as DOS hands them over */
+    uint16_t ax;             /* FCB drive status, as AL/AH at program start */
+} DosExecImage;
+
+/* AH=4Bh AL=0 without the CPU: loads dos_path as a child of the current process (environment copied
+ * from env_seg, 0 = the parent's; tail = length byte, text, CR; FCBs parsed from the tail), makes it the
+ * current process and records the EXEC frame so terminate returns to the parent. CPU registers are
+ * untouched. Returns 0 or a DOS error code (2 file not found, 8 no memory, 11 bad format). */
+int dos_exec_load(Machine *m, const char *dos_path, const uint8_t *tail, uint16_t env_seg,
+                  DosExecImage *out);
+/* Sets registers, segments, SS:SP and CS:IP as DOS does when it starts a program. */
+void dos_exec_enter(Machine *m, const DosExecImage *img);
+/* The last child's return code as AH=4Dh returns it (AL code, AH termination type). */
+uint16_t dos_last_exit_status(Machine *m);
+/* Runs after terminate freed the child and made the parent current, before control goes to the INT 22h
+ * address; NULL removes it. */
+void dos_set_terminate_hook(Machine *m, void (*hook)(Machine *m, uint8_t code));
+
 /* Sets the current directory of the current drive, e.g. "\\" or "\\INN". */
 void dos_set_cwd(Machine *m, const char *dos_dir);
 

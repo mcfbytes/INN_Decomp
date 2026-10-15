@@ -650,6 +650,94 @@ static void test_overlays(void)
     remove_tree(root);
 }
 
+/* Terminate restores the pre-load registers; stop there instead of executing them. */
+static int term_hooks;
+static uint8_t term_code;
+
+static void on_terminate(Machine *m, uint8_t code)
+{
+    term_hooks++;
+    term_code = code;
+    m->exit_requested = true;
+}
+
+static void test_exec_load(void)
+{
+    make_root("exec_load");
+    static const uint8_t com[] = {0xB8, 0x00, 0x4C, 0xCD, 0x21};
+    write_host("EXIT.COM", com, sizeof com);
+    Machine *m = new_machine();
+    uint8_t tail[2] = {0, '\r'};
+    DosExecImage img;
+    memset(&img, 0, sizeof img);
+    CHECK(dos_exec_load(m, "C:\\NOPE.COM", tail, 0, &img) == DE_FILE_NOT_FOUND);
+    uint16_t shell = dos_state(m)->cur_psp;
+    uint32_t vec22 = mem_rd32(m, 0x22 * 4);
+    m->cpu.r[R_AX].w = 0xABCD;
+    uint32_t eip = m->cpu.eip;
+    CHECK(dos_exec_load(m, "C:\\EXIT.COM", tail, 0, &img) == 0);
+    CHECK(m->cpu.r[R_AX].w == 0xABCD && m->cpu.eip == eip);
+    CHECK(img.psp != 0 && img.psp != shell);
+    CHECK(img.cs == img.psp && img.ip == 0x100);
+    CHECK(dos_state(m)->cur_psp == img.psp);
+    CHECK(mem_rd16(m, real_addr(img.psp, 0)) == 0x20CD);
+    CHECK(mem_rd16(m, real_addr(img.psp, PSP_PARENT)) == shell);
+    CHECK(mem_rd32(m, real_addr(img.psp, PSP_INT22)) == vec22);
+    CHECK(mem_rd32(m, 0x22 * 4) == vec22);
+    char name[9] = {0};
+    mem_read_block(m, real_addr((uint16_t)(img.psp - 1), MCB_NAME), name, 8);
+    CHECK(strcmp(name, "EXIT") == 0);
+    CHECK(mem_rd16(m, real_addr((uint16_t)(img.psp - 1), MCB_OWNER)) == img.psp);
+    CHECK(memcmp(mem_ptr(m, img.psp, 0x100), com, sizeof com) == 0);
+    term_hooks = 0;
+    term_code = 0xFF;
+    dos_set_terminate_hook(m, on_terminate);
+    dos_exec_enter(m, &img);
+    CHECK(m->cpu.seg[S_CS] == img.cs && m->cpu.eip == img.ip);
+    CHECK(AX == img.ax);
+    CHECK(run(m) == 0);
+    CHECK(term_hooks == 1 && term_code == 0);
+    CHECK(dos_last_exit_status(m) == 0);
+    CHECK(dos_last_exit_status(m) == 0);
+    CHECK(dos_state(m)->cur_psp == shell);
+    finish(m);
+}
+
+/* EMS and XMS report none: EMMXXXX0 is not a file, INT 67h fails, INT 2Fh AX=4300h is not 80h. */
+static void test_ems_xms(void)
+{
+    make_root("ems");
+    Prog p = {.org = COM_ORG};
+    mov_imm(&p, R_DX, DATA);
+    dos(&p, 0x3D00);
+    fails(&p, 1);
+    expect_reg(&p, R_AX, DE_FILE_NOT_FOUND, 2);
+    mov_imm(&p, R_AX, 0x4000);
+    e8(&p, 0xCD);
+    e8(&p, 0x67);
+    e8(&p, 0x80);
+    e8(&p, 0xFC);
+    e8(&p, 0x00); /* cmp ah, 0 */
+    e8(&p, 0x75);
+    e8(&p, EXIT_LEN);
+    exit_with(&p, 3);
+    mov_imm(&p, R_AX, 0x4300);
+    e8(&p, 0xCD);
+    e8(&p, 0x2F);
+    e8(&p, 0x3C);
+    e8(&p, 0x80); /* cmp al, 80h */
+    e8(&p, 0x75);
+    e8(&p, EXIT_LEN);
+    exit_with(&p, 4);
+    exit_with(&p, 0);
+    put_str(&p, DATA, "EMMXXXX0");
+    write_com("EMS.COM", &p);
+    Machine *m = new_machine();
+    CHECK(dos_start_program(m, "EMS.COM", NULL));
+    CHECK(run(m) == 0);
+    finish(m);
+}
+
 int main(void)
 {
     test_allocator();
@@ -658,6 +746,8 @@ int main(void)
     test_journal();
     test_memory_program();
     test_exec();
+    test_exec_load();
+    test_ems_xms();
     test_overlays();
     if (failures)
         fprintf(stderr, "test_dos: %d failure(s)\n", failures);

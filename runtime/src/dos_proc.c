@@ -1,10 +1,14 @@
 /* Processes: PSP construction, the root shell, terminate / TSR (with return to the parent's
  * INT 22h address), and the PSP get/set/create functions. */
 #define _POSIX_C_SOURCE 200809L /* fds, directories, localtime_r on any libc */
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "dos_int.h"
 #include "lift.h"
+
+static void dos_audit_arm(Machine *m);
 
 enum { INT22 = 0x22, INT23 = 0x23, INT24 = 0x24 };
 enum { TERM_NORMAL = 0, TERM_TSR = 3, TSR_MIN_PARAS = 6, KEEP_NONE = -1 };
@@ -74,6 +78,7 @@ void dos_create_shell(Machine *m)
     d->shell_psp = d->cur_psp = psp;
     d->dta_seg = psp;
     d->dta_off = PSP_TAIL;
+    dos_audit_arm(m);
 }
 
 static ExecFrame *pop_frame(DosState *d, uint16_t psp)
@@ -84,6 +89,12 @@ static ExecFrame *pop_frame(DosState *d, uint16_t psp)
             return &d->frames[i];
         }
     return NULL;
+}
+
+static bool exec_log_on(void)
+{
+    const char *v = getenv("INN_EXEC_LOG");
+    return v && strcmp(v, "1") == 0;
 }
 
 /* Resumes the parent: its registers from EXEC time, or its saved SS:SP as a fallback. */
@@ -124,16 +135,24 @@ void dos_terminate(Machine *m, uint8_t code, uint8_t type, int keep_paras)
     d->return_code = (uint16_t)(code | type << 8);
     if (m->trace)
         log_msg("dos: psp %04X terminated, code %02X type %u", psp, code, type);
+    if (exec_log_on())
+        log_msg("exit: %04X code=%02X type=%02X", psp, code, type);
     ExecFrame *f = pop_frame(d, psp);
     d->cur_psp = parent;
     d->dta_seg = parent;
     d->dta_off = PSP_TAIL;
+    /* Hook last on both paths: it may longjmp. The top program has exit_requested set first. */
+    void (*hook)(Machine *, uint8_t) = d->terminate_hook;
     if (psp == d->shell_psp || parent == psp || (f && f->from_shell)) {
         m->exit_requested = true;
         m->exit_code = code;
+        if (hook)
+            hook(m, code);
         return;
     }
     resume_parent(m, f, parent, ret);
+    if (hook)
+        hook(m, code);
 }
 
 static CallbackResult terminate(Machine *m, uint8_t code, uint8_t type, int keep)
@@ -162,6 +181,16 @@ CallbackResult dos_get_return_code(Machine *m)
     return dos_ok(m);
 }
 
+uint16_t dos_last_exit_status(Machine *m)
+{
+    return dos_state(m)->return_code;
+}
+
+void dos_set_terminate_hook(Machine *m, void (*hook)(Machine *m, uint8_t code))
+{
+    dos_state(m)->terminate_hook = hook;
+}
+
 CallbackResult dos_set_psp(Machine *m)
 {
     dos_state(m)->cur_psp = BX;
@@ -186,6 +215,72 @@ CallbackResult dos_new_psp(Machine *m)
     mem_wr16(m, dst + PSP_JFT_PTR, PSP_JFT);
     mem_wr16(m, dst + PSP_JFT_PTR + 2, DX);
     return CB_DONE;
+}
+
+/* INT 21h counts for INN_DOS_AUDIT=1. Split by AL where one AH covers several functions. */
+enum { AUDIT_AL_FUNCS = 8 };
+
+static const uint8_t audit_al_ah[AUDIT_AL_FUNCS] = {0x44, 0x4B, 0x57, 0x58, 0x5A, 0x5B, 0x5C, 0x5D};
+static uint32_t audit_count[256];
+static uint32_t audit_al[AUDIT_AL_FUNCS][256];
+static CallbackFn audit_int21;
+
+static int audit_al_index(uint8_t ah)
+{
+    for (int i = 0; i < AUDIT_AL_FUNCS; i++)
+        if (audit_al_ah[i] == ah)
+            return i;
+    return -1;
+}
+
+static CallbackResult audited_int21(Machine *m)
+{
+    int sub = audit_al_index(AH);
+    if (sub >= 0)
+        audit_al[sub][AL]++;
+    else
+        audit_count[AH]++;
+    return audit_int21(m);
+}
+
+static void audit_dump(void)
+{
+    int sub = 0;
+    for (int ah = 0; ah < 256; ah++) {
+        if (sub < AUDIT_AL_FUNCS && ah == audit_al_ah[sub]) {
+            for (int al = 0; al < 256; al++)
+                if (audit_al[sub][al])
+                    log_msg("dos audit: AH=%02X AL=%02X %u", ah, al, (unsigned)audit_al[sub][al]);
+            sub++;
+            continue;
+        }
+        if (audit_count[ah])
+            log_msg("dos audit: AH=%02X %u", ah, (unsigned)audit_count[ah]);
+    }
+    fflush(stderr);
+}
+
+static void dos_audit_arm(Machine *m)
+{
+    const char *v = getenv("INN_DOS_AUDIT");
+    if (!v || strcmp(v, "1") != 0)
+        return;
+    uint16_t off = mem_rd16(m, 0x21 * 4), seg = mem_rd16(m, 0x21 * 4 + 2);
+    uint32_t stub = real_addr(seg, off);
+    int id = mem_rd8(m, stub + 2);
+    if (seg != CALLBACK_SEG || mem_rd8(m, stub) != 0xFE || mem_rd8(m, stub + 1) != 0x38 ||
+        mem_rd8(m, stub + 3) != 0xCF || id >= m->callback_count || !m->callbacks[id]) {
+        log_msg("dos audit: INT 21h stub not found");
+        return;
+    }
+    if (!audit_int21)
+        audit_int21 = m->callbacks[id];
+    m->callbacks[id] = audited_int21;
+    static bool hooked;
+    if (!hooked) {
+        atexit(audit_dump);
+        hooked = true;
+    }
 }
 
 /* AH=55h: a child PSP at DX with memory top SI; it becomes the current PSP. */
