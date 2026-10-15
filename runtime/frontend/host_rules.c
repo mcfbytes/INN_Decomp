@@ -6,8 +6,8 @@
 #include <string.h>
 #include <time.h>
 
-#include "tsn_hle.h"
-#include "tsn_script.h"
+#include "exec_stub.h"
+#include "host_rules.h"
 
 enum { RULES_MAX = 64, ITEMS_MAX = 96, ANY = -1 };
 
@@ -21,7 +21,7 @@ typedef struct Rule {
     int tmpl_len;
 } Rule;
 
-struct TsnScript {
+struct HostRules {
     Rule rules[RULES_MAX];
     int count;
 };
@@ -76,12 +76,12 @@ static bool parse_item(const char *t, Item *items, int *n)
     return *end == 0 && v >= 0 && v <= 255;
 }
 
-TsnScript *tsn_script_load(Machine *m, const char *path)
+HostRules *host_rules_load(Machine *m, const char *path)
 {
     FILE *f = fopen(path, "r");
     if (!f)
         return NULL;
-    TsnScript *s = calloc(1, sizeof *s);
+    HostRules *s = calloc(1, sizeof *s);
     char line[1024];
     int lineno = 0;
     bool ok = true;
@@ -99,9 +99,9 @@ TsnScript *tsn_script_load(Machine *m, const char *path)
             uint8_t bytes[ITEMS_MAX];
             for (int i = 0; i < count; i++)
                 bytes[i] = (uint8_t)items[i].value;
-            tsn_hle_set_shared(m, (uint16_t)strtoul(tok[1], NULL, 16), bytes, (uint16_t)count);
+            exec_stub_set_shared(m, (uint16_t)strtoul(tok[1], NULL, 16), bytes, (uint16_t)count);
         } else if (!strcmp(tok[0], "previous") && n == 2) {
-            tsn_hle_set_previous(m, tok[1]);
+            exec_stub_set_previous(m, tok[1]);
         } else if (!strcmp(tok[0], "reply") && s->count < RULES_MAX) {
             Rule *r = &s->rules[s->count++];
             int i = 1;
@@ -144,12 +144,12 @@ static void answer(Machine *m, const Rule *r, const uint8_t *req, uint16_t len)
             break;
         }
     }
-    tsn_hle_deliver(m, out, (uint16_t)n);
+    exec_stub_deliver(m, out, (uint16_t)n);
 }
 
-void tsn_script_on_send(Machine *m, const uint8_t *msg, uint16_t len, void *user)
+void host_rules_on_send(Machine *m, const uint8_t *msg, uint16_t len, void *user)
 {
-    TsnScript *s = user;
+    HostRules *s = user;
     char hex[3 * 48 + 1] = "";
     for (int i = 0; i < len && i < 48; i++)
         snprintf(hex + 3 * i, 4, " %02x", msg[i]);
@@ -164,4 +164,4 @@ void tsn_script_on_send(Machine *m, const uint8_t *msg, uint16_t len, void *user
     }
 }
 
-void tsn_script_free(TsnScript *s) { free(s); }
+void host_rules_free(HostRules *s) { free(s); }

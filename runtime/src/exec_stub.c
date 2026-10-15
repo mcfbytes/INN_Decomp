@@ -5,7 +5,7 @@
 
 #include "bios_internal.h"
 #include "lift.h"
-#include "tsn_hle.h"
+#include "exec_stub.h"
 
 enum {
     EXPORTS = 17, SHARED_MAX = 256, QUEUE_MAX = 64, MSG_MAX = 1024, PENDING_FREE_MAX = 100,
@@ -14,26 +14,26 @@ enum {
     TICK_ADDR = 0x4F0, /* the BIOS inter-application area holds the client's tick counter */
 };
 
-typedef struct TsnMsg {
+typedef struct ExecMsg {
     uint16_t len;
     uint8_t bytes[MSG_MAX];
-} TsnMsg;
+} ExecMsg;
 
-typedef struct TsnHle {
-    TsnSendHook on_send;
+typedef struct ExecStub {
+    ExecSendHook on_send;
     void *user;
     uint16_t table_off, previous_off, shared_off;
     uint16_t shared_len;
     bool has_previous;
     uint32_t alloc_cb, free_cb, deref_cb; /* seg:off of the client's memory callbacks */
-    TsnMsg queue[QUEUE_MAX];
+    ExecMsg queue[QUEUE_MAX];
     int q_head, q_count;
     uint32_t pending_free[PENDING_FREE_MAX];
     int pending_count;
     char next_program[64];
-} TsnHle;
+} ExecStub;
 
-static TsnHle *tsn(Machine *m) { return m->tsn; }
+static ExecStub *stub(Machine *m) { return m->exec_stub; }
 
 static uint16_t arg16(Machine *m, int index) /* far cdecl: args after the 4-byte return address */
 {
@@ -76,7 +76,7 @@ static uint32_t call_client(Machine *m, uint32_t fn, const uint16_t *args, int n
 
 static uint32_t deref(Machine *m, uint32_t handle)
 {
-    TsnHle *t = tsn(m);
+    ExecStub *t = stub(m);
     if (!t->deref_cb)
         return 0;
     uint16_t args[2] = {(uint16_t)handle, (uint16_t)(handle >> 16)};
@@ -85,7 +85,7 @@ static uint32_t deref(Machine *m, uint32_t handle)
 
 static void free_pending(Machine *m)
 {
-    TsnHle *t = tsn(m);
+    ExecStub *t = stub(m);
     int n = t->pending_count;
     t->pending_count = 0;
     for (int i = 0; i < n && t->free_cb; i++) {
@@ -100,7 +100,7 @@ static CallbackResult x_get_status(Machine *m) { ret16(m, CONNECTED << 8 | DRIVE
 
 static CallbackResult x_get_shared(Machine *m)
 {
-    TsnHle *t = tsn(m);
+    ExecStub *t = stub(m);
     uint32_t out = far_linear(arg_far(m, 0));
     mem_wr16(m, out, t->shared_off);
     mem_wr16(m, out + 2, BIOS_SEG);
@@ -110,7 +110,7 @@ static CallbackResult x_get_shared(Machine *m)
 
 static CallbackResult x_set_shared(Machine *m)
 {
-    TsnHle *t = tsn(m);
+    ExecStub *t = stub(m);
     uint32_t src = arg_far(m, 0);
     uint16_t len = arg16(m, 2);
     if (!src || !len) {
@@ -128,7 +128,7 @@ static CallbackResult x_connect(Machine *m) { ret16(m, STATUS_OK); return CB_DON
 
 static CallbackResult x_send(Machine *m)
 {
-    TsnHle *t = tsn(m);
+    ExecStub *t = stub(m);
     uint32_t handle = arg_far(m, 0);
     uint16_t len = arg16(m, 2);
     if (!len || len > MSG_MAX) {
@@ -149,7 +149,7 @@ static CallbackResult x_send(Machine *m)
 
 static CallbackResult x_receive(Machine *m)
 {
-    TsnHle *t = tsn(m);
+    ExecStub *t = stub(m);
     uint32_t out = far_linear(arg_far(m, 0));
     if (!t->q_count || !t->alloc_cb) {
         mem_wr16(m, out, 0);
@@ -157,7 +157,7 @@ static CallbackResult x_receive(Machine *m)
         ret16(m, 0);
         return CB_DONE;
     }
-    TsnMsg *msg = &t->queue[t->q_head];
+    ExecMsg *msg = &t->queue[t->q_head];
     uint16_t size = msg->len;
     uint32_t handle = call_client(m, t->alloc_cb, &size, 1);
     if (!handle) {
@@ -187,7 +187,7 @@ static CallbackResult x_poll(Machine *m)
 
 static CallbackResult x_set_next_program(Machine *m)
 {
-    TsnHle *t = tsn(m);
+    ExecStub *t = stub(m);
     uint32_t name = arg_far(m, 0);
     if (name)
         mem_read_cstr(m, (uint16_t)(name >> 16), (uint16_t)name, t->next_program, sizeof t->next_program);
@@ -202,7 +202,7 @@ static CallbackResult x_service(Machine *m) { ret16(m, STATUS_OK); return CB_DON
 
 static CallbackResult x_get_previous(Machine *m)
 {
-    TsnHle *t = tsn(m);
+    ExecStub *t = stub(m);
     ret_far(m, t->has_previous ? (uint32_t)BIOS_SEG << 16 | t->previous_off : 0);
     return CB_DONE;
 }
@@ -213,7 +213,7 @@ static CallbackResult x_flush(Machine *m) { return CB_DONE; }
 
 static CallbackResult x_set_callbacks(Machine *m)
 {
-    TsnHle *t = tsn(m);
+    ExecStub *t = stub(m);
     t->alloc_cb = arg_far(m, 0);
     t->deref_cb = arg_far(m, 2);
     t->free_cb = arg_far(m, 4);
@@ -224,29 +224,29 @@ static CallbackResult x_get_line_rate(Machine *m) { ret16(m, LINE_RATE); return 
 
 static CallbackResult int14_discover(Machine *m)
 {
-    ret_far(m, (uint32_t)BIOS_SEG << 16 | tsn(m)->table_off);
+    ret_far(m, (uint32_t)BIOS_SEG << 16 | stub(m)->table_off);
     return CB_DONE;
 }
 
 /* ---- set-up ---- */
 
-void tsn_hle_install(Machine *m, TsnSendHook on_send, void *user)
+void exec_stub_install(Machine *m, ExecSendHook on_send, void *user)
 {
     static const struct { const char *name; CallbackFn fn; } EXPORT[EXPORTS] = {
-        {"tsn_get_status", x_get_status}, {"tsn_get_shared", x_get_shared},
-        {"tsn_set_shared", x_set_shared}, {"tsn_connect", x_connect},
-        {"tsn_send", x_send}, {"tsn_receive", x_receive},
-        {"tsn_set_ack_timeout", x_set_ack_timeout}, {"tsn_disconnect", x_disconnect},
-        {"tsn_poll", x_poll}, {"tsn_set_next_program", x_set_next_program},
-        {"tsn_service", x_service}, {"tsn_get_previous", x_get_previous},
-        {"tsn_is_transmit_idle", x_is_transmit_idle}, {"tsn_switch_host", x_switch_host},
-        {"tsn_flush", x_flush}, {"tsn_set_callbacks", x_set_callbacks},
-        {"tsn_get_line_rate", x_get_line_rate},
+        {"exec_get_status", x_get_status}, {"exec_get_shared", x_get_shared},
+        {"exec_set_shared", x_set_shared}, {"exec_connect", x_connect},
+        {"exec_send", x_send}, {"exec_receive", x_receive},
+        {"exec_set_ack_timeout", x_set_ack_timeout}, {"exec_disconnect", x_disconnect},
+        {"exec_poll", x_poll}, {"exec_set_next_program", x_set_next_program},
+        {"exec_service", x_service}, {"exec_get_previous", x_get_previous},
+        {"exec_is_transmit_idle", x_is_transmit_idle}, {"exec_switch_host", x_switch_host},
+        {"exec_flush", x_flush}, {"exec_set_callbacks", x_set_callbacks},
+        {"exec_get_line_rate", x_get_line_rate},
     };
-    TsnHle *t = calloc(1, sizeof *t);
+    ExecStub *t = calloc(1, sizeof *t);
     if (!t)
         fatal("out of memory");
-    m->tsn = t;
+    m->exec_stub = t;
     t->on_send = on_send;
     t->user = user;
     uint8_t table[EXPORTS * 4];
@@ -261,24 +261,24 @@ void tsn_hle_install(Machine *m, TsnSendHook on_send, void *user)
     static const uint8_t zero[SHARED_MAX + 64];
     t->shared_off = bios_rom_emit(m, zero, SHARED_MAX);
     t->previous_off = bios_rom_emit(m, zero, 64);
-    callback_register(m, "int14_tsn", int14_discover, VEC_SERIAL);
+    callback_register(m, "int14_exec", int14_discover, VEC_SERIAL);
 }
 
-void tsn_hle_set_send_hook(Machine *m, TsnSendHook on_send, void *user)
+void exec_stub_set_send_hook(Machine *m, ExecSendHook on_send, void *user)
 {
-    tsn(m)->on_send = on_send;
-    tsn(m)->user = user;
+    stub(m)->on_send = on_send;
+    stub(m)->user = user;
 }
 
-void tsn_hle_shutdown(Machine *m)
+void exec_stub_shutdown(Machine *m)
 {
-    free(m->tsn);
-    m->tsn = NULL;
+    free(m->exec_stub);
+    m->exec_stub = NULL;
 }
 
-void tsn_hle_set_shared(Machine *m, uint16_t offset, const uint8_t *data, uint16_t len)
+void exec_stub_set_shared(Machine *m, uint16_t offset, const uint8_t *data, uint16_t len)
 {
-    TsnHle *t = tsn(m);
+    ExecStub *t = stub(m);
     if (offset >= SHARED_MAX)
         return;
     if (len > SHARED_MAX - offset)
@@ -288,9 +288,9 @@ void tsn_hle_set_shared(Machine *m, uint16_t offset, const uint8_t *data, uint16
         t->shared_len = (uint16_t)(offset + len);
 }
 
-void tsn_hle_set_previous(Machine *m, const char *name)
+void exec_stub_set_previous(Machine *m, const char *name)
 {
-    TsnHle *t = tsn(m);
+    ExecStub *t = stub(m);
     size_t n = strlen(name);
     n = n > 63 ? 63 : n;
     memcpy(m->mem + real_addr(BIOS_SEG, t->previous_off), name, n);
@@ -298,14 +298,14 @@ void tsn_hle_set_previous(Machine *m, const char *name)
     t->has_previous = true;
 }
 
-void tsn_hle_deliver(Machine *m, const uint8_t *msg, uint16_t len)
+void exec_stub_deliver(Machine *m, const uint8_t *msg, uint16_t len)
 {
-    TsnHle *t = tsn(m);
+    ExecStub *t = stub(m);
     if (t->q_count == QUEUE_MAX || len > MSG_MAX) {
         log_msg("tsn: host message dropped (queue full or %u bytes)", len);
         return;
     }
-    TsnMsg *q = &t->queue[(t->q_head + t->q_count) % QUEUE_MAX];
+    ExecMsg *q = &t->queue[(t->q_head + t->q_count) % QUEUE_MAX];
     q->len = len;
     memcpy(q->bytes, msg, len);
     t->q_count++;

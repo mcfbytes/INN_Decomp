@@ -5,7 +5,7 @@
 #include <string.h>
 
 #include "devices.h"
-#include "tsn_hle.h"
+#include "exec_stub.h"
 
 static int failures;
 
@@ -284,11 +284,11 @@ static void test_mouse(void)
 }
 
 /* The TSNEXEC stand-in answers INT 14h with its export table; the game port reports no joystick. */
-static void test_tsn_and_gameport(void)
+static void test_exec_stub_and_gameport(void)
 {
     Machine *m = boot();
-    tsn_hle_install(m, NULL, NULL);
-    tsn_hle_set_previous(m, "SierraLand");
+    exec_stub_install(m, NULL, NULL);
+    exec_stub_set_previous(m, "SierraLand");
     static const uint8_t code[] = {
         0xCD, 0x14,                   /* int 14h: DX:AX = table */
         0x8E, 0xC2, 0x89, 0xC3,       /* mov es,dx; mov bx,ax */
@@ -308,7 +308,7 @@ static void test_tsn_and_gameport(void)
     mem_read_cstr(m, mem_rd16(m, RESULT + 4), mem_rd16(m, RESULT + 2), name, sizeof name);
     CHECK(!strcmp(name, "SierraLand"), "GetPreviousProgram '%s'", name);
     CHECK(m->mem[RESULT + 6] == 0xFF, "game port %02X", m->mem[RESULT + 6]);
-    tsn_hle_shutdown(m);
+    exec_stub_shutdown(m);
     finish(m);
 }
 
@@ -320,7 +320,7 @@ int main(void)
     test_vga();
     test_uart();
     test_mouse();
-    test_tsn_and_gameport();
+    test_exec_stub_and_gameport();
     if (failures)
         fprintf(stderr, "%d check(s) failed\n", failures);
     else

@@ -147,7 +147,7 @@ expects. The frontend starts each program in its own directory.
 
 ## TSN host stand-in
 
-`tsn_hle.c` replaces TSNEXEC for running one DOS game client alone: INT 14h returns a 17-entry export
+`exec_stub.c` replaces TSNEXEC for running one DOS game client alone: INT 14h returns a 17-entry export
 table of callbacks (each stub `FE 38 id CB` ends in `RETF`, since the exports are far cdecl calls).
 Messages travel whole, without the link layer: Send dereferences the client's handle through its own
 callbacks (nested guest calls, as TSNEXEC makes them) and hands the bytes to a hook; Receive allocates and
@@ -155,7 +155,7 @@ fills a handle for the oldest queued host message. GetStatus reports connected (
 2400, the tick-counter pointer is `0000:04F0`, the shared block (256 bytes) and the previous-program name
 live in the ROM area.
 
-The frontend's `--tsn-host rules.txt` (`runtime/frontend/tsn_script.c`) answers from a rule file:
+The frontend's `--tsn-host rules.txt` (`runtime/frontend/host_rules.c`) answers from a rule file:
 
 ```
 shared 80 02 00 01 03 05            # shared block bytes at a hex offset ("text" also allowed)

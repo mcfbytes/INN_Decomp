@@ -99,7 +99,7 @@ struct Machine {
 
     void *dos, *bios, *pic, *pit, *vga, *kbd, *mouse, *uart, *ems, *xms, *frontend;
     void *audio, *opl, *speaker, *dma, *sb;
-    void *tsn; /* TSNEXEC stand-in (tsn_hle.c), when a frontend installs one */
+    void *exec_stub; /* TSNEXEC stand-in (exec_stub.c), when a frontend installs one */
     bool exit_requested;
     int exit_code;
     int trace; /* 0 off, 1 interrupts and DOS calls, 2 every instruction */

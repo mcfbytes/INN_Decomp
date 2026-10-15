@@ -41,7 +41,7 @@ set_source_files_properties(${NUKED_OPL3} PROPERTIES COMPILE_OPTIONS "-w")
 target_link_libraries(dosrt PUBLIC m)
 
 set(INN_FRONTEND_SOURCES runtime/frontend/frontend_sdl.c runtime/frontend/frame_clock.c
-    runtime/frontend/input_script.c runtime/frontend/audio_sdl.c runtime/frontend/tsn_script.c)
+    runtime/frontend/input_script.c runtime/frontend/audio_sdl.c runtime/frontend/host_rules.c)
 
 if(EMSCRIPTEN)
   # Browser build (docs/web.md). The preload directory bakes a local C: drive into inn.data for
