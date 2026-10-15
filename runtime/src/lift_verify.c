@@ -178,6 +178,23 @@ static void report(Machine *m, ActiveHook *h, const char *why)
     log_msg("verify: %s %s call %d: %s", h->entry->module, h->entry->name, h->stats->shadow_calls, why);
 }
 
+/* AX and DX are scratch for C functions, but they also carry the return value, so a scratch
+ * difference is counted (not a mismatch: a void function leaves whatever it last computed there)
+ * and the first one per entry is logged. */
+static void note_result_difference(Machine *m, ActiveHook *h)
+{
+    const Cpu *a = &m->cpu, *b = &verify(m)->cpu_original;
+    uint16_t scratch = h->entry->scratch_regs;
+    bool ax = (scratch & LIFT_REG_AX) && a->r[R_AX].w != b->r[R_AX].w;
+    bool dx = (scratch & LIFT_REG_DX) && a->r[R_DX].w != b->r[R_DX].w;
+    if (!ax && !dx)
+        return;
+    if (h->stats->result_diffs++ == 0)
+        log_msg("verify: %s %s call %d: result DX:AX lifted %04X:%04X original %04X:%04X (scratch)",
+                h->entry->module, h->entry->name, h->stats->shadow_calls, a->r[R_DX].w, a->r[R_AX].w, b->r[R_DX].w,
+                b->r[R_AX].w);
+}
+
 /* Memory below hi_sp, down to 0x2000 below lo_sp but not below SS:0, is dead stack: a lift whose
  * locals wrap below the stack segment (into static data of a small DGROUP stack) is caught. */
 static void compare(Machine *m, ActiveHook *h, uint16_t lo_sp, uint16_t hi_sp)
@@ -208,8 +225,11 @@ static void compare(Machine *m, ActiveHook *h, uint16_t lo_sp, uint16_t hi_sp)
         return;
     }
     dos_snapshot_save(m, v->dos_lifted);
-    if (memcmp(v->dos_lifted, v->dos_original, dos_snapshot_size()) != 0)
+    if (memcmp(v->dos_lifted, v->dos_original, dos_snapshot_size()) != 0) {
         report(m, h, "DOS state (open files, positions, current directory) differs");
+        return;
+    }
+    note_result_difference(m, h);
 }
 
 /* ---- one verified call ---- */

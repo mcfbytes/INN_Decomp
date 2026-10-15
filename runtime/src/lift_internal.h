@@ -11,6 +11,7 @@ enum { MAX_TABLES = 64, MAX_ACTIVE = 8192, MAX_NESTING = 64, HOOK_BITMAP_BYTES =
 typedef struct HookStats {
     bool armed_once;
     int shadow_calls, shadow_mismatches;
+    int result_diffs; /* calls whose AX or DX differed although scratch: a possible wrong return value */
 } HookStats;
 
 typedef struct ActiveHook {

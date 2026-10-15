@@ -48,8 +48,12 @@ static void log_verify_line(const LiftedEntry *e, const HookStats *st)
         log_msg("verify: %s %s: not shadowed (LIFT_NOSHADOW)", e->module, e->name);
         return;
     }
-    log_msg("verify: %s %s: %d calls checked, %d mismatches", e->module, e->name, st->shadow_calls,
-            st->shadow_mismatches);
+    if (st->result_diffs)
+        log_msg("verify: %s %s: %d calls checked, %d mismatches, DX:AX differs in %d", e->module, e->name,
+                st->shadow_calls, st->shadow_mismatches, st->result_diffs);
+    else
+        log_msg("verify: %s %s: %d calls checked, %d mismatches", e->module, e->name, st->shadow_calls,
+                st->shadow_mismatches);
 }
 
 /* Every entry that was armed at some point, loaded now or not. */

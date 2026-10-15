@@ -111,6 +111,12 @@ The game then continues from the original's end state, so a wrong lift cannot de
 lifted hooks are off during the original's shadow run, so lifted callees inside it run original
 code and the whole call tree is compared. The
 first difference is reported with the function, the call number and the differing value.
+AX and DX are scratch for C functions but also carry their return value, so the scratch set alone
+would hide a wrong result. When everything else matches but DX:AX differs, the call is counted and
+the first one per entry is logged as `result DX:AX lifted ... original ...`, and the summary line
+adds `DX:AX differs in N`. That is not a mismatch (a void function leaves whatever it last computed),
+so a function that returns a value declares it with the `*_RET_AX` or `*_RET_DXAX` scratch macros,
+which take AX (or DX and AX) out of the scratch set and make a wrong result a mismatch.
 
 Functions whose original would repeat device I/O during a shadow run (dialling, UART handshakes
 through a modem driver) or end the process are marked `LIFT_FAR_NOSHADOW` / `LIFT_NEAR_NOSHADOW`:
