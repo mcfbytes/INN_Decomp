@@ -12,7 +12,8 @@ endif()
 add_compile_options(-Wall -Wextra -Wno-unused-parameter)
 
 # The machine and its services; frontends live in runtime/frontend.
-file(GLOB DOSRT_SOURCES CONFIGURE_DEPENDS runtime/src/*.c)
+# M9 stand-in until package 11: package 11 replaces this glob with its INN_NATIVE option.
+file(GLOB DOSRT_SOURCES CONFIGURE_DEPENDS runtime/src/*.c runtime/src/native/*.c)
 add_library(dosrt STATIC ${DOSRT_SOURCES})
 target_include_directories(dosrt PUBLIC runtime/src)
 

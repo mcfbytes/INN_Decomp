@@ -105,6 +105,7 @@ struct Machine {
     void *exec_stub; /* TSNEXEC stand-in (exec_stub.c), when a frontend installs one */
     bool exit_requested;
     int exit_code;
+    bool native; /* M9 stand-in until package 11: INN runs as native C, no CPU (cleared while a game runs) */
     int trace; /* 0 off, 1 interrupts and DOS calls, 2 every instruction */
     bool fpu_present; /* a 387 answers escape opcodes; otherwise they decode and do nothing */
 };

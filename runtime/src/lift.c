@@ -48,6 +48,8 @@ void lift_init(Machine *m)
     bool direct_all = !direct || !*direct || *direct == '1';
     lift_state(m)->direct = direct_all || (direct && *direct == '2');
     lift_state(m)->direct_cb = direct_all || (direct && *direct == '3');
+    const char *native_control = getenv("INN_NATIVE_CONTROL");
+    lift_state(m)->native_control = native_control && strcmp(native_control, "1") == 0;
     const char *prof = getenv("INN_INTERP_PROFILE");
     if (prof && *prof) {
         dosrt_interp_profile = calloc(MEM_ONE_MEG / 16, sizeof *dosrt_interp_profile);
@@ -179,6 +181,10 @@ static void arm(Machine *m, const LiftedEntry *e, HookStats *stats, uint16_t loa
 {
     LiftState *s = lift_state(m);
     if (s->only && !lift_listed(s->only, e->name))
+        return;
+    if (m->native)
+        s->native_seen = true;
+    if (e->native_only && !s->native_control && !s->native_seen)
         return;
     if (s->active_count >= MAX_ACTIVE)
         fatal("too many active lifted functions");

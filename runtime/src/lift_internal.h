@@ -62,6 +62,8 @@ typedef struct LiftState {
     bool direct, direct_cb; /* INN_DIRECT_CALLS: lifted entries, thunks and returns / service stubs skip the CPU */
     uint64_t direct_calls, direct_fallbacks, direct_callbacks, direct_thunks, direct_returns;
     LiftUnresolvedFn unresolved; /* lift_set_unresolved */
+    bool native_control; /* INN_NATIVE_CONTROL=1: native-only entries are armed in a hybrid build */
+    bool native_seen;    /* m->native was set when a module was armed: native-only entries stay armed */
 } LiftState;
 
 struct VerifyState;
