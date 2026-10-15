@@ -83,6 +83,9 @@ void dos_sft_release(Machine *m, int idx)
     if (f->refs > 0 && --f->refs == 0 && f->fd >= 0) {
         dos_host_close(f->fd);
         f->fd = -1;
+        if (f->written)
+            dos_host_file_closed(f->dos_path);
+        f->written = false;
     }
 }
 

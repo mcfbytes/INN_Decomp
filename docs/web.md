@@ -13,7 +13,7 @@ cmake --build build-web
 ```
 
 Output in `build-web/`: `inn.html` (from `runtime/web/shell.html`), `inn.js`, `inn.wasm`, and the page
-scripts `page.js` and `zip.js` copied from `runtime/web/`. The default build type is `Release` (`-O3`).
+scripts `page.js`, `saves.js` and `zip.js` copied from `runtime/web/`. The default build type is `Release` (`-O3`).
 
 | CMake cache variable | Default | Effect |
 |---|---|---|
@@ -60,9 +60,48 @@ it. A preload build does not mount IDBFS.
 ## Serial over WebSocket
 
 `runtime/src/uart_link_ws.c` is a `SerialLink` on `<emscripten/websocket.h>`: binary frames carry raw
-serial bytes both ways, received bytes queue in a growing inbox until the UART paces them in, sends wait
+serial bytes both ways (text frames are the save channel, next section), received bytes queue in a growing inbox until the UART paces them in, sends wait
 (return 0) while connecting, and DCD/DSR/CTS follow the socket state as with the TCP link. `--com1` picks
 it for `ws://` and `wss://` specs; the native build returns an error for those.
+
+## Game saves on the server
+
+Characters, automaps and the INN persona files normally live only in this browser's IndexedDB. Over the
+same WebSocket, `innkeeperd` can keep them per account and put them back when the account signs on from
+another browser. The host side (protocol, store, rules) is `docs/server/saves.md` in the TSN-INN-Decomp
+repository; this is the browser side.
+
+- **Channel.** Binary frames stay serial bytes. Text frames are JSON control messages: `uart_link_ws.c`
+  hands each one to `Module.onControlText(text)` and never to the UART, and the exported
+  `Module.sendControl(text)` sends one (a 1 MiB file fits; the text is staged in the heap, not on the
+  stack). `runtime/web/saves.js` (`InnSaves`) is the only user.
+- **Which files.** `INN\YSERBIUS\MYCHARS.DAT`, `AUTOMAPS.DAT`, `INN\TWINION\TWINCHAR.DAT`, `AUTOMAPS.DAT`,
+  `INN\PLAYER.DIR` and `INN\*.DTA` except `PASS_SET.DTA`, which never leaves the browser. The host
+  enforces the same list. Names are matched without regard to case against the drive's own spelling.
+- **When.** The host sends a manifest as soon as the line has logged on (`LoginAccepted`); before that it
+  answers `not_logged_on`. For each path, comparing the local SHA-256 with the hash and version last
+  synced (kept in `localStorage` per account):
+
+  | Case | Action |
+  |---|---|
+  | only the host has it, or the host changed and the local file did not | download and write it (with the host's modification time) |
+  | only the page has it, or the local file changed and the host's did not | upload |
+  | both changed | upload anyway; the host keeps the later modification as current and the other as a previous version, and the page downloads if it lost |
+
+  The manifest arrives about when the logon completes, before the player can pick a land, and CGENN and
+  TWGENN read the character files after that.
+- **Uploads.** `dos_file.c` and `dos_handle.c` call `dos_host_file_closed(dos_path)` when the program
+  closes a file it wrote or renames onto a name; in the browser build that calls `Module.onFileClosed`,
+  which uploads an allowlisted path 1.5 s later (debounced). Every changed file is also pushed when the tab
+  is hidden, on `pagehide`, and when the client exits. Native builds do nothing there.
+- **UI.** The settings drawer shows the sync state under Storage. A save that lost to a newer copy on the
+  host raises a toast. "Forget saved installation" clears only this browser; the host's copies stay.
+- **Failure.** If the host is unreachable or the account has not logged on, nothing is lost: the files stay
+  in the drive and the next manifest reconciles them.
+
+Verified 2026-10-14 in headless Chromium against a scratch `innkeeperd --data-dir`: the first install
+uploaded its six save files after the logon, an edit closed through the hook became version 2, and a fresh
+browser profile with an install that lacked the character files received all four, version 2 included.
 
 ## The page
 

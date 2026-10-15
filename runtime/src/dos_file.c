@@ -43,6 +43,19 @@ static int host_flags(uint8_t mode, OpenHow how)
     return flags;
 }
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+/* The page syncs game saves to the server when the program finishes writing them (docs/web.md). */
+EM_JS(void, page_file_closed, (const char *dos_path), {
+    if (Module.onFileClosed)
+        Module.onFileClosed(UTF8ToString(dos_path));
+});
+EM_JS_DEPS(file_closed, "$UTF8ToString");
+void dos_host_file_closed(const char *dos_path) { page_file_closed(dos_path); }
+#else
+void dos_host_file_closed(const char *dos_path) { (void)dos_path; }
+#endif
+
 /* Opens or creates name and gives it a handle in the current process. */
 static int open_file(Machine *m, const char *name, OpenHow how, uint8_t mode, uint16_t *handle)
 {
@@ -71,6 +84,7 @@ static int open_file(Machine *m, const char *name, OpenHow how, uint8_t mode, ui
     f->dev = p.dev;
     f->mode = how == OPEN_EXISTING ? mode : ACCESS_RW;
     snprintf(f->dos_path, sizeof f->dos_path, "%s", p.dos);
+    f->written = false;
     int h = dos_alloc_handle(m, idx);
     if (h < 0) {
         if (fd >= 0)
@@ -213,6 +227,8 @@ CallbackResult dos_write(Machine *m)
     free(buf);
     if (n < 0)
         return dos_fail(m, DE_ACCESS_DENIED);
+    if (f->dev == DEV_NONE)
+        f->written = true;
     AX = (uint16_t)n;
     return dos_ok(m);
 }
@@ -266,6 +282,7 @@ CallbackResult dos_rename(Machine *m)
         return dos_fail(m, DE_ACCESS_DENIED);
     if (dos_host_rename(from.host, to.host) != 0)
         return dos_fail(m, errno_to_dos(errno));
+    dos_host_file_closed(to.dos);
     return dos_ok(m);
 }
 

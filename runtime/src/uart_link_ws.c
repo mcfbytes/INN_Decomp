@@ -6,6 +6,7 @@
 #include "devices.h"
 
 #ifdef __EMSCRIPTEN__
+#include <emscripten.h>
 #include <emscripten/websocket.h>
 
 enum { WS_INBOX_INITIAL = 4096 };
@@ -40,9 +41,47 @@ static bool inbox_reserve(WsLink *w, size_t extra)
     return true;
 }
 
+/* Text frames are the save channel's JSON control messages (docs/web.md): they go to the page
+ * (Module.onControlText) and never reach the serial line. The page sends its own through
+ * Module.sendControl, which stages the text in a malloc'd buffer for inn_control_send. */
+static EMSCRIPTEN_WEBSOCKET_T control_socket;
+static bool control_open;
+
+EM_JS(void, control_to_page, (const char *text, int len), {
+    if (Module.onControlText)
+        Module.onControlText(UTF8ToString(text, len));
+});
+
+EM_JS(void, control_install, (void), {
+    Module.sendControl = function(text) {
+        const n = lengthBytesUTF8(text);
+        const p = _inn_control_alloc(n + 1);
+        if (!p)
+            return false;
+        stringToUTF8(text, p, n + 1);
+        return _inn_control_send(p) == 0;
+    };
+});
+EM_JS_DEPS(control, "$UTF8ToString,$lengthBytesUTF8,$stringToUTF8");
+
+EMSCRIPTEN_KEEPALIVE char *inn_control_alloc(int bytes) { return malloc((size_t)bytes); }
+
+/* Sends the NUL-terminated text in p as one text frame and frees p; 0 when it was sent. */
+EMSCRIPTEN_KEEPALIVE int inn_control_send(char *p)
+{
+    int sent = -1;
+    if (control_open &&
+        emscripten_websocket_send_utf8_text(control_socket, p) == EMSCRIPTEN_RESULT_SUCCESS)
+        sent = 0;
+    free(p);
+    return sent;
+}
+
 static bool on_open(int type, const EmscriptenWebSocketOpenEvent *e, void *ctx)
 {
     ((WsLink *)ctx)->state = WS_OPEN;
+    control_socket = e->socket;
+    control_open = true;
     log_msg("uart: websocket open");
     return true;
 }
@@ -50,7 +89,12 @@ static bool on_open(int type, const EmscriptenWebSocketOpenEvent *e, void *ctx)
 static bool on_message(int type, const EmscriptenWebSocketMessageEvent *e, void *ctx)
 {
     WsLink *w = ctx;
-    if (e->isText || !e->numBytes)
+    if (e->isText) {
+        if (e->numBytes)
+            control_to_page((const char *)e->data, (int)e->numBytes);
+        return true;
+    }
+    if (!e->numBytes)
         return true;
     if (!inbox_reserve(w, e->numBytes)) {
         log_msg("uart: websocket inbox out of memory, dropping %u bytes", e->numBytes);
@@ -64,6 +108,7 @@ static bool on_message(int type, const EmscriptenWebSocketMessageEvent *e, void 
 static bool on_error(int type, const EmscriptenWebSocketErrorEvent *e, void *ctx)
 {
     ((WsLink *)ctx)->state = WS_CLOSED;
+    control_open = false;
     log_msg("uart: websocket error");
     return true;
 }
@@ -71,6 +116,7 @@ static bool on_error(int type, const EmscriptenWebSocketErrorEvent *e, void *ctx
 static bool on_close(int type, const EmscriptenWebSocketCloseEvent *e, void *ctx)
 {
     ((WsLink *)ctx)->state = WS_CLOSED;
+    control_open = false;
     log_msg("uart: websocket closed (code %u)", e->code);
     return true;
 }
@@ -102,6 +148,7 @@ static bool ws_connected(void *ctx) { return ((WsLink *)ctx)->state == WS_OPEN; 
 static void ws_close(void *ctx)
 {
     WsLink *w = ctx;
+    control_open = false;
     emscripten_websocket_close(w->socket, 1000, "client closed");
     emscripten_websocket_delete(w->socket);
     free(w->inbox);
@@ -136,6 +183,7 @@ int uart_attach_ws(Machine *m, int com, const char *url)
         free(w);
         return -1;
     }
+    control_install();
     SerialLink link = { w, ws_send, ws_recv, ws_connected, ws_close };
     if (uart_attach(m, com, link) != 0) {
         ws_close(w);

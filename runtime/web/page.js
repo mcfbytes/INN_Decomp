@@ -336,6 +336,21 @@ function keepSaving() {
   window.addEventListener('pagehide', () => syncDrive(false));
 }
 
+// Game saves follow the account to the server (saves.js); this wires them to the runtime and the page.
+function keepServerSaves() {
+  InnSaves.init({
+    fs: FS,
+    drive: DRIVE,
+    log,
+    persist: () => syncDrive(false),
+    send: (text) => !!Module.sendControl && Module.sendControl(text),
+    notify: (text) => toast(text, 'ok'),
+    status: (text) => { $('saves-note').textContent = text; },
+  });
+  document.addEventListener('visibilitychange', () => document.hidden && InnSaves.flushAll());
+  window.addEventListener('pagehide', () => InnSaves.flushAll());
+}
+
 function start() {
   if (page.started || page.drive === 'none') return;
   page.started = true;
@@ -349,6 +364,7 @@ function start() {
   watchFocus();
   $('canvas').focus();
   keepSaving();
+  keepServerSaves();
   setLink('connecting');
   setStatus(statusRunning());
   Module.callMain(runtimeArgs(server));
@@ -390,12 +406,15 @@ var Module = {
   canvas: document.getElementById('canvas'),
   print: log,
   printErr: log,
+  onControlText: (text) => InnSaves.onControl(text),
+  onFileClosed: (path) => InnSaves.onFileClosed(path),
   setStatus: (text) => text && setStatus(text),
   onRuntimeInitialized: () => onRuntimeReady().catch((err) => log(String(err.stack || err))),
   onGuestExit: (code) => {
     setStatus('Session ended');
     $('ended-text').textContent = code ? `The client exited with code ${code}.` : 'You have signed off.';
     $('ended').hidden = false;
+    InnSaves.flushAll();
     if (document.fullscreenElement) document.exitFullscreen();
     syncDrive(false);
   },

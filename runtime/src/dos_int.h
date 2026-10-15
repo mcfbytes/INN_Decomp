@@ -85,6 +85,7 @@ typedef struct DosFile {
     DosDevice dev;
     uint8_t mode; /* open mode byte as passed to 3Dh */
     char dos_path[DOS_PATH_MAX];
+    bool written; /* a write succeeded since the open: closing it reports the path */
 } DosFile;
 
 /* Parent state saved by EXEC, restored when the child terminates. */
@@ -145,6 +146,8 @@ int dos_host_unlink(const char *path);
 int dos_host_rename(const char *from, const char *to);
 /* close(2) for DOS handles; deferred during a shadow run for descriptors open when it began. */
 void dos_host_close(int fd);
+/* A file the program wrote was closed, or renamed onto dos_path (browser build: Module.onFileClosed). */
+void dos_host_file_closed(const char *dos_path);
 /* open(2) for DOS open/create; exists says whether the path existed before. */
 int dos_host_open(const char *path, int flags, bool exists);
 
