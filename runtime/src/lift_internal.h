@@ -2,6 +2,7 @@
 #ifndef DOSRT_LIFT_INTERNAL_H
 #define DOSRT_LIFT_INTERNAL_H
 
+#include "lift_semantic.h"
 #include "lift.h"
 
 enum { SHADOW_STALL_INSNS = 200000000 };
@@ -65,6 +66,13 @@ typedef struct LiftState {
 } LiftState;
 
 struct VerifyState;
+
+/* ---- semantic port comparison (lift_semantic.c): the lifted run's side, kept by lift_verify.c ---- */
+/* The lifted run's trace while a shadow run is comparing semantically, else NULL. */
+SemTrace *lift_verify_semantic_lifted(Machine *m);
+/* The value of the next original read of this kind; false when the original made no more. */
+bool lift_verify_semantic_original_read(Machine *m, SemKind kind, uint32_t *value);
+void lift_verify_semantic_missing(Machine *m, SemKind kind);
 
 static inline LiftState *lift_state(Machine *m) { return m->lift; }
 

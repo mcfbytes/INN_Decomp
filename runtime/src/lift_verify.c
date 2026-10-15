@@ -27,6 +27,14 @@ typedef struct VerifyState {
     IoEvent log[IO_LOG_MAX];
     int log_len, replay_pos;
     bool io_diverged;
+    /* semantic port comparison (lift_semantic.c) */
+    bool semantic;            /* INN_VERIFY_SEMANTIC */
+    bool sem_active;          /* the lifted run is recording; its ports are canonicalised, not replayed in order */
+    bool sem_valid;           /* a lifted run has finished and compare() has not looked at it yet */
+    int sem_missing;          /* 1 + SemKind of the first lifted read the original made no value for */
+    SemTrace sem_original, sem_lifted;
+    struct { uint16_t port; int next; } read_cursor[32]; /* per port: next original read to replay */
+    int read_cursors;
     const char *synth_label; /* set while a synthetic call (lift_synth.c) is verified: its call list line */
 } VerifyState;
 
@@ -55,6 +63,12 @@ void lift_verify_enable(Machine *m, int calls_per_entry)
             fatal("out of memory");
     }
     s->verify->calls_per_entry = calls_per_entry;
+    const char *semantic = getenv("INN_VERIFY_SEMANTIC");
+#ifdef INN_NATIVE_HW
+    s->verify->semantic = !semantic || *semantic != '0';
+#else
+    s->verify->semantic = semantic && *semantic == '1';
+#endif
 }
 
 int lift_verify_mismatches(const Machine *m)
@@ -78,6 +92,62 @@ void lift_io_record(Machine *m, uint16_t port, int size, uint32_t value, bool is
         v->io_diverged = true;
 }
 
+/* ---- semantic mode: the lifted run's ports are canonicalised like the original's ---- */
+
+SemTrace *lift_verify_semantic_lifted(Machine *m)
+{
+    const LiftState *s = m->lift;
+    if (!s || !s->verify || !s->verify->sem_active || m->io_mode != IO_REPLAY || lift_replay_active(m))
+        return NULL;
+    return &s->verify->sem_lifted;
+}
+
+bool lift_verify_semantic_original_read(Machine *m, SemKind kind, uint32_t *value)
+{
+    return sem_trace_next_read(&verify(m)->sem_original, kind, value);
+}
+
+void lift_verify_semantic_missing(Machine *m, SemKind kind)
+{
+    VerifyState *v = verify(m);
+    if (!v->sem_missing)
+        v->sem_missing = 1 + (int)kind;
+}
+
+static void semantic_begin(VerifyState *v)
+{
+    sem_trace_init(&v->sem_original);
+    for (int i = 0; i < v->log_len; i++)
+        sem_trace_port(&v->sem_original, v->log[i].port, v->log[i].size, v->log[i].value, v->log[i].is_out);
+    sem_trace_finish(&v->sem_original);
+    sem_trace_init(&v->sem_lifted);
+    v->read_cursors = 0;
+    v->sem_missing = 0;
+    v->sem_active = true;
+}
+
+/* The next recorded read of port, in order among the reads of that port. */
+static const IoEvent *semantic_next_read(VerifyState *v, uint16_t port)
+{
+    int c = 0;
+    while (c < v->read_cursors && v->read_cursor[c].port != port)
+        c++;
+    if (c == v->read_cursors) {
+        if (c == (int)(sizeof v->read_cursor / sizeof v->read_cursor[0]))
+            return NULL;
+        v->read_cursor[c].port = port;
+        v->read_cursor[c].next = 0;
+        v->read_cursors++;
+    }
+    for (int i = v->read_cursor[c].next; i < v->log_len; i++)
+        if (v->log[i].port == port && !v->log[i].is_out) {
+            v->read_cursor[c].next = i + 1;
+            return &v->log[i];
+        }
+    v->read_cursor[c].next = v->log_len;
+    return NULL;
+}
+
 static const IoEvent *next_replay(Machine *m, uint16_t port, int size, bool is_out)
 {
     VerifyState *v = verify(m);
@@ -95,6 +165,15 @@ uint32_t lift_io_replay_in(Machine *m, uint16_t port, int size)
 {
     if (lift_replay_active(m))
         return lift_replay_io_in(m, port, size);
+    VerifyState *v = verify(m);
+    if (v->sem_active) {
+        const IoEvent *r = semantic_next_read(v, port);
+        if (!r)
+            v->io_diverged = true;
+        uint32_t value = r ? r->value : 0xFFFFFFFFu;
+        sem_trace_port(&v->sem_lifted, port, size, value, false);
+        return value;
+    }
     const IoEvent *e = next_replay(m, port, size, false);
     return e ? e->value : 0xFFFFFFFFu;
 }
@@ -103,6 +182,10 @@ void lift_io_replay_out(Machine *m, uint16_t port, uint32_t value, int size)
 {
     if (lift_replay_active(m)) {
         lift_replay_io_out(m, port, value, size);
+        return;
+    }
+    if (verify(m)->sem_active) {
+        sem_trace_port(&verify(m)->sem_lifted, port, size, value, true);
         return;
     }
     const IoEvent *e = next_replay(m, port, size, true);
@@ -139,11 +222,18 @@ static void run_lifted(Machine *m, ActiveHook *h)
 {
     VerifyState *v = verify(m);
     v->replay_pos = 0;
+    if (v->semantic)
+        semantic_begin(v);
     m->io_mode = IO_REPLAY;
     lift_call_c(m, h->entry->fn);
     m->io_mode = IO_LIVE;
-    if (v->replay_pos != v->log_len)
+    if (v->semantic) {
+        sem_trace_finish(&v->sem_lifted);
+        v->sem_active = false;
+        v->sem_valid = true;
+    } else if (v->replay_pos != v->log_len) {
         v->io_diverged = true;
+    }
 }
 
 /* ---- comparison ---- */
@@ -226,8 +316,20 @@ static void compare(Machine *m, ActiveHook *h, uint16_t lo_sp, uint16_t hi_sp)
 {
     VerifyState *v = verify(m);
     char why[160];
+    bool semantic = v->sem_valid;
+    v->sem_valid = false;
     if (v->io_diverged) {
         report(m, h, "port I/O sequence differs");
+        return;
+    }
+    if (semantic && v->sem_missing) {
+        snprintf(why, sizeof why, "semantic event: lifted read of kind %d has no matching original read",
+                 v->sem_missing - 1);
+        report(m, h, why);
+        return;
+    }
+    if (semantic && !sem_trace_compare(&v->sem_lifted, &v->sem_original, why, sizeof why)) {
+        report(m, h, why);
         return;
     }
     if (!registers_match(&m->cpu, &v->cpu_original, h->entry->scratch_regs, why, sizeof why)) {

@@ -16,6 +16,12 @@ file(GLOB DOSRT_SOURCES CONFIGURE_DEPENDS runtime/src/*.c)
 add_library(dosrt STATIC ${DOSRT_SOURCES})
 target_include_directories(dosrt PUBLIC runtime/src)
 
+# M9 stand-in until package 11: the hybrid-hw switch (drivers call host APIs, verified by meaning).
+option(INN_NATIVE_HW "Hybrid-hw build: semantic port verification on by default" OFF)
+if(INN_NATIVE_HW)
+  target_compile_definitions(dosrt PUBLIC INN_NATIVE_HW=1)
+endif()
+
 # Lifted (hand-decompiled) sources live in the private tree; the public build runs without them.
 set(INN_LIFTED_DIR "${CMAKE_SOURCE_DIR}/private/lifted" CACHE PATH "Lifted sources (private tree)")
 if(EXISTS "${INN_LIFTED_DIR}")
