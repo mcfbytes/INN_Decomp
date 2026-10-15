@@ -77,3 +77,10 @@ INN_DRIVE=$PWD/work/yserbius-c INNKEEPERD=../TSN-INN-Decomp/target/debug/innkeep
 
 The scenario logs on, opens MedievaLand (Tab, Enter), picks Yserbius and its place, presses Play in the
 gallery, walks into the volcano and turns in the dungeon.
+
+More scenarios in `private/lifted/scenarios/` reach further into the game (same logon prefix, same verifier call):
+
+- `ys_create.txt` (242000 ms): in the gallery, Replace with all creation screens (identity, attributes, appearance, spells, skills), Delete the new character, create another, then Play.
+- `ys_combat.txt` (233000 ms): walks to a Mountain Lion encounter, opens the spell list, fights, tries to flee (refused) and is defeated back to the map.
+- `ys_tavern.txt` (232000 ms): enters the tavern, sorts, reads Tavern Posts, writes and posts a message, opens the options, then opens the Hall of Heroes from the character sheet's options.
+- `ys_sheets.txt` (220000 ms): character sheet screens, Hall of Heroes, then in the dungeon the inventory, skills, spells, automap and game options.
