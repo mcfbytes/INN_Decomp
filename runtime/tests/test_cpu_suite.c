@@ -18,6 +18,9 @@ int pic_acknowledge(Machine *m) { return -1; }
 void pic_raise_irq(Machine *m, int irq) {}
 void pic_lower_irq(Machine *m, int irq) {}
 bool lift_dispatch(Machine *m, uint32_t linear) { return false; } /* no hooks: exec_hooks stays NULL */
+void lift_io_callback(Machine *m, int id) {}
+void lift_io_halt(Machine *m) {}
+void lift_irq_boundary(Machine *m) {}
 void log_msg(const char *fmt, ...) {}
 void fatal(const char *fmt, ...)
 {

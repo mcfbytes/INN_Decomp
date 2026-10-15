@@ -934,6 +934,8 @@ static void group_fe(Machine *m, Insn *in)
         if (fn(m) == CB_RETRY) {
             c->eip = in->start_eip;
             c->yielded = true;
+        } else if (m->io_mode != IO_LIVE) {
+            lift_io_callback(m, id);
         }
         return;
     }
@@ -1377,6 +1379,8 @@ static void exec_one(Machine *m)
         return;
     case 0xF4:
         c->halted = true;
+        if (m->io_mode != IO_LIVE)
+            lift_io_halt(m);
         return;
     case 0xF5: c->flags ^= F_CF; return;
     case 0xF6: group_unary(m, &in, 1); return;
@@ -1414,6 +1418,8 @@ uint64_t cpu_run(Machine *m, uint64_t budget)
     while (done < budget && !m->exit_requested) {
         if (c->irq_inhibit) {
             c->irq_inhibit = false;
+        } else if ((c->flags & F_IF) && __builtin_expect(m->irq_gate, 0)) {
+            lift_irq_boundary(m);
         } else if ((c->flags & F_IF) && m->irq_pending && !m->irq_hold) {
             int vector = pic_acknowledge(m);
             if (vector >= 0)

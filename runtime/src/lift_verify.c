@@ -67,6 +67,10 @@ int lift_verify_mismatches(const Machine *m)
 
 void lift_io_record(Machine *m, uint16_t port, int size, uint32_t value, bool is_out)
 {
+    if (lift_replay_active(m)) {
+        lift_replay_io_record(m, port, size, value, is_out);
+        return;
+    }
     VerifyState *v = verify(m);
     if (v->log_len < IO_LOG_MAX)
         v->log[v->log_len++] = (IoEvent){ port, (uint8_t)size, is_out, value };
@@ -89,12 +93,18 @@ static const IoEvent *next_replay(Machine *m, uint16_t port, int size, bool is_o
 
 uint32_t lift_io_replay_in(Machine *m, uint16_t port, int size)
 {
+    if (lift_replay_active(m))
+        return lift_replay_io_in(m, port, size);
     const IoEvent *e = next_replay(m, port, size, false);
     return e ? e->value : 0xFFFFFFFFu;
 }
 
 void lift_io_replay_out(Machine *m, uint16_t port, uint32_t value, int size)
 {
+    if (lift_replay_active(m)) {
+        lift_replay_io_out(m, port, value, size);
+        return;
+    }
     const IoEvent *e = next_replay(m, port, size, true);
     if (e && e->value != value)
         verify(m)->io_diverged = true;
@@ -333,11 +343,51 @@ static void verify_region(Machine *m, ActiveHook *h)
                 v->cpu_lifted.seg[S_CS], v->cpu_lifted.eip & 0xFFFF, exit_sp);
 }
 
+/* ---- device replay: the original runs with time and interrupts flowing (lift_replay.c) ---- */
+
+static void verify_replayed(Machine *m, ActiveHook *h, uint16_t entry_sp)
+{
+    VerifyState *v = verify(m);
+    h->stats->replay_calls++;
+    lift_replay_record_begin(m);
+    run_original(m, h);
+    lift_replay_record_end(m);
+    save(m, &v->cpu_original, v->mem_original, v->vga_original, v->dos_original);
+    restore(m, &v->cpu_before, v->mem_before, v->vga_before, v->dos_before);
+    dos_journal_undo(m);
+    m->io_mode = IO_REPLAY;
+    bool same_events = lift_replay_play(m, h->entry->fn);
+    m->io_mode = IO_LIVE;
+    int before = v->mismatches;
+    if (!same_events) {
+        char why[200];
+        snprintf(why, sizeof why, "device replay: %s", lift_replay_why(m));
+        report(m, h, why);
+    } else {
+        compare(m, h, entry_sp, entry_sp);
+    }
+    if (v->mismatches != before) {
+        int irqs, late;
+        size_t entries;
+        lift_replay_counts(m, &irqs, &late, &entries);
+        log_msg("verify:   replay log %zu entries, %d interrupts (%d taken without a preceding event)", entries,
+                irqs, late);
+    }
+    restore(m, &v->cpu_original, v->mem_original, v->vga_original, v->dos_original);
+}
+
+static bool replayed(const LiftState *s, const LiftedEntry *e)
+{
+    return e->replay || (s->verify_replay && lift_listed(s->verify_replay, e->name));
+}
+
 bool lift_verify_call(Machine *m, ActiveHook *h)
 {
     LiftState *s = lift_state(m);
     VerifyState *v = s->verify;
-    if (!v || s->in_shadow || h->entry->no_shadow || h->stats->shadow_calls >= v->calls_per_entry)
+    if (!v || s->in_shadow || h->stats->shadow_calls >= v->calls_per_entry)
+        return false;
+    if (h->entry->no_shadow && !replayed(s, h->entry))
         return false;
     if (s->verify_skip && lift_listed(s->verify_skip, h->entry->name))
         return false;
@@ -359,6 +409,15 @@ bool lift_verify_call(Machine *m, ActiveHook *h)
 
     if (h->entry->region) {
         verify_region(m, h);
+        dos_journal_end(m);
+        m->cpu.stop = false;
+        m->irq_hold = false;
+        s->in_shadow = false;
+        s->shadow_of = NULL;
+        return true;
+    }
+    if (replayed(s, h->entry)) {
+        verify_replayed(m, h, entry_sp);
         dos_journal_end(m);
         m->cpu.stop = false;
         m->irq_hold = false;

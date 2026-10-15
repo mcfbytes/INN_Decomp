@@ -13,6 +13,7 @@ typedef struct HookStats {
     int shadow_calls, shadow_mismatches;
     int result_diffs; /* calls whose AX or DX differed although scratch: a possible wrong return value */
     int synth_calls, synth_mismatches, synth_result_diffs; /* the same for synthetic calls (lift_synth.c) */
+    int replay_calls; /* shadow calls verified with device replay */
 } HookStats;
 
 typedef struct ActiveHook {
@@ -49,6 +50,8 @@ typedef struct LiftState {
     uint16_t idle_off; /* BIOS-segment stub PUSHF; STI; HLT; POPF; RETF, emitted on first use */
     int c_depth; /* lifted C on the host stack and not inside a nested guest call */
     const char *verify_skip; /* INN_VERIFY_SKIP: hooked names whose calls are never shadowed */
+    const char *verify_replay; /* INN_VERIFY_REPLAY: names shadowed with device replay (lift_replay.c) */
+    struct Replay *replay;
     const char *only; /* INN_LIFT_ONLY: comma-separated names to hook, all when NULL */
     struct VerifyState *verify;
     struct { char name[16]; uint16_t load_seg; } modules[16];
@@ -73,6 +76,20 @@ void lift_call_c(Machine *m, LiftedFn fn);
 bool lift_verify_call(Machine *m, ActiveHook *h);
 /* Whether the bytes at h's entry are the entry's signature (with relocations applied). */
 bool lift_entry_bytes_match(Machine *m, const ActiveHook *h);
+
+/* ---- device replay (lift_replay.c, docs/lifting.md "Device replay") ---- */
+bool lift_replay_active(const Machine *m);
+/* The original's run: interrupts flow, gated to the instruction after an event; events are logged. */
+void lift_replay_record_begin(Machine *m);
+void lift_replay_record_end(Machine *m);
+/* Runs the lifted function against the log; false when it diverged (lift_replay_why says where). */
+bool lift_replay_play(Machine *m, LiftedFn fn);
+const char *lift_replay_why(Machine *m);
+void lift_replay_counts(Machine *m, int *irqs, int *late_irqs, size_t *entries);
+void lift_replay_free(Machine *m);
+void lift_replay_io_record(Machine *m, uint16_t port, int size, uint32_t value, bool is_out);
+uint32_t lift_replay_io_in(Machine *m, uint16_t port, int size);
+void lift_replay_io_out(Machine *m, uint16_t port, uint32_t value, int size);
 
 /* ---- synthetic calls (lift_synth.c, docs/lifting.md "Synthetic calls") ---- */
 typedef struct SynthResult {

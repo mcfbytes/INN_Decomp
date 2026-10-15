@@ -118,12 +118,14 @@ adds `DX:AX differs in N`. That is not a mismatch (a void function leaves whatev
 so a function that returns a value declares it with the `*_RET_AX` or `*_RET_DXAX` scratch macros,
 which take AX (or DX and AX) out of the scratch set and make a wrong result a mismatch.
 
-Functions whose original would repeat device I/O during a shadow run (dialling, UART handshakes
-through a modem driver) or end the process are marked `LIFT_FAR_NOSHADOW` / `LIFT_NEAR_NOSHADOW`:
-they are hooked but only ever checked functionally, and the summary lists them as not shadowed.
+Functions that wait on the BIOS tick, a UART or another interrupt (dialling, UART handshakes through
+a modem driver) are marked `LIFT_FAR_REPLAY` / `LIFT_NEAR_REPLAY` and verified with device replay
+(below). Functions whose original ends the process, or whose effects no snapshot can undo, are marked
+`LIFT_FAR_NOSHADOW` / `LIFT_NEAR_NOSHADOW`: they are hooked but only ever checked functionally, and the
+summary lists them as not shadowed.
 During the lifted run, VGA port accesses also reach the device (its state is snapshotted), so mode
 sets and palette writes are compared. Interrupts are held and emulated time stands still during
-shadow runs, so the VGA status register toggles vertical retrace by read count instead; code that
+shadow runs (device replay aside), so the VGA status register toggles vertical retrace by read count instead; code that
 waits for a timer tick still spins there; a shadow
 run still going after 200 million instructions is logged with the hook's name and CS:IP.
 `INN_LIFT_ONLY=name,name,...` hooks only the named functions, which checks functions that are
@@ -139,6 +141,47 @@ memory, the VGA device (registers, DAC, planes) and host-side DOS state (open fi
 current directory). Host file deletions, renames, creations and growth are journaled and undone
 between the two runs. Known limits: bytes written to host files are written by both runs and not restored; devices other than VGA (PIT, UART, OPL) see only the original run's I/O, which is the
 intended behaviour.
+
+## Device replay
+
+A plain shadow run holds interrupts and devices see only the original's I/O, so an original that waits
+for a timer tick or a received byte never returns. Entries marked `LIFT_*_REPLAY`, and any named in
+`INN_VERIFY_REPLAY=name,...` (also NOSHADOW ones, to try them), are verified differently
+(`runtime/src/lift_replay.c`):
+
+- **The original runs live, with time flowing.** Interrupts are delivered and devices tick (PIT, the BIOS
+  tick at 0040:006C through INT 08h, UART transmit and receive on the real link), so the original waits,
+  dials and logs on exactly as it would unverified. Everything it observes is logged in order as
+  *events*: port reads (with the value read) and writes, every host callback that completes (INT 1Ah,
+  DOS and BIOS services; a callback that blocks and retries counts once, the lifted-code return sentinel
+  never), and HLT. Consecutive identical events (a poll loop) share one log entry with a repeat count.
+- **Interrupts are gated to events.** In the original's run an interrupt is taken only at the first
+  instruction boundary with IF set after an event (while halted, at any boundary), and logged there. Where
+  an interrupt falls between two events is not observable by the code (any latency is valid on a real
+  PC), but which events lie before and after it is, and that is what the lifted run can reproduce. An
+  interrupt pending for 100000 instructions without an event is taken anyway and counted as unaligned.
+- **The lifted run replays.** Devices are frozen (no tickers run, emulated time stands still, nothing
+  reaches the link), port reads return the logged values, port writes, callbacks and HLTs must match the
+  log in kind, port, size and value, and each logged interrupt is delivered as soon as the lifted run has
+  made the event before it: at the next guest instruction boundary with IF set, or, when lifted C made the
+  event with IF set, at once as a nested INT from inside the port access (C has no instruction
+  boundaries). Interrupts the original took at its return are delivered after the lifted function
+  returns. ISRs run as guest code (or their lifts) in both runs, so their port reads are replayed too.
+- **Alignment is by events, not instruction counts.** Lifted C reaches the same waits through nested
+  guest calls and runs far fewer instructions, so instruction counts or emulated time would not line up;
+  the sequence of port accesses and service calls does when the lift is faithful. The first event that
+  differs ends the lifted run (a longjmp back to the verifier) and is reported as
+  `device replay: event N: lifted <event>, original <event>`, followed by the log's size and interrupt
+  counts. Otherwise the end states are compared as for any shadow run: memory, registers, VGA and DOS
+  state; the port I/O and serial output are already compared event by event.
+- **The link sees every byte once**, from the original's run; the lifted run's UART writes are compared,
+  never sent. The game continues from the original's end state, at the emulated time it reached.
+
+Limits: an interrupt the original took during a stretch with IF clear in lifted C (C that emulates
+CLI/STI) is delivered at the lifted run's next chance instead, before or after reads of memory the ISR
+writes; code that polls memory for an ISR's result without any event in the loop is only taken by the
+unaligned fallback. Both show up as event or memory mismatches, not as false matches. The log holds at
+most 16M entries. Synthetic calls never use replay.
 
 ## Synthetic calls
 

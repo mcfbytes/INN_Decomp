@@ -198,6 +198,11 @@ void machine_add_ticker(Machine *m, TickFn fn)
 
 static void end_slice(Machine *m)
 {
+    if (m->ticks_frozen) { /* the replayed run must not move devices or pull bytes from a link */
+        m->slice_left = m->ips * TICK_SLICE_US / 1000000;
+        m->slice_start_insn = m->cpu.instructions;
+        return;
+    }
     m->virtual_us += TICK_SLICE_US;
     m->slice_left = m->ips * TICK_SLICE_US / 1000000;
     m->slice_start_insn = m->cpu.instructions;

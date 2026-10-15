@@ -31,6 +31,7 @@ typedef struct LiftedEntry {
     bool region;    /* LIFT_REGION: may leave at any instruction; see lift_verify.c */
     bool no_shadow; /* LIFT_NOSHADOW: hooked, never shadow-verified (device I/O, process exit) */
     uint16_t unknown_mask; /* bit i: signature byte i is not compared (past the end of an overlay's code) */
+    bool replay;    /* LIFT_*_REPLAY: shadow-verified with time and interrupts flowing (device replay) */
 } LiftedEntry;
 
 /* reloc_mask bit 15: byte 0 is the high half of a relocated word starting before the entry. */
@@ -42,6 +43,10 @@ enum { LIFT_FAR = 0, LIFT_NEAR = 1, LIFT_REGION = 2 };
 /* A far function hooked but never shadow-verified: its original would repeat device I/O (dialling,
  * UART handshakes) or end the process. Checked functionally only; use sparingly. */
 enum { LIFT_FAR_NOSHADOW = 3, LIFT_NEAR_NOSHADOW = 4 };
+/* Shadow-verified with device replay (docs/lifting.md, "Device replay"): the original runs with
+ * emulated time and interrupts flowing, the lifted run gets the same interrupts and port reads at the
+ * same events. For functions that wait on the BIOS tick, a UART or another interrupt. */
+enum { LIFT_FAR_REPLAY = 5, LIFT_NEAR_REPLAY = 6 };
 #define LIFTED(seg, off, fn, kind, scratch) void fn(Machine *m);
 
 /* Registers every lifted table built into this binary; a no-op without the private tree. */
@@ -101,6 +106,11 @@ static inline void lift_coverage_hit(Machine *m, int via)
 void lift_io_record(Machine *m, uint16_t port, int size, uint32_t value, bool is_out);
 uint32_t lift_io_replay_in(Machine *m, uint16_t port, int size);
 void lift_io_replay_out(Machine *m, uint16_t port, uint32_t value, int size);
+/* Device replay events the CPU reports while m->io_mode is not IO_LIVE: a host callback that completed,
+ * and HLT. lift_irq_boundary runs at each instruction boundary with IF set while m->irq_gate is on. */
+void lift_io_callback(Machine *m, int id);
+void lift_io_halt(Machine *m);
+void lift_irq_boundary(Machine *m);
 
 /* ---- helpers for lifted code ---- */
 

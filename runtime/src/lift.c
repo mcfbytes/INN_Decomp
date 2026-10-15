@@ -37,6 +37,7 @@ void lift_init(Machine *m)
     lifted_register_all(m);
     lift_state(m)->only = getenv("INN_LIFT_ONLY");
     lift_state(m)->verify_skip = getenv("INN_VERIFY_SKIP");
+    lift_state(m)->verify_replay = getenv("INN_VERIFY_REPLAY");
     const char *verify_calls = getenv("INN_VERIFY_LIFTED");
     if (verify_calls && atoi(verify_calls) > 0)
         lift_verify_enable(m, atoi(verify_calls));
@@ -50,6 +51,15 @@ void lift_init(Machine *m)
 
 static void log_verify_line(const LiftedEntry *e, const HookStats *st)
 {
+    if (st->replay_calls) {
+        if (st->result_diffs)
+            log_msg("verify: %s %s: %d calls checked, %d mismatches, DX:AX differs in %d (device replay)", e->module,
+                    e->name, st->shadow_calls, st->shadow_mismatches, st->result_diffs);
+        else
+            log_msg("verify: %s %s: %d calls checked, %d mismatches (device replay)", e->module, e->name,
+                    st->shadow_calls, st->shadow_mismatches);
+        return;
+    }
     if (e->no_shadow) {
         log_msg("verify: %s %s: not shadowed (LIFT_NOSHADOW)", e->module, e->name);
         return;
@@ -86,6 +96,7 @@ void lift_shutdown(Machine *m)
         lift_synth_shutdown(m);
     if (m->lift) {
         free(lift_state(m)->verify);
+        lift_replay_free(m);
         for (int t = 0; t < lift_state(m)->table_count; t++)
             free(lift_state(m)->tables[t].stats);
     }

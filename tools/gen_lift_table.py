@@ -23,7 +23,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import borland_overlay  # noqa: E402
 
 MARKER = re.compile(
-    r'^LIFTED\(\s*(0x[0-9A-Fa-f]+)\s*,\s*(0x[0-9A-Fa-f]+)\s*,\s*(\w+)\s*,\s*(LIFT_FAR_NOSHADOW|LIFT_NEAR_NOSHADOW|LIFT_FAR|LIFT_NEAR|LIFT_REGION)\s*,'
+    r'^LIFTED\(\s*(0x[0-9A-Fa-f]+)\s*,\s*(0x[0-9A-Fa-f]+)\s*,\s*(\w+)\s*,\s*(LIFT_FAR_NOSHADOW|LIFT_NEAR_NOSHADOW|LIFT_FAR_REPLAY|LIFT_NEAR_REPLAY|LIFT_FAR|LIFT_NEAR|LIFT_REGION)\s*,'
     r'\s*([\w|\s]+?)\s*\)', re.M)
 SIGNATURE_LEN = 12
 SPLIT_HEAD = 1 << 15  # byte 0 is the high half of a relocated word that starts before the entry
@@ -103,18 +103,18 @@ def entries_of(module_dir, name, image, relocs, overlays):
                 sys.exit(f'{source}: {match[3]} lies outside the image')
             kind = match[4]
             yield (module, seg, off, match[3], kind.startswith('LIFT_NEAR'), match[5], signature, mask,
-                   kind == 'LIFT_REGION', kind.endswith('_NOSHADOW'), unknown)
+                   kind == 'LIFT_REGION', kind.endswith('_NOSHADOW'), unknown, kind.endswith('_REPLAY'))
 
 
 def emit_module(out, index, entries):
     for _, _, _, fn, *_ in entries:
         out.append(f'void {fn}(Machine *m);')
     out.append(f'static const LiftedEntry module_{index}[] = {{')
-    for module, seg, off, fn, near, scratch, signature, mask, region, no_shadow, unknown in entries:
+    for module, seg, off, fn, near, scratch, signature, mask, region, no_shadow, unknown, replay in entries:
         sig = ', '.join(f'0x{b:02X}' for b in signature)
         out.append(f'    {{ "{module}", 0x{seg:04X}, 0x{off:04X}, {fn}, "{fn}", {str(near).lower()}, '
                    f'{scratch}, {{ {sig} }}, 0x{mask:04X}, {str(region).lower()}, {str(no_shadow).lower()}, '
-                   f'0x{unknown:04X} }},')
+                   f'0x{unknown:04X}, {str(replay).lower()} }},')
     out.append('};')
 
 

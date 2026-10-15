@@ -95,6 +95,8 @@ struct Machine {
     uint8_t *exec_hooks; /* one bit per linear address: a lifted function starts here */
     IoMode io_mode;      /* shadow verification records or replays port I/O */
     bool irq_hold;       /* no interrupt delivery while a shadow run compares two paths */
+    bool irq_gate;       /* device replay: interrupts are delivered by lift_irq_boundary (lift_replay.c) */
+    bool ticks_frozen;   /* device replay's lifted run: no device tickers, emulated time stands still */
     void *lift;
     void *coverage;      /* INN_COVERAGE: call targets seen (lift_coverage.c); NULL when off */
 
