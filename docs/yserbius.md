@@ -84,3 +84,10 @@ More scenarios in `private/lifted/scenarios/` reach further into the game (same 
 - `ys_combat.txt` (233000 ms): walks to a Mountain Lion encounter, opens the spell list, fights, tries to flee (refused) and is defeated back to the map.
 - `ys_tavern.txt` (232000 ms): enters the tavern, sorts, reads Tavern Posts, writes and posts a message, opens the options, then opens the Hall of Heroes from the character sheet's options.
 - `ys_sheets.txt` (220000 ms): character sheet screens, Hall of Heroes, then in the dungeon the inventory, skills, spells, automap and game options.
+
+Twinion has the same set (second choice in the land dialog, `INN_DRIVE` as above; `tw_` prefix):
+
+- `tw_dungeon.txt` (200000 ms): Fates of Twinion and its place, gallery Play, the castle gate into the dungeon, turns and a step.
+- `tw_create.txt` (245000 ms): gallery Replace with all creation screens, Delete, create another, Play.
+- `tw_combat.txt` (345000 ms): a recorded walk to the Hanging Slimes encounter on level 1, spell book, attack rounds until the character is defeated back to the map.
+- `tw_sheets.txt` (222000 ms): character sheet screens, options and Hall of Heroes, then in the dungeon the inventory, quest items, skills, automap and game options.
