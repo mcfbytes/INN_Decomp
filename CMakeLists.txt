@@ -48,11 +48,14 @@ if(EXISTS "${INN_LIFTED_DIR}")
   file(GLOB_RECURSE INN_LIFTED_SOURCES FOLLOW_SYMLINKS CONFIGURE_DEPENDS "${INN_LIFTED_DIR}/*.c")
   file(GLOB_RECURSE INN_LIFTED_MODULES FOLLOW_SYMLINKS CONFIGURE_DEPENDS "${INN_LIFTED_DIR}/*/module.txt")
   set(INN_LIFTED_TABLE "${CMAKE_BINARY_DIR}/lifted_table.c")
-  add_custom_command(OUTPUT "${INN_LIFTED_TABLE}"
+  set(INN_LIFTED_ENTRIES "${CMAKE_BINARY_DIR}/lifted_entries.h")
+  add_custom_command(OUTPUT "${INN_LIFTED_TABLE}" "${INN_LIFTED_ENTRIES}"
     COMMAND python3 -I "${CMAKE_SOURCE_DIR}/tools/gen_lift_table.py" "${INN_LIFTED_DIR}" "${INN_LIFTED_TABLE}"
     DEPENDS ${INN_LIFTED_SOURCES} ${INN_LIFTED_MODULES} "${CMAKE_SOURCE_DIR}/tools/gen_lift_table.py")
   target_sources(dosrt PRIVATE ${INN_LIFTED_SOURCES} "${INN_LIFTED_TABLE}")
-  target_include_directories(dosrt PRIVATE "${INN_LIFTED_DIR}/include")
+  target_include_directories(dosrt PRIVATE "${INN_LIFTED_DIR}/include" "${CMAKE_BINARY_DIR}")
+  # The header is produced with the table; lifted sources include it through lift_calls.h.
+  set_source_files_properties(${INN_LIFTED_SOURCES} PROPERTIES OBJECT_DEPENDS "${INN_LIFTED_ENTRIES}")
 else()
   set(INN_LIFTED_TABLE "${CMAKE_BINARY_DIR}/lifted_table.c")
   file(WRITE "${INN_LIFTED_TABLE}" "#include \"lift.h\"\nvoid lifted_register_all(Machine *m) { (void)m; }\n")
