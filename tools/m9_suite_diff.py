@@ -4,12 +4,14 @@
 usage: m9_suite_diff.py <base_dir> <new_dir> [--allow name,...]
 
 A key is "<module> <function>" for a live summary, or the same with
-" (synthetic)" or " (device replay)". FAIL when a status leaves ok, a key's
-mismatch count rises, or a key that checked calls in the base has none in the
-new run (coverage lost). --allow skips the coverage check for those keys.
-<base_dir>/FLAKY, one key per line, turns that key's failures into warnings.
-Checked counts that fall but stay above zero, and keys only in the new run,
-are warnings. Exit status is 1 when any FAIL remains.
+" (synthetic)" or " (device replay)". Several lifted entries share one
+function name, so every summary of a key is added: a uniq -c prefix weights
+that line, and a line with no prefix counts as one. FAIL when a status leaves
+ok, a key's mismatch count rises, or a key that checked calls in the base has
+none in the new run (coverage lost). --allow skips the coverage check for
+those keys. <base_dir>/FLAKY, one key per line, turns that key's failures into
+warnings. Checked counts that fall but stay above zero, and keys only in the
+new run, are warnings. Exit status is 1 when any FAIL remains.
 """
 
 import argparse
@@ -18,7 +20,7 @@ import sys
 from pathlib import Path
 
 VERIFY_RE = re.compile(
-    r'^(?:\s*\d+\s+)?verify: (\S+) (\S+): (\d+) calls checked, (\d+) mismatches'
+    r'^(?:\s*(\d+)\s+)?verify: (\S+) (\S+): (\d+) calls checked, (\d+) mismatches'
     r'(?:, DX:AX differs in \d+)?(?: \((synthetic|device replay)\))?\s*$'
 )
 
@@ -37,8 +39,15 @@ def parse_verify(path):
         match = VERIFY_RE.match(line)
         if not match:
             continue
-        found[key_of(match.group(1), match.group(2), match.group(5))] = (
-            int(match.group(3)), int(match.group(4)))
+        copies = int(match.group(1)) if match.group(1) else 1
+        key = key_of(match.group(2), match.group(3), match.group(6))
+        checked = copies * int(match.group(4))
+        mismatches = copies * int(match.group(5))
+        prev = found.get(key)
+        if prev:
+            found[key] = (prev[0] + checked, prev[1] + mismatches)
+        else:
+            found[key] = (checked, mismatches)
     return found
 
 
