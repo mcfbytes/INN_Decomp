@@ -123,18 +123,30 @@ static void write_data(Machine *m, uint8_t v)
     }
 }
 
+void opl_write_reg(Machine *m, uint8_t reg, uint8_t value)
+{
+    opl_state(m)->addr = reg;
+    write_data(m, value); /* audio_sync before a sound change; timers use machine_now_ns */
+}
+
+uint8_t opl_read_status(Machine *m)
+{
+    return read_status(m);
+}
+
 static uint32_t opl_in(Machine *m, uint16_t port, int size)
 {
-    bool status = !(port & 1);
-    return status ? read_status(m) : 0xFF;
+    (void)size;
+    return (port & 1) ? 0xFF : opl_read_status(m);
 }
 
 static void opl_out(Machine *m, uint16_t port, uint32_t value, int size)
 {
-    if (!(port & 1))
-        opl_state(m)->addr = (uint8_t)value;
+    (void)size;
+    if (port & 1)
+        opl_write_reg(m, opl_state(m)->addr, (uint8_t)value);
     else
-        write_data(m, (uint8_t)value);
+        opl_state(m)->addr = (uint8_t)value;
 }
 
 /* Linear interpolation from the chip's native rate, as Nuked's own resampler does. */
