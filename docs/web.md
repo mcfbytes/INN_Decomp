@@ -52,8 +52,26 @@ The page asks for the install (unless `inn.data` provides one), then runs
 |---|---|
 | `com1=ws://host:port` | Server URL; default `ws://<page host>:2316` (`wss://` on an https page). The page also offers an editable field and remembers the last value. |
 | `autostart=1` | Start as soon as an install is available (preloaded or saved), without the Start button. |
+| `scene=<id>` | Landing backdrop: `town` (default, the flat pixel-art valley in `shell.html`), `valley`, `diner`, `tower` or `harbor`. An unknown id falls back to `town`. |
+| `scenes` | Any value: shows a small picker at the bottom left to flip between the backdrops live (it also updates `scene=` in the address bar). |
 | `perf=1` | Pass `--perf`: a timing line in the log every 5 s (see Performance). |
 | `ips=N` | Guest instruction rate (`--ips`), default 20000000. |
+
+## Landing scenes
+
+`runtime/web/scene.js` is the engine and `runtime/web/scenes/<id>.js` one painting each. A scene module is
+`{ id, title, focus, paint(ctx, kit), anims, hotspots }` registered with `InnScenes.register`. `paint` draws a 320x200
+picture with Canvas 2D (soft gradients, wobbly brush shapes, dabs and grain); the engine adds a paper-and-wash texture,
+cuts a 256-colour palette from the result (median cut) and maps it with an 8x8 ordered dither, so the load takes about
+30 ms. The canvas is drawn with `image-rendering: pixelated` and covers the window, with the scene's `focus` kept beside
+the setup card (on a narrow portrait screen it hangs from the bottom edge under the card).
+
+Every scene has a day palette and a dusk palette; the dusk one is used when the browser is in dark mode. Small things move by
+re-compositing only their own rectangle (`anims`: clouds, glints, blinking lights, and gags that replay every 20 s or so),
+so the picture is never repainted per frame. All of it stops under `prefers-reduced-motion`. Hotspots are rectangles in
+scene pixels; clicking one, or resting the mouse on it for a second, shows a short narrator line in a bordered text box.
+Adding a scene: write `scenes/<id>.js`, add the id to `IDS` in `scene.js` and the file to the copy list in `CMakeLists.txt`.
+The artwork is original code; nothing is traced or copied from any game.
 
 ## The C: drive
 
@@ -133,8 +151,10 @@ It follows the system colour scheme (day palette in light, dusk with lit windows
 and "Remember on this device" are under Advanced. `SITE_NAME` at the top of `page.js` is the one place
 for a name: empty (the default) shows no wordmark and the title "Online world"; a value is used for both.
 
-**Providers.** The page fetches `<server http base>/auth/providers` (the server address with `ws` turned
-into `http`, same host and port); a JSON array of `{id, name, url}` shows a "Sign in with ..." button per
+**Providers.** Off by default: `AUTH_SERVER` at the top of `page.js` is empty, and innkeeperd's WebSocket
+port does not answer HTTP. With `AUTH_SERVER` set to a URL, or `?auth=<url>` in the page's address, the
+page fetches `<that origin>/auth/providers`; any other non-empty `?auth=` value asks the game server's
+address with `ws` turned into `http` (same host and port). A JSON array of `{id, name, url}` shows a "Sign in with ..." button per
 entry. Any error, a 404 or an empty list keeps the section hidden, so there are no buttons without
 providers.
 
