@@ -291,6 +291,17 @@ const Adv = (() => {
     try { await InnAuth.attestNow(Site.attest()); } catch { /* the next login carries it too */ }
   }
 
+  // Runs an account call. When the server says it has no current age and terms answer for this sign-in (403
+  // attest_required), asks the notice again, sends the answer and tries once more.
+  async function attested(call) {
+    try { return await call(); } catch (e) {
+      if (!(e instanceof InnAuth.AuthError) || e.kind !== 'attest') throw e;
+      await Site.ask();
+      await InnAuth.attestNow(Site.attest());
+      return call();
+    }
+  }
+
   function signFail(e) {
     sign.busy = false;
     const kind = e && e.kind;
@@ -299,12 +310,15 @@ const Adv = (() => {
       refreshInv();
       return askWho({ own: true, bad: true, text: 'Your sign-in has expired (the server answered 401). The operator would like to see some identification.' });
     }
-    const tail = { network: ' The operator\'s line is mostly static.', closed: ' The operator suggests a larger switchboard.', server: ' The operator is looking into it.', refused: '' }[kind] || '';
+    const tail = { network: ' The operator\'s line is mostly static.', closed: ' The operator suggests a larger switchboard.', server: ' The operator is looking into it.', limit: ' The operator is firm about this.', attest: ' The doorman wants it in writing.', refused: '' }[kind] || '';
+    const busy = kind === 'server' && e.code === 'busy';
     const head = {
       network: `Could not reach the sign-in server at ${InnAuth.state.base}. Check that it is running and that the ?auth= address is right.`,
       closed: 'The server is not taking new accounts: enrolment is closed. Existing lines still work.',
-      server: `The sign-in server had a problem (it answered ${e.status}). Try again in a moment.`,
-      refused: `${e.message}`,
+      server: busy ? 'The switchboard is busy (the server answered 503). Try again in a moment.' : `The sign-in server had a problem (it answered ${e.status}). Try again in a moment.`,
+      limit: 'This card has opened as many new lines as it may in a day (the server answered 429). Use a line you already have, or try again tomorrow.',
+      attest: 'The server has no current answer to the age and terms notice for this sign-in (it answered 403), and it would not take one. You are not signed in for new lines.',
+      refused: e.code === 'no_such_account' ? 'That line is not on this card (the server answered 404).' : `${e.message}`,
     }[kind] || `Sign-in failed: ${e && e.message ? e.message : e}.`;
     say(`${head}${/[.!?]$/.test(head) ? '' : '.'}${tail}`, { bad: true, actions: signedIn() ? [{ label: 'OK', fn: narrHide }] : [{ label: 'Pick a card', fn: () => askWho({ own: sign.own }) }, { label: 'OK', fn: narrHide }] });
   }
@@ -332,8 +346,14 @@ const Adv = (() => {
       bad: true, actions: [{ label: 'Pick a card', fn: () => askWho({ own: sign.own }) }, { label: 'OK', fn: narrHide }] });
   }
 
+  // The codes the server sends with a failed login (docs/web.md "Login handshake"; innkeeperd.md 8.6).
   function signDeclined(code, name) {
-    const what = code === 'access_denied' ? `Sign-in was declined at ${name || 'the provider'}` : `Sign-in did not finish (${code})`;
+    const at = (name || 'the provider').replace(/\.$/, '');
+    const what = {
+      access_denied: `Sign-in was declined at ${at}`,
+      provider_error: `${at} could not sign you in (it reported an error)`,
+      server_error: 'The game server could not finish the sign-in (it reported an error)',
+    }[code] || `Sign-in did not finish (${code})`;
     say(`${what}. You are not signed in. The operator hangs up with great dignity.`, {
       bad: true, actions: [{ label: 'Pick a card', fn: () => askWho({ own: sign.own }) }, { label: 'OK', fn: narrHide }] });
   }
@@ -373,10 +393,14 @@ const Adv = (() => {
     if (!canDial()) return;
     say(`Putting you through on the ${a.persona} line…`, { sticky: true });
     try {
-      const c = await InnAuth.credential(a.id);
+      const c = await attested(() => InnAuth.credential(a.id));
       if (!c || c.account !== a.id || typeof c.password !== 'string') throw new InnAuth.AuthError('server', 'The credential answer was not understood.', 200);
-      await writeCredentials(a.id, c.password);
+      await writeCredentials(a.id, c.password, a.persona);
     } catch (e) {
+      if (e instanceof InnAuth.AuthError && e.code === 'no_such_account') {
+        sign.pick = true;
+        return withSession((s) => chooseLine(s, 'That line is not on this card (the server answered 404).'));
+      }
       if (e instanceof InnAuth.AuthError) return signFail(e);
       return say(`Could not prepare the line: ${e.message}`, { bad: true, actions: [{ label: 'OK', fn: narrHide }] });
     }
@@ -422,7 +446,7 @@ const Adv = (() => {
     if (bad) { ui.persErr.textContent = bad; ui.pers.focus(); return; }
     ui.persOk.disabled = true;
     try {
-      const a = await InnAuth.createAccount(name);
+      const a = await attested(() => InnAuth.createAccount(name));
       ui.pdlg.hidden = true;
       if (!a || !Number.isInteger(a.id)) throw new InnAuth.AuthError('server', 'The new line was not understood.', 201);
       if (sign.last) sign.last.accounts.push(a);
@@ -430,6 +454,11 @@ const Adv = (() => {
     } catch (e) {
       if (e.kind === 'refused') { ui.persErr.textContent = e.message || 'The server did not accept that name.'; ui.pers.focus(); return; }
       ui.pdlg.hidden = true;
+      if (e.kind === 'limit' && sign.last && sign.last.accounts.length) {
+        sign.last.canCreate = false;
+        sign.pick = true;
+        return chooseLine(sign.last, 'No new line today: this card has opened its limit (the server answered 429).');
+      }
       return signFail(e);
     } finally { ui.persOk.disabled = false; }
   }

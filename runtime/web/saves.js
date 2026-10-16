@@ -20,10 +20,13 @@ const InnSaves = (() => {
   const PERSONA = /^INN\\(?:LL\\|SL\\)?([A-Z0-9_$-]{1,8})\.DTA$/;
   const BANKROLL = /^INN\\LL\$\$[0-9]{1,4}\.DAT$/;
   const PASSWORD_STEM = 'PASS_SET';
+  const SEED_PREFIX = 'inn.seed.';
 
   let env = null;            // { fs, drive, log, notify, persist, send, status, saved }
   let account = null;        // set by the first manifest of this connection
   let state = {};            // path -> { version, hash }: what this browser last synced
+  let seeds = {};            // path -> hash of a file the page made up for this account (the host's copy wins over it)
+  let line = null;           // { stem } while a signed-in account's line is dialed: only that persona's files sync
   let nextId = 1;
   const pending = new Map(); // request id -> { resolve, timer }
   const timers = new Map();  // path -> debounce timer
@@ -42,6 +45,16 @@ const InnSaves = (() => {
     if (FIXED.includes(path) || BANKROLL.test(path)) return path;
     const m = PERSONA.exec(path);
     return m && m[1] !== PASSWORD_STEM ? path : null;
+  }
+
+  // While a signed-in line is dialed, the install is shared with other accounts and with whatever personas the
+  // zip held, so only this persona's files (by the file name stem) and the character files go through the
+  // account's save space. The hub's PLAYER.DIR is written by the page for the line and never synced.
+  function allowed(path) {
+    if (!line) return true;
+    if (path === 'INN\\PLAYER.DIR') return false;
+    const m = PERSONA.exec(path);
+    return !m || m[1] === line.stem;
   }
 
   function toBase64(bytes) {
@@ -137,13 +150,13 @@ const InnSaves = (() => {
 
   // Every allowlisted file the drive has now.
   function localPaths() {
-    const found = FIXED.filter((rel) => hostPath(rel));
+    const found = FIXED.filter((rel) => allowed(rel) && hostPath(rel));
     for (const dir of ['INN', 'INN\\LL', 'INN\\SL']) {
       const host = hostPath(dir);
       if (!host) continue;
       for (const name of env.fs.readdir(host)) {
         const rel = canonical(`${dir}\\${name}`);
-        if (rel && !found.includes(rel)) found.push(rel);
+        if (rel && allowed(rel) && !found.includes(rel)) found.push(rel);
       }
     }
     return found;
@@ -155,9 +168,18 @@ const InnSaves = (() => {
     try { state = JSON.parse(localStorage.getItem(STATE_PREFIX + account)) || {}; } catch { state = {}; }
   }
 
+  function loadSeeds() {
+    try { seeds = JSON.parse(localStorage.getItem(SEED_PREFIX + account)) || {}; } catch { seeds = {}; }
+  }
+
+  function saveSeeds() {
+    try { localStorage.setItem(SEED_PREFIX + account, JSON.stringify(seeds)); } catch { /* kept for this visit only */ }
+  }
+
   function remember(path, version, hash) {
     state[path] = { version, hash };
     try { localStorage.setItem(STATE_PREFIX + account, JSON.stringify(state)); } catch { /* kept for this visit only */ }
+    if (seeds[path]) { delete seeds[path]; saveSeeds(); }
   }
 
   // ---- talking to the host ----
@@ -242,6 +264,9 @@ const InnSaves = (() => {
     if (!local) return download(path);
     if (local.hash === server.hash) { remember(path, server.version, server.hash); return; }
     const synced = state[path];
+    // A file the page made up for this account (a new persona's looks): the host's copy, if it has one,
+    // is the real one, whatever the clocks say.
+    if (!synced && seeds[path] === local.hash) return download(path);
     const localChanged = !synced || synced.hash !== local.hash;
     const serverChanged = !synced || synced.version !== server.version;
     if (!localChanged && serverChanged) return download(path);
@@ -249,8 +274,8 @@ const InnSaves = (() => {
   }
 
   async function onManifest(message) {
-    if (account !== message.account) { account = message.account; loadState(); }
-    const byPath = new Map(message.files.map((f) => [f.path, f]));
+    if (account !== message.account) { account = message.account; loadState(); loadSeeds(); }
+    const byPath = new Map(message.files.filter((f) => allowed(f.path)).map((f) => [f.path, f]));
     const paths = new Set([...byPath.keys(), ...localPaths()]);
     restored = 0;
     env.status(`Syncing ${paths.size} save file${paths.size === 1 ? '' : 's'} with the server...`);
@@ -282,7 +307,7 @@ const InnSaves = (() => {
   // The program closed a file it wrote, or renamed one onto this DOS path.
   function onFileClosed(dosPath) {
     const rel = canonical(dosPath.replace(/^[A-Za-z]:/, ''));
-    if (rel && account !== null) schedule(rel);
+    if (rel && allowed(rel) && account !== null) schedule(rel);
   }
 
   function cancelTimers() {
@@ -345,5 +370,19 @@ const InnSaves = (() => {
 
   function init(environment) { env = environment; }
 
-  return { init, reset, config, onControl, onFileClosed, flushAll, flushFinal, sweep, sha256Hex, canonical, lastSaved: () => lastSaved };
+  // The page's own account for this connection: persona is the line's persona name, or null for a line that
+  // has no sign-in (everything in the install syncs, as before).
+  function setLine(persona) { line = persona ? { stem: persona.slice(0, 8).toUpperCase() } : null; }
+
+  // A file the page just made for this account. `hash` is its SHA-256; the account number is the one the
+  // server will send in its manifest (the page knows it from sign-in).
+  function seed(forAccount, path, hash) {
+    let all = {};
+    try { all = JSON.parse(localStorage.getItem(SEED_PREFIX + forAccount)) || {}; } catch { all = {}; }
+    all[path] = hash;
+    try { localStorage.setItem(SEED_PREFIX + forAccount, JSON.stringify(all)); } catch { /* the seed is lost with the visit */ }
+  }
+
+  return { init, reset, config, setLine, seed, onControl, onFileClosed, flushAll, flushFinal, sweep, sha256Hex, canonical, lastSaved: () => lastSaved };
 })();
+if (typeof module !== 'undefined' && module.exports) module.exports = InnSaves;

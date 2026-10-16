@@ -177,6 +177,16 @@ const Site = (() => {
     }));
   }
 
+  // Asks the notice again whatever this browser remembers (the server said it has no current answer from
+  // this sign-in). Resolves true on yes; never resolves once the refusal screen is up.
+  function ask() {
+    return ready.then(() => new Promise((resolve) => {
+      if (st.phase === 'refused') return;
+      st.waiters.push(resolve);
+      if (st.phase !== 'open') open('ask');
+    }));
+  }
+
   // ---- keeping everything else quiet while the notice is up ----
 
   const swallow = (e) => { if (blocking()) e.stopImmediatePropagation(); };
@@ -207,7 +217,7 @@ const Site = (() => {
   ensure();
 
   return {
-    cfg, ready, LINKS, ensure, attest, blocking,
+    cfg, ready, LINKS, ensure, ask, attest, blocking,
     ok: () => st.phase === 'ok',            // the notice has been answered yes
     refused: () => st.phase === 'refused',
     whenClear: () => ensure(),

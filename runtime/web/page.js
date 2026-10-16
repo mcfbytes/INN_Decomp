@@ -181,8 +181,8 @@ async function loadProviders() {
 
 // Writes the account number into every LSCI.CFG (the root one and the land copies LSCIGET made) and
 // the stored password into INN\PASS_SET.DTA, so the client's own logon runs unchanged (innkeeper
-// docs/protocol/messages.md section 4.1; the encoder is in auth.js).
-function writeCredentials(account, password) {
+// docs/protocol/messages.md section 4.1; the encoder is in auth.js). Then the persona (below).
+function writeCredentials(account, password, persona) {
   const file = InnAuth.passwordFile(password);
   const configs = findConfigs(DRIVE);
   if (!configs.length) throw new Error('LSCI.CFG not found in the installation.');
@@ -194,7 +194,30 @@ function writeCredentials(account, password) {
   const existing = FS.readdir(dir).find((n) => /^pass_set\.dta$/i.test(n)) || 'PASS_SET.DTA';
   FS.writeFile(`${dir}/${existing}`, file);
   log(`signed-in account ${account} written to LSCI.CFG and ${existing}`);
+  if (persona) writePersona(account, persona);
   return syncDrive(false);
+}
+
+// The client's "Select Player" shows what INN\PLAYER.DIR lists and reads each persona from its .DTA, so for a
+// signed-in line the page makes PLAYER.DIR name only the line's persona (the file is the page's, never
+// synced) and, when the drive has no .DTA for it, writes a fresh one (looks chosen from the account number).
+// Other personas' .DTA files stay on the drive, unlisted and out of this account's save space.
+// Format and reasons: docs/web.md, "The persona on the drive".
+function writePersona(account, persona) {
+  const dir = `${DRIVE}/${PROGRAM.dir}`;
+  const names = FS.readdir(dir);
+  const find = (want) => names.find((n) => n.toUpperCase() === want);
+  FS.writeFile(`${dir}/${find('PLAYER.DIR') || 'PLAYER.DIR'}`, InnAuth.playerDir(persona));
+  const stem = InnAuth.personaStem(persona);
+  if (!find(`${stem}.DTA`)) {
+    const bytes = InnAuth.personaFile(persona, account);
+    FS.writeFile(`${dir}/${stem}.DTA`, bytes);
+    InnSaves.seed(account, `INN\\${stem}.DTA`, InnSaves.sha256Hex(bytes));
+    log(`new persona ${persona} written to ${stem}.DTA`);
+  }
+  // Without GUIDE.CFG the client opens with its welcome and INN Guide questions, which belong to a first run.
+  if (!find('GUIDE.CFG')) FS.writeFile(`${dir}/GUIDE.CFG`, new Uint8Array(2));
+  InnSaves.setLine(persona);
 }
 
 function toast(text, kind = '') {
@@ -633,6 +656,7 @@ function keepServerSaves() {
 function start(session) {
   if (page.started || page.drive === 'none' || Site.blocking()) return;
   page.started = true;
+  if (!session) InnSaves.setLine(null);
   const server = $('com1').value.trim() || defaultServer();
   page.server = server;
   page.session = session || '';

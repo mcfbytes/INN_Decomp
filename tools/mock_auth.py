@@ -13,7 +13,8 @@ It implements the page <-> server contract in docs/web.md ("Sign-in (server cont
     GET  /auth/session                        Bearer token -> {identity: {handle, provider}, accounts, canCreate,
                                               attested: {age, terms} | null}
     POST /auth/attest                         {attest: "18+v1"} -> 204 (records the age/terms answer)
-    POST /auth/accounts                       {persona} -> 201 {id, persona}
+    POST /auth/accounts                       {persona} -> 201 {id, persona}; 403 attest_required with
+                                              --attest-required; 429 rate_limited with --accounts-per-day
     POST /auth/accounts/<id>/credential       -> {account, password} (rotates)
     POST /auth/logout                         -> 204
 
@@ -21,8 +22,11 @@ Two fake providers, "Example Phone Co." (example) and "Test Telegraph" (telegrap
 identity; --accounts gives accounts to it (default provider: example). Sign-in is PII-free like the real contract: the mock asks for no email, name or profile. Each fake provider
 has one subject; the identity key is HMAC-SHA256(secret, issuer + NUL + subject) and the page only ever sees
 a handle derived from it ("Caller 7F3A"). The login URL's `attest=<age>+v<terms>` is stored on the identity.
-The real innkeeperd handles the
-WebSocket and, today, ignores the session token; binding a connection to the identity is a server task.
+The real innkeeperd now does all of this itself (its docs/server/innkeeperd.md section 8) and binds the
+WebSocket to the session; this mock never touches the WebSocket. It differs from the real server in two
+ways: its consent page is its own (the real server redirects to the provider's), and the Deny, "Provider
+error" and "Server error" buttons stand for the callback's error codes access_denied, provider_error and
+server_error.
 
     python3 tools/mock_auth.py --port 2843 --page-origin http://127.0.0.1:2842 \\
         --accounts 100001:Guybrush --enrol open
@@ -51,9 +55,13 @@ PASSWORD_ALPHABET = string.ascii_uppercase + string.digits
 
 
 class State:
-    def __init__(self, accounts, enrol, page_origin):
+    def __init__(self, accounts, enrol, page_origin, per_day=0, attest_required=False):
         self.lock = threading.Lock()
         self.enrol = enrol
+        self.per_day = per_day                  # 0: no limit
+        self.attest_required = attest_required
+        self.opened = {}        # provider id -> accounts opened through POST /auth/accounts
+        self.attest_posted = set()   # session tokens that have POSTed /auth/attest
         self.page_origin = page_origin
         self.secret = secrets.token_bytes(32)   # the HMAC key; random per run, never printed
         self.sessions = {}      # token -> provider id
@@ -72,6 +80,9 @@ class State:
 
     def handle(self, provider):
         return "Caller " + self.identity_key(provider)[:4].upper()
+
+    def can_create(self, provider):
+        return self.enrol == "open" and not (self.per_day and self.opened.get(provider, 0) >= self.per_day)
 
     def persona_taken(self, persona):
         low = persona.lower()
@@ -102,6 +113,7 @@ CONSENT = """<!doctype html><meta charset="utf-8"><meta name="viewport" content=
 <input type="hidden" name="provider" value="{provider}"><input type="hidden" name="return" value="{ret}">
 <input type="hidden" name="mode" value="{mode}"><input type="hidden" name="attest" value="{attest}">
 <button name="decision" value="allow" autofocus>Allow</button><button name="decision" value="deny">Deny</button>
+<button name="decision" value="provider_error">Provider error</button><button name="decision" value="server_error">Server error</button>
 </form>"""
 
 POPUP_DONE = """<!doctype html><meta charset="utf-8"><title>Signed in</title>
@@ -188,7 +200,7 @@ def make_handler(state):
                 return self.reply(200, {
                     "identity": {"handle": state.handle(provider), "provider": provider},
                     "accounts": [{"id": i, "persona": p} for i, p in sorted(owned.items())],
-                    "canCreate": state.enrol == "open",
+                    "canCreate": state.can_create(provider),
                     "attested": state.attested.get(state.identity_key(provider)),
                 })
             self.err(404, "not_found", "No such endpoint.")
@@ -209,8 +221,9 @@ def make_handler(state):
                 frag = f"inn-session={token}"
                 sys.stderr.write(f"mock_auth: signed in via {provider}, session {token[:6]}...\n")
             else:
-                message = {"type": "inn-auth", "error": "access_denied"}
-                frag = "inn-error=access_denied"
+                code = {"provider_error": "provider_error", "server_error": "server_error"}.get(q.get("decision"), "access_denied")
+                message = {"type": "inn-auth", "error": code}
+                frag = f"inn-error={code}"
             if mode == "redirect":
                 return self.reply(302, headers=[("Location", f"{ret}#{frag}")])
             body = POPUP_DONE.format(message=json.dumps(message).replace("<", "\\u003c"), target=json.dumps(origin))
@@ -239,12 +252,17 @@ def make_handler(state):
                     return self.err(400, "bad_attest", "Use <age>+v<terms>, for example 18+v1.")
                 with state.lock:
                     state.attested[state.identity_key(provider)] = {"age": int(m.group(1)), "terms": int(m.group(2))}
+                    state.attest_posted.add(token)
                 return self.reply(204)
             if path == "/auth/accounts":
                 data = self.read_json()
                 persona = data.get("persona") if isinstance(data, dict) else None
                 if state.enrol != "open":
                     return self.err(403, "enrolment_closed", "New accounts are not being taken.")
+                if state.attest_required and token not in state.attest_posted:
+                    return self.err(403, "attest_required", "Answer the age and terms notice first.")
+                if not state.can_create(provider):
+                    return self.err(429, "rate_limited", "This sign-in has opened enough lines for today.")
                 if not isinstance(persona, str) or not PERSONA_RE.match(persona):
                     return self.err(400, "bad_persona", "Use 1 to 10 letters or digits.")
                 with state.lock:
@@ -253,6 +271,7 @@ def make_handler(state):
                     number = state.next_id
                     state.next_id += 1
                     state.accounts.setdefault(provider, {})[number] = persona
+                    state.opened[provider] = state.opened.get(provider, 0) + 1
                 return self.reply(201, {"id": number, "persona": persona})
             m = re.fullmatch(r"/auth/accounts/(\d+)/credential", path)
             if m:
@@ -282,8 +301,15 @@ def main():
                          "provider defaults to example; '' for none (default %(default)s)")
     ap.add_argument("--enrol", choices=("open", "closed"), default="open",
                     help="open: canCreate is true and POST /auth/accounts works; closed: 403 (default open)")
+    ap.add_argument("--accounts-per-day", type=int, default=0,
+                    help="accounts one identity may open through POST /auth/accounts; beyond that canCreate is false "
+                         "and the answer is 429 rate_limited (default 0: no limit)")
+    ap.add_argument("--attest-required", action="store_true",
+                    help="POST /auth/accounts answers 403 attest_required until the session has POSTed /auth/attest, "
+                         "although GET /auth/session reports the attestation as current")
     args = ap.parse_args()
-    state = State(parse_accounts([a for a in args.accounts.split(",") if a]), args.enrol, args.page_origin.rstrip("/"))
+    state = State(parse_accounts([a for a in args.accounts.split(",") if a]), args.enrol, args.page_origin.rstrip("/"),
+                  args.accounts_per_day, args.attest_required)
     server = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(state))
     sys.stderr.write(f"mock_auth: MOCK server (development only) on http://127.0.0.1:{args.port}, page origin {state.page_origin}\n")
     try:

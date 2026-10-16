@@ -203,6 +203,8 @@ repository; this is the browser side.
   `INN\LL` and `INN\SL` (CasinoLand and SierraLand personas) and the CasinoLand bankroll `INN\LL$$<n>.DAT`
   (`LLSYSTEM.DAT`, CasinoLand's access password, stays local). The host
   enforces the same list. Names are matched without regard to case against the drive's own spelling.
+  While a signed-in line is dialed the list narrows to the character files and that persona's own `.DTA`
+  files, and `INN\PLAYER.DIR` stays out (see "The persona on the drive").
 - **When.** The host sends a manifest as soon as the line has logged on (`LoginAccepted`); before that it
   answers `not_logged_on`. For each path, comparing the local SHA-256 with the hash and version last
   synced (kept in `localStorage` per account):
@@ -321,8 +323,10 @@ list) nothing changes: phone, then dial. With providers, the flow below runs (co
    the install (below), then dials with the session token on the WebSocket address. The modem box gains an
    `AT+CARD=<provider id>` line before `ATDT`.
 5. *Errors* are narrator boxes, the facts first: the popup closed without signing in, the provider's Deny
-   (`access_denied`), an expired session (401: the token is dropped and the cards come back), closed enrolment, and
-   an unreachable server. Everything is reachable by keyboard: F10, Game, "Sign in...", Enter on a card, the
+   (`access_denied`) or failure (`provider_error`, `server_error`), an expired session (401: the token is dropped
+   and the cards come back), closed enrolment, a new line refused for today's limit (429), an age and terms
+   answer the server wants again (403 `attest_required`: the notice is shown again and the call repeated once),
+   a busy server (503) and an unreachable one. The table in the next section lists each. Everything is reachable by keyboard: F10, Game, "Sign in...", Enter on a card, the
    buttons of the narrator box (Left and Right move between them), the dialog.
 
 Game, "Sign out" calls `POST /auth/logout`, forgets the token and has the narrator say goodbye; Help, About names
@@ -349,9 +353,11 @@ not played.
 
 ## Sign-in (server contract)
 
-What the page expects from `innkeeperd` (or any server that offers sign-in). The server side is PLAN.md "Sign-in with
-common providers" in the TSN-INN-Decomp repository, not built yet; `tools/mock_auth.py` implements this contract for
-development, and nothing else does. Terms: the *page origin* is where `inn.html` is served, the *auth origin* is the
+What the page expects from `innkeeperd` (or any server that offers sign-in). `innkeeperd` implements it
+(TSN-INN-Decomp `docs/server/innkeeperd.md` section 8, with the choices it made where this contract is open in 8.6);
+`tools/mock_auth.py` implements it too, for developing the page without a server. The page was driven end to end
+against the real server on 2026-10-16: sign-in through a mock OpenID Connect provider, a new account and line, the
+Login, the town map. Terms: the *page origin* is where `inn.html` is served, the *auth origin* is the
 server's HTTP origin (`?auth=`, `AUTH_SERVER`, or the game server address with `ws` turned into `http`).
 
 **Endpoints** (all on the auth origin; JSON bodies; errors are `{"error": "<code>", "message": "<words>"}`, and the
@@ -363,9 +369,24 @@ page shows `message` for a 4xx it does not know):
 | `GET <url>&return=<page URL>&mode=popup` | the login (consent) page; ends on `/auth/callback` | 400 for an unknown provider or a `return` whose origin is not an allowed page origin |
 | `GET /auth/session`, `Authorization: Bearer <token>` | 200 `{"identity": {"handle": "Caller 7F3A", "provider": "<id>"}, "accounts": [{"id": 100001, "persona": "Guybrush"}], "canCreate": true, "attested": {"age": 18, "terms": 1}}` (`attested` is `null` when none is on record) | 401: token missing, unknown or expired |
 | `POST /auth/attest`, `{"attest": "18+v2"}` | 204; the answer is stored on the identity | 400 `bad_attest`; 401 |
-| `POST /auth/accounts`, `{"persona": "Elaine"}` | 201 `{"id": 100002, "persona": "Elaine"}` | 401; 403 `enrolment_closed`; 400 `bad_persona`; 409 `persona_taken`; 429 rate limited |
+| `POST /auth/accounts`, `{"persona": "Elaine"}` | 201 `{"id": 100002, "persona": "Elaine"}` | 401; 403 `enrolment_closed`; 403 `attest_required`; 400 `bad_persona`; 409 `persona_taken`; 429 `rate_limited` |
 | `POST /auth/accounts/<id>/credential` | 200 `{"account": 100002, "password": "K3J9QWZ7"}`; every call rotates the password | 401; 404 when the identity does not own `<id>` |
 | `POST /auth/logout` | 204 and the token is revoked | the page forgets the token whatever the answer |
+
+What the page does with the answers it does not just show:
+
+| Answer | The page |
+|---|---|
+| 401 from any call | drops the token, brings the calling cards back ("Your sign-in has expired (the server answered 401)") |
+| 403 `attest_required` on `POST /auth/accounts` (or the credential) | asks the age and terms notice again whatever this browser remembers, sends `POST /auth/attest`, and repeats the call once; a second refusal is shown as a failure |
+| 429 `rate_limited` on a new line | says the card has reached its limit for the day (429), marks `canCreate` false and offers the lines it has |
+| 404 `no_such_account` on a credential | says the line is not on this card (404) and offers the list again |
+| 503 `busy`, other 5xx | "The switchboard is busy" or "The sign-in server had a problem", with the status, and a retry hint |
+| callback `error`: `access_denied` | "Sign-in was declined at <provider>" |
+| callback `error`: `provider_error`, `server_error` | the provider (or the game server) "could not sign you in / finish the sign-in (it reported an error)" |
+| any other callback code | "Sign-in did not finish (<code>)" |
+
+Every message is a narrator box with the fact first (what failed, the status or code), then a dry remark.
 
 `id` is a positive integer below 2^32 (it becomes the `id` key of `LSCI.CFG`). `password` is 6 to 10 of A-Z and
 0-9 (the stored form is 6 to 10 characters; innkeeper `docs/protocol/messages.md` section 4.1); the page refuses
@@ -426,11 +447,10 @@ pages are plain navigations and need no CORS. Send `Cache-Control: no-store` on 
 the runtime as `?session=<token>` (`ws://host:port/?session=...`); `page.server`, the modem lines and the status
 text keep the plain address. A subprotocol (`inn-session.<token>`) would keep the token out of access logs, but
 `uart_link_ws.c` opens the socket through `emscripten_websocket_new` with no protocol list and the address is the
-only thing `--com1` carries, so the query parameter is what the page does. The server should take the token only on
-the upgrade request, keep it out of its logs, give it a short lifetime and bind that connection to the identity
-(accept a Login only for an account the identity owns). `innkeeperd` ignores the token today: the session binding
-is a server task, and a headless run against `innkeeperd` with no data directory accepts the written credentials.
-One known leak: if the runtime cannot open the socket it prints the address it was given, which the page's log
+only thing `--com1` carries, so the query parameter is what the page does. `innkeeperd` takes the token only on
+the upgrade request, keeps it out of its logs, gives it a short lifetime (`--session-hours`) and binds that
+connection to the identity (a Login is accepted only for an account the identity owns). With `--public` an upgrade
+with no live token is a 401. One known leak: if the runtime cannot open the socket it prints the address it was given, which the page's log
 (Copy log) then holds.
 
 **What goes into the install.** Before dialing, `page.js` (`writeCredentials`) writes, for the account chosen:
@@ -444,9 +464,71 @@ One known leak: if the runtime cannot open the socket it prints the address it w
   (captures.md section 4). `tools/test_auth.js` checks the encoder against that capture: `SWORDFISH` gives
   `1d 7a 01 66 16 66 18 73 03 00`.
 
-The client sends the persona name it holds in `PLAYER.DIR`, not the one chosen on the card; a server that binds a
-session to accounts has to accept (or map) that. "I have my own number" uses whatever the install now holds, which
-after a sign-in dial is the last credential written.
+The client sends the persona name it holds in `PLAYER.DIR` on its Login; `innkeeperd` accepts it and keeps the
+persona chosen on the web as the stored one. "I have my own number" uses whatever the install now holds, which
+after a sign-in dial is the last credential written (and the persona files of that line, below).
+`writeCredentials` also writes the persona.
+
+### The persona on the drive
+
+Without this the client would offer, and log on with, whatever personas the install zip held (`PLAYER.DIR`,
+`<NAME>.DTA`), not the persona of the web account. Reading the client's own scripts (the hub scripts: the character
+editor, the "Select Player" screen and the persona record's `readFrom` and `writeTo` methods) gave the whole
+format, and persona files the client itself had written agree with it byte for byte, so the page writes the
+files itself. Nothing here is Sierra data: the format is described below, and the faces are made by the page.
+
+*PLAYER.DIR* is a text file: one persona name per line, each ended by CR LF (`Elaine`, CR, LF). "Select Player"
+shows one card per line.
+
+*The persona file* is `<first 8 characters of the name, upper case>.DTA` in the same directory (the client keeps
+only 8 characters: its Create screen says "That file name is already in use (the first 8 characters)"). All numbers
+are little-endian:
+
+| Offset | Size | Content |
+|---|---|---|
+| 0 | word | 12, the format marker (any other value makes the client treat the file as unreadable) |
+| 2 | word | the home town's length, counting the zero below |
+| 4 | text | the home town, then one zero byte |
+| next | 8 words | look 1, look 2, look 3, hobbies, hobbies, age, mail box (low), mail box (high) |
+| next | word + 16 bytes | 16, then 16 skill levels (3 for a new persona) |
+| next | 8 bytes | preferences: 12, 0, 0, 7, 15, 3, 0, 0 |
+| next | 9 words | two cursor positions (999, 997) and seven zeros |
+
+That is 65 bytes plus the length of the home town. The three look words are bit fields, each limited by the
+character editor to 0 to count-1: *look 1* has bit 0 for female (the face-hair button then reads "Jewelry"),
+skin in bits 1 to 3 (5 choices), head in bits 4 to 6 (8), face hair 7 to 9 (8), eyebrows 10 to 12 (8);
+*look 2* has glasses in bits 0 to 2 (8), eyes 3 to 5 (8), nose 6 to 8 (8), mouth 9 to 11 (8), hair colour 12 to 15
+(14); *look 3* has clothes in bits 0 to 3 (13), hair style 4 to 8 (25), hats 9 to 12 (12), clothes colour 13 to 15
+(8). The two hobby words are 0xFEFF for "none chosen"; the age is 1 to 999 (the page writes 18); the mail box is
+zero when blank. `tools/test_auth.js` checks the writer against that table.
+
+**What the page does**, when it puts a line through (`writePersona` in `page.js`, after `writeCredentials`):
+
+1. `PLAYER.DIR` is rewritten to name only this line's persona. The file is the page's: while a signed-in line is
+   dialed it is not part of the save space (`InnSaves.setLine`), so it is neither uploaded nor replaced. Other
+   personas' files stay on the drive, unlisted.
+2. If the drive has no `<STEM>.DTA` for the persona, a new one is written, with the face chosen by a small seeded
+   generator from the account number (the same account always gets the same face in any browser), the home town
+   `Town`, age 18, no hobbies and default skills. An existing file (the same account's earlier session) is
+   not touched.
+3. `GUIDE.CFG` (two zero bytes) is written if missing, so the client does not run its first-run welcome.
+4. The saves (above) take only the character files and this persona's `.DTA` files while the line is dialed. The
+   made-up file is recorded as a *seed* for the account (`inn.seed.<account>` in `localStorage`): when the host's
+   manifest arrives, a seeded file that the host also holds is replaced by the host's copy whatever the clocks
+   say, and one the host does not hold is uploaded as the account's first copy. `tools/test_saves.js` runs that
+   against a scripted host.
+5. "I have my own number" and the classic card clear the filter: everything in the install syncs as before.
+
+Two accounts that share an install therefore never see each other's personas, and the install's own personas
+(say the one in the zip) are never uploaded to a web account.
+
+*Known limits.* The client reads its persona once, at "Select Player", before the host's manifest exists (the
+manifest comes after the Login). In a browser that has never held the account, the client therefore shows and
+keeps the made-up persona, and writes it back over the file the sync has just restored: looks changed with
+"Change", and skills earned elsewhere, do not carry to a new browser (verified: the host's copy was restored,
+then overwritten by the client's). A first fix would be for the server to hand the persona files over HTTP,
+with the session token, before the page dials. Two personas whose first 8 characters match (`Abcdefgh1`,
+`Abcdefgh2`) share one file name; the page does not try to tell them apart.
 
 ## Legal pages and the age notice
 
@@ -487,8 +569,16 @@ server-side record exist so the operator can show that adults were asked and agr
 ```
 python3 tools/mock_auth.py --port 2843 --page-origin http://127.0.0.1:8080 --accounts 100001:Guybrush --enrol open
 # page: http://127.0.0.1:8080/inn.html?auth=http://127.0.0.1:2843&com1=ws://127.0.0.1:2316
-node tools/test_auth.js          # encoder, LSCI.CFG edit and persona rule
+node tools/test_auth.js          # encoder, LSCI.CFG edit, persona rule and persona files
+node tools/test_saves.js         # the signed-in line's save filter and the seeded persona file
 ```
+
+Flags for the error paths: `--attest-required` makes `POST /auth/accounts` answer 403 `attest_required` until the
+session has posted `/auth/attest` (the session JSON still reports the attestation as current), and
+`--accounts-per-day N` gives the 429 `rate_limited` and a false `canCreate`. The mock's consent page also has
+"Provider error" and "Server error" buttons for the callback codes. To run the page against the real server
+instead, `innkeeperd dev-oidc` is a mock provider and `--insecure-dev-keys` lets a loopback run work without
+Azure (innkeeperd.md 8.5).
 
 `tools/mock_auth.py` is for local development and tests only, never production: Python standard library, binds
 127.0.0.1, in memory, no real authentication (its consent page has Allow and Deny buttons), and it prints the
