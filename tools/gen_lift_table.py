@@ -28,9 +28,11 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import borland_overlay  # noqa: E402
 
+# LIFTED_PREFIX(..., scratch, n) compares only the first n signature bytes: for an entry followed by data
+# the loader or the host fills in, which the file does not hold.
 MARKER = re.compile(
-    r'^LIFTED\(\s*(0x[0-9A-Fa-f]+)\s*,\s*(0x[0-9A-Fa-f]+)\s*,\s*(\w+)\s*,\s*(LIFT_FAR_NOSHADOW|LIFT_NEAR_NOSHADOW|LIFT_FAR_REPLAY|LIFT_NEAR_REPLAY|LIFT_FAR|LIFT_NEAR|LIFT_REGION)\s*,'
-    r'\s*([\w|\s]+?)\s*\)', re.M)
+    r'^LIFTED(?:_PREFIX)?\(\s*(0x[0-9A-Fa-f]+)\s*,\s*(0x[0-9A-Fa-f]+)\s*,\s*(\w+)\s*,\s*(LIFT_FAR_NOSHADOW|LIFT_NEAR_NOSHADOW|LIFT_FAR_REPLAY|LIFT_NEAR_REPLAY|LIFT_FAR|LIFT_NEAR|LIFT_REGION)\s*,'
+    r'\s*([\w|\s]+?)\s*(?:,\s*(\d+)\s*)?\)', re.M)
 SIGNATURE_LEN = 12
 SPLIT_HEAD = 1 << 15  # byte 0 is the high half of a relocated word that starts before the entry
 
@@ -109,6 +111,8 @@ def entries_of(module_dir, name, native, image, relocs, overlays):
             if len(signature) != SIGNATURE_LEN:
                 sys.exit(f'{source}: {match[3]} lies outside the image')
             kind = match[4]
+            if match[6]:
+                unknown |= ((1 << SIGNATURE_LEN) - 1) & ~((1 << int(match[6])) - 1)
             yield (module, seg, off, match[3], kind.startswith('LIFT_NEAR'), match[5], signature, mask,
                    kind == 'LIFT_REGION', kind.endswith('_NOSHADOW'), unknown, kind.endswith('_REPLAY'), native)
 

@@ -16,6 +16,10 @@ int native_exec(Machine *m, const char *dos_path, const uint8_t *tail /* length 
  * with m->exit_requested set. */
 void native_run_top(Machine *m);
 
+/* The CPU runs from CS:IP, with interrupts held, until it reaches the native start of its program (a
+ * packed program's unpacker ends there). False when it stops elsewhere first. */
+bool native_unpack_to_start(Machine *m);
+
 /* Mixed-mode device hand-off around a child that runs on the emulator (package 10b fills them in). */
 void native_handoff_to_emulator(Machine *m);
 void native_handoff_from_emulator(Machine *m);

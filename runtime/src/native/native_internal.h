@@ -64,8 +64,6 @@ void native_reanchor(Machine *m);
 /* The polls of a safe point (input, link, timer), then one interrupt if IF allows; true when one was
  * delivered. */
 bool native_poll_deliver(Machine *m);
-/* Safe point work without the charge: timer, input and link polls, one IRQ, the periodic yield. */
-void native_poll(Machine *m);
 void native_timer_reset(Machine *m);
 
 #endif

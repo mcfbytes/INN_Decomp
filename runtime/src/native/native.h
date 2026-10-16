@@ -23,6 +23,7 @@ void native_shutdown(Machine *m);
 bool native_active(const Machine *m);              /* INN runs natively (not a game on the emulator) */
 void native_set_active(Machine *m, bool on);       /* mixed-mode switch (package 10b) */
 void native_safepoint(Machine *m);                 /* charge, deliver a due IRQ, maybe yield */
+void native_poll(Machine *m);                      /* the safe point without the charge */
 void native_charge(Machine *m, uint32_t ns);
 void native_idle(Machine *m);                      /* STI; HLT: run until one interrupt was delivered */
 void native_wait_until(Machine *m, uint64_t virtual_us); /* deliver IRQs while waiting */

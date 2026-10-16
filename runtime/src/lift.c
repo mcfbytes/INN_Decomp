@@ -252,6 +252,16 @@ const char *lift_module_owning(Machine *m, uint16_t seg, uint16_t *load_seg)
     return best;
 }
 
+bool lift_module_has_native(Machine *m, const char *module)
+{
+    LiftState *s = lift_state(m);
+    for (int t = 0; s && t < s->table_count; t++)
+        for (int i = 0; i < s->tables[t].count; i++)
+            if (s->tables[t].entries[i].native_only && !strcmp(s->tables[t].entries[i].module, module))
+                return true;
+    return false;
+}
+
 uint16_t lift_module_base(Machine *m, const char *module)
 {
     LiftState *s = lift_state(m);
@@ -678,6 +688,11 @@ void lift_dispatch_far_at(Machine *m, uint16_t seg, uint16_t off)
         s->direct_fallbacks++;
     if (!direct || !back)
         lift_run_nested(m, UINT32_MAX, sp_after_return, false); /* the sentinel callback ends it */
+}
+
+void lift_int_boundary(Machine *m)
+{
+    native_poll(m);
 }
 
 void guest_call_far(Machine *m, uint16_t seg, uint16_t off)

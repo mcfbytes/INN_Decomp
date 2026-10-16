@@ -505,42 +505,6 @@ static bool platform_quit_requested(void *ctx)
     return ((Frontend *)ctx)->quit;
 }
 
-/* The native start CS:IP is at: a hooked native-control entry whose bytes are in place. */
-static bool at_native_start(Machine *m)
-{
-    uint32_t linear = m->cpu.seg_base[S_CS] + (m->cpu.eip & 0xFFFF);
-    if (!lift_hooked(m, linear))
-        return false;
-    LiftState *s = lift_state(m);
-    for (int i = 0; i < s->active_count; i++)
-        if (s->active[i].linear == linear)
-            return s->active[i].entry->native_only && lift_entry_bytes_match(m, &s->active[i]);
-    return false;
-}
-
-/* The EXEs on the drive are packed (LZEXE): the unpacker at the EXE entry runs on the CPU, with
- * interrupts held so that none goes to a device, until it jumps to the program's native start. False
- * when it stops anywhere else first (another lifted entry, a halt, the budget). */
-enum { UNPACK_INSNS = 100000000 };
-
-static bool unpack_to_native_start(Machine *m)
-{
-    for (uint64_t left = UNPACK_INSNS; !m->exit_requested;) {
-        if (at_native_start(m))
-            return true;
-        m->cpu.hook_pending = false;
-        uint64_t done = cpu_run(m, left);
-        if (m->cpu.hook_pending) {
-            m->cpu.hook_pending = false;
-            return at_native_start(m);
-        }
-        if (done == 0 || done >= left || m->cpu.halted)
-            return false;
-        left -= done;
-    }
-    return false;
-}
-
 /* The top program was loaded before native mode was on, so the native-only entries of its module are
  * not armed yet: arm them now, and those of every module loaded later. */
 enum { PSP_PARAS = 0x10, MCB_SIZE_WORD = 3 };
@@ -561,11 +525,7 @@ static void arm_native_control(Machine *m)
 static bool run_to_native_start(Machine *m)
 {
     arm_native_control(m);
-    bool hold = m->irq_hold;
-    m->irq_hold = true;
-    bool found = unpack_to_native_start(m);
-    m->irq_hold = hold;
-    return found;
+    return native_unpack_to_start(m);
 }
 
 /* Runs the program natively; without a native start it runs on the emulator as in the hybrid build. */

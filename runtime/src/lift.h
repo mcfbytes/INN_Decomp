@@ -49,6 +49,8 @@ enum { LIFT_FAR_NOSHADOW = 3, LIFT_NEAR_NOSHADOW = 4 };
  * same events. For functions that wait on the BIOS tick, a UART or another interrupt. */
 enum { LIFT_FAR_REPLAY = 5, LIFT_NEAR_REPLAY = 6 };
 #define LIFTED(seg, off, fn, kind, scratch) void fn(Machine *m);
+/* As LIFTED, comparing only the first `bytes` of the signature (data the host fills follows the code). */
+#define LIFTED_PREFIX(seg, off, fn, kind, scratch, bytes) void fn(Machine *m);
 
 /* Registers every lifted table built into this binary; a no-op without the private tree. */
 void lifted_register_all(Machine *m);
@@ -162,9 +164,15 @@ static inline void lift_ret_near(Machine *m, uint16_t arg_bytes)
     m->cpu.r[R_SP].w += arg_bytes;
 }
 
+/* Native mode: the instruction boundary before an INT, where an interrupt may still be taken (the INT
+ * itself clears IF before the callee's safe point). */
+void lift_int_boundary(Machine *m);
+
 /* Runs INT n through the current interrupt vector, as the instruction does. */
 static inline void guest_int(Machine *m, uint8_t vector)
 {
+    if (m->native)
+        lift_int_boundary(m);
     cpu_push16(m, (uint16_t)m->cpu.flags);
     m->cpu.flags &= ~(uint32_t)(F_IF | F_TF);
     guest_call_far(m, mem_rd16(m, vector * 4u + 2), mem_rd16(m, vector * 4u));

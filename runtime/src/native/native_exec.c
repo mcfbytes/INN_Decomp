@@ -106,7 +106,7 @@ static void restore_state(Machine *m, ExecCtx *fr)
 }
 
 /* The lifted entry at CS:IP of a program image, if a hook is armed there with matching bytes. */
-static bool native_start_at(Machine *m, uint16_t cs, uint16_t ip)
+static bool native_start_at(Machine *m, uint16_t cs, uint16_t ip, bool native_only)
 {
     uint32_t linear = real_addr(cs, ip);
     if (!lift_hooked(m, linear))
@@ -114,8 +114,41 @@ static bool native_start_at(Machine *m, uint16_t cs, uint16_t ip)
     LiftState *s = lift_state(m);
     for (int i = 0; i < s->active_count; i++)
         if (s->active[i].linear == linear)
-            return lift_entry_bytes_match(m, &s->active[i]);
+            return (!native_only || s->active[i].entry->native_only) && lift_entry_bytes_match(m, &s->active[i]);
     return false;
+}
+
+/* The packed program's unpacker runs on the CPU, with interrupts held so that none goes to a device,
+ * until it jumps to the program's native start. The CPU runs only the unpacker, never guest code of
+ * the client, so native mode is off for it (strict mode would refuse the instructions). False when it
+ * stops anywhere else first (another lifted entry, a halt, the budget). */
+enum { UNPACK_INSNS = 100000000 };
+
+bool native_unpack_to_start(Machine *m)
+{
+    bool was_native = m->native, hold = m->irq_hold;
+    bool found = false;
+    m->native = false;
+    m->irq_hold = true;
+    for (uint64_t left = UNPACK_INSNS; !m->exit_requested;) {
+        if (native_start_at(m, m->cpu.seg[S_CS], (uint16_t)m->cpu.eip, true)) {
+            found = true;
+            break;
+        }
+        m->cpu.hook_pending = false;
+        uint64_t done = cpu_run(m, left);
+        if (m->cpu.hook_pending) {
+            m->cpu.hook_pending = false;
+            found = native_start_at(m, m->cpu.seg[S_CS], (uint16_t)m->cpu.eip, true);
+            break;
+        }
+        if (done == 0 || done >= left || m->cpu.halted)
+            break;
+        left -= done;
+    }
+    m->irq_hold = hold;
+    m->native = was_native;
+    return found;
 }
 
 /* Runs the child whose registers are set up until it terminates. Returns through the jump buffer when
@@ -126,7 +159,17 @@ static void run_child(Machine *m, ExecCtx *fr)
         return;
     LiftState *s = lift_state(m);
     uint16_t cs = m->cpu.seg[S_CS], ip = (uint16_t)m->cpu.eip;
-    fr->native = native_start_at(m, cs, ip);
+    fr->native = native_start_at(m, cs, ip, false);
+    if (!fr->native) {
+        /* A packed INN program (an LZEXE unpacker at the EXE entry) starts natively once unpacked. */
+        uint16_t base;
+        const char *module = lift_module_owning(m, cs, &base);
+        if (module && lift_module_has_native(m, module) && native_unpack_to_start(m)) {
+            cs = m->cpu.seg[S_CS];
+            ip = (uint16_t)m->cpu.eip;
+            fr->native = true;
+        }
+    }
     if (fr->native) {
         lift_dispatch_far_at(m, cs, ip);
         log_msg("native_exec: the program at %04X:%04X returned instead of terminating; exit code 0", cs, ip);
