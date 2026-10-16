@@ -429,6 +429,7 @@ int host_link_open(Machine *m, const char *spec);      /* host:port or ws:// / w
 bool host_link_carrier(Machine *m);                    /* connected: DCD, DSR and CTS */
 int host_link_send(Machine *m, const uint8_t *buf, int len); /* bytes taken; fewer while connecting */
 int host_link_recv(Machine *m, uint8_t *buf, int cap);
+void host_link_set_rate(Machine *m, uint32_t baud);    /* the driver's line rate */
 void host_link_set_dtr(Machine *m, bool on);
 void host_link_break(Machine *m);                      /* sends the CR stand-in innkeeperd expects */
 /* The driver's ring pump (the UART interrupt's work, done without a UART) lives with the lifted driver
@@ -437,6 +438,11 @@ void host_link_break(Machine *m);                      /* sends the CR stand-in 
 void host_link_set_pump(Machine *m, void (*pump)(Machine *m));
 void host_link_pump(Machine *m);
 ```
+
+`host_link_send` and `host_link_recv` pace the link at the line rate the driver programmed: one byte per
+byte time (10 bits at that rate) in each direction, as the emulated UART does, so the client's timing and
+the games' timer-seeded behaviour stay close to the hybrid build. `INN_LINK_PACING=0` makes the link
+unpaced.
 
 ### Files
 

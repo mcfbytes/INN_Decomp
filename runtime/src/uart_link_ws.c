@@ -171,29 +171,39 @@ static EMSCRIPTEN_WEBSOCKET_T ws_open(const char *url, WsLink *w)
     return socket;
 }
 
-int uart_attach_ws(Machine *m, int com, const char *url)
+SerialLink serial_link_ws(const char *url)
 {
+    SerialLink none = { 0 };
     if (!emscripten_websocket_is_supported())
-        return -1;
+        return none;
     WsLink *w = calloc(1, sizeof *w);
     if (!w)
-        return -1;
+        return none;
     w->socket = ws_open(url, w);
     if (!w->socket) {
         free(w);
-        return -1;
+        return none;
     }
     control_install();
     SerialLink link = { w, ws_send, ws_recv, ws_connected, ws_close };
+    return link;
+}
+#else
+SerialLink serial_link_ws(const char *url)
+{
+    SerialLink none = { 0 };
+    return none; /* native builds reach the server over plain TCP (serial_link_tcp) */
+}
+#endif
+
+int uart_attach_ws(Machine *m, int com, const char *url)
+{
+    SerialLink link = serial_link_ws(url);
+    if (!link.send)
+        return -1;
     if (uart_attach(m, com, link) != 0) {
-        ws_close(w);
+        link.close(link.ctx);
         return -1;
     }
     return 0;
 }
-#else
-int uart_attach_ws(Machine *m, int com, const char *url)
-{
-    return -1; /* native builds reach the server over plain TCP (uart_attach_tcp) */
-}
-#endif

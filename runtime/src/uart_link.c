@@ -163,28 +163,38 @@ static int tcp_open(const char *host, int port)
     return fd;
 }
 
-int uart_attach_tcp(Machine *m, int com, const char *host, int port)
+SerialLink serial_link_tcp(const char *host, int port)
 {
+    SerialLink none = { 0 };
     int fd = tcp_open(host, port);
     if (fd < 0)
-        return -1;
+        return none;
     TcpLink *t = calloc(1, sizeof *t);
     if (!t) {
         close(fd);
-        return -1;
+        return none;
     }
     t->fd = fd;
     t->connecting = true;
     SerialLink link = { t, tcp_send, tcp_recv, tcp_connected, tcp_close };
+    return link;
+}
+#else
+SerialLink serial_link_tcp(const char *host, int port)
+{
+    SerialLink none = { 0 };
+    return none; /* the browser build reaches the server through a WebSocket link instead */
+}
+#endif
+
+int uart_attach_tcp(Machine *m, int com, const char *host, int port)
+{
+    SerialLink link = serial_link_tcp(host, port);
+    if (!link.send)
+        return -1;
     if (uart_attach(m, com, link) != 0) {
-        tcp_close(t);
+        link.close(link.ctx);
         return -1;
     }
     return 0;
 }
-#else
-int uart_attach_tcp(Machine *m, int com, const char *host, int port)
-{
-    return -1; /* the browser build reaches the server through a WebSocket link instead */
-}
-#endif
