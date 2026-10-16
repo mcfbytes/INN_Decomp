@@ -18,7 +18,7 @@ tools/verify_lifted.sh on ports first_port .. first_port+4, at most five at a
 time. <list> lines are: <name> <drive> <run_ms|auto> [VAR=value ...]
 (# comments). auto is the script's largest time plus 15000 (logon: 95000).
 @PRIVATE@ in a value becomes the private/lifted directory; underscores in
-INN_PROGRAM become spaces. Stops starting new runs after 500s and prints
+INN_PROGRAM and INN_ARGS become spaces. Stops starting new runs after 500s and prints
 "suite complete: N ok, M failed" or "suite incomplete: K left".
 EOF
 }
@@ -95,7 +95,7 @@ load_list() {
             key=${kv%%=*}
             val=${kv#*=}
             val=${val//@PRIVATE@/$PRIVATE}
-            if [[ $key == INN_PROGRAM ]]; then
+            if [[ $key == INN_PROGRAM || $key == INN_ARGS ]]; then
                 val=${val//_/ }
             fi
             blob+="$key=$val"$'\n'

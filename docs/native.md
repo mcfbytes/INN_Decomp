@@ -13,7 +13,8 @@ Decided 2026-10-15:
   palette and then to the canvas; music goes to the existing OPL synthesiser and mixer, driven by
   function calls instead of port writes, and on to WebAudio; the PIT becomes a host timer; keyboard and
   mouse come from a host event queue; the modem link is the WebSocket (TCP natively); DOS services are
-  runtime C calls; EMS and XMS report none.
+  runtime C calls; EMS and XMS report none. Sound Blaster digital audio is not played. The music driver
+  has to be `adl.drv`; the browser page rewrites any other `music` line in its copy of `LSCI.CFG`.
 - **Data stays where DOS put it.** SCI objects, heaps, resources, driver tables and the TSNEXEC link
   rings keep their addresses in the flat 1 MB guest memory image. Nothing is converted to host
   pointers or structs.
@@ -124,6 +125,9 @@ Proved 2026-10-15: `test_native` built with `-sJSPI -fwasm-exceptions -sSUPPORT_
 scope, then longjmps out and dispatches again (Node 24 with `--experimental-wasm-jspi`; the same
 pattern passes in headless Chromium 153).
 
+The native web build requires JSPI, so it runs in Chromium-based browsers (Chrome, Edge) and not in
+browsers that only have Asyncify. Full-instrumentation Asyncify has not been measured as a fallback.
+
 **Natively (SDL2)** the same waits call `SDL_Delay` and pump SDL events. **Headless** runs use a
 deterministic virtual clock (section 5) and no platform at all: waits jump the clock, the input
 script is applied at safe points as its times pass, screenshots come from the host video.
@@ -144,7 +148,11 @@ tick, the TSNEXEC tick counter maintained by the client). In native mode it adva
   background tab) it jumps forward and the lost time is dropped, as the frame clock does today.
 - **Deterministic mode (headless).** No wall clock: charges and waits only. A run is then independent of
   host speed; only the moments the server's bytes arrive (polled at safe points) tie it to wall time, as
-  in today's headless hybrid runs.
+  in today's headless hybrid runs. Headless hybrid and native runs start that clock at `INN_EPOCH`
+  (default 750000000, 8 Oct 1993 UTC). An empty `INN_EPOCH` uses the host clock. The same epoch makes
+  two runs of one build repeat. Hybrid and native still start about 0.4 s apart, because they charge
+  work differently: a periodic host message can fall on opposite sides of a scripted event. Move the
+  event off that boundary.
 
 Timer interrupts are due by this clock: IRQ 0 every `divisor / 1193182` s of the PIT divisor the client
 programmed (section 9). Several overdue ticks are delivered one per safe point, at most 5 in a row;
@@ -441,8 +449,8 @@ void host_link_pump(Machine *m);
 
 `host_link_send` and `host_link_recv` pace the link at the line rate the driver programmed: one byte per
 byte time (10 bits at that rate) in each direction, as the emulated UART does, so the client's timing and
-the games' timer-seeded behaviour stay close to the hybrid build. `INN_LINK_PACING=0` makes the link
-unpaced.
+the games' timer-seeded behaviour stay close to the hybrid build. Pacing is the default. `INN_LINK_PACING=0`
+makes the link unpaced.
 
 ### Files
 
@@ -579,5 +587,46 @@ Detailed briefs are private. Order and groups (packages in one step touch disjoi
 | 4 | **10b** mixed mode: device hand-off, games from the native build |
 | 5 | **9c** final verification campaign, browser checks, documentation |
 
-Status: package 11 done (native core, `INN_NATIVE` and `INN_NATIVE_HW`, platform, JSPI proof). Until
-package 3 adds native starts, the native build reports that TSNEXEC has none and runs it on the emulator.
+## Status
+
+Measured 2026-10-16. The INN client runs native. Games run on the emulator in mixed mode. Still open:
+Sound Blaster digital audio on the native path, and an Asyncify fallback for browsers without JSPI.
+
+| Section | Where it stands |
+|---|---|
+| 1 Scope | In place for the INN client. Games are not lifted onto the host APIs. |
+| 2 Prototype | Historical. Direct calls are the hybrid default. |
+| 3 Execution model | Native programs run as C; the interpreter is the strict-mode fatal path and the game path. |
+| 4 Main loop | SDL and JSPI both drive the native loop. The native web build is JSPI only. |
+| 5 Clock | Work charges, waits and pacing are in. `INN_EPOCH` fixes the headless clock. Hybrid and native differ by about 0.4 s at start-up. |
+| 6 Interrupts | IRQ 0 and the other lines are delivered at safe points. |
+| 7 Direct calls | On by default in the hybrid build. |
+| 8 Program control | TSNEXEC and LSCITV start and exit as C. A native run no longer falls back to the emulator for them. |
+| 9 Host APIs | Video, OPL music, the timer, input and the link are host calls. The link is paced unless `INN_LINK_PACING=0`. Digital Sound Blaster audio is not. |
+| 10 Builds | Hybrid, native and web native (`-DINN_WEB_SUSPEND=JSPI -DINN_NATIVE=ON`) all build. |
+| 11 Mixed mode | Yserbius and Twinion scenarios reach their checkpoints from the native build and return. |
+| 12 Verification | Campaign below. |
+| 13 Prototype | Unchanged, on `m9-proto`. |
+| 14 Risks | The start-up dumps are not byte-identical (below). Timing-dependent scenarios are listed below. JSPI is in; Asyncify is not. |
+| 15 Packages | 9a through 10b are merged. 9c is this measurement. |
+
+**Strict native.** All 30 scenarios in `M9-NATIVE.txt` finish with no fatal. Strict mode is the default (`INN_NATIVE_STRICT=0` is the fallback).
+
+**Hybrid against native** (`tools/m9_compare.sh`, 30 scenarios). 26 pass. The failures, not patched in other packages' code:
+
+| Scenario | What differs |
+|---|---|
+| `inn_casino` | Traffic and two screens. A game random value follows the timing model. Known flaky. |
+| `tw_combat` | Traffic and three screens. The encounter varies between runs of one build. Known flaky. |
+| `ys_create` | Traffic matches. `final.png` differs by 2042 of 64000 pixels (3.1906%), box 49,0–219,141, just over the 3% tolerance. Same on a second run. |
+| `inn_sierraland` | One run diverged on the way out of 3-D golf (extra leave and occupancy messages, and `sl_end.png`). A second run passed. |
+
+`ev_input` used to race one land-occupancy poll. The scripted walk now starts 8 s later, and hybrid and native traffic match. `mem_swap` (`--conv-kb 520`) passes.
+
+**Files.** After `mem_mail` and after `inn_casino`, `INN/PLAYER.DIR`, `INN/LANDADDR`, `INN/LANDADDR.TIM` and the persona `.DTA` files are byte-identical between the two builds.
+
+**Start-up dumps** (`INN_DUMP_AT=exec:1,kernel:1` on logon). Registers, the MCB chain and the DOS handle list match. In the kernel dump, INT 22h is the native terminate stub. Ignoring the BIOS tick, the unused stack immediately below SP, and memory from `A0000` up, a few ranges in the DOS file image and in DGROUP still differ. Left as they are.
+
+**Hybrid suite** with direct calls, 20 calls per function, against the baseline (`--allow` from `work/m9/baseline/ALLOW`): 31 scenarios ok, diff 0 FAIL. Warnings are new keys and, on `inn_casino`, the file and swap entries that scenario no longer reaches. Those entries are checked on `mem_swap` (live) and by `private/lifted/synth/lscitv_file.txt` (synthetic), each with 0 mismatches.
+
+**Browser** (native JSPI, headless Chromium, `?com1=ws://…&perf=1`). The land directory arrives at 25 s and the town map is up at the 50 s shot. The Yserbius gallery is up at 90 s and the town map again at 135 s. `perf:` speed stays between 0.998 and 1.003 (most windows 1.000). No `long frame` line; the longest busy slice in those windows is 17 ms. `executed` counts guest instructions, so it is about 0 while INN is native and about 15 MIPS while Yserbius runs on the emulator. `--perf` on the native loop is taken at each platform sleep, which is the same report `frame_clock_run` prints for the emulated loop.

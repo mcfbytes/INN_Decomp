@@ -14,6 +14,7 @@
 #include "lift.h"
 #include "devices.h"
 #include "host_input.h"
+#include "audio.h"
 #include "frame_clock.h"
 #include "input_script.h"
 #include "exec_stub.h"
@@ -83,6 +84,11 @@ typedef struct Frontend {
     uint64_t mixed_anchor_wall_us, mixed_anchor_virtual_us; /* a game on the emulator: time that corresponds */
     uint64_t slept_us, yields; /* in the current frame, for --perf long-frame reports */
     bool perf; /* emulated time of the last wall-clock check in a nested wait */
+    /* Native runs do not go through frame_step. --perf is accounted at each platform sleep:
+     * host time since the previous sleep returned is the busy slice, and a 5 s wall window
+     * prints the same line frame_clock_run prints. */
+    uint64_t perf_mark_us, perf_mark_virtual_us;
+    uint64_t perf_window_us, perf_virtual_us, perf_instructions, perf_busy_us, perf_longest_us;
     bool quit;
 } Frontend;
 
@@ -453,10 +459,53 @@ EM_ASYNC_JS(void, browser_turn, (void), {
 });
 #endif
 
+/* One busy slice of a native (or mixed-mode) run ended because the platform is about to sleep. */
+static void perf_before_sleep(Frontend *f)
+{
+    if (!f->perf || !f->m)
+        return;
+    uint64_t now = frame_clock_now_us();
+    if (!f->perf_mark_us) {
+        f->perf_mark_us = f->perf_window_us = now;
+        f->perf_mark_virtual_us = f->perf_virtual_us = f->m->virtual_us;
+        f->perf_instructions = f->m->cpu.instructions;
+        return;
+    }
+    uint64_t busy = now - f->perf_mark_us;
+    uint64_t emulated = f->m->virtual_us - f->perf_mark_virtual_us;
+    f->perf_busy_us += busy;
+    if (busy > f->perf_longest_us)
+        f->perf_longest_us = busy;
+    if (busy > LONG_FRAME_US)
+        log_msg("perf: long frame %llu ms: emulated %llu ms, slept 0 ms in 1 yields",
+                (unsigned long long)(busy / 1000), (unsigned long long)(emulated / 1000));
+    if (now - f->perf_window_us < 5000000)
+        return;
+    uint64_t wall = now - f->perf_window_us;
+    uint64_t advanced = f->m->virtual_us - f->perf_virtual_us;
+    uint64_t instructions = f->m->cpu.instructions - f->perf_instructions;
+    double busy_d = f->perf_busy_us ? (double)f->perf_busy_us : 1.0;
+    AudioStats audio = audio_take_stats(f->m);
+    log_msg("perf: speed %.3fx real, host busy %.1f%%, executed %.2f MIPS, capacity %.1f MIPS "
+            "(guest clock %.0f MIPS), dropped %.0f ms, longest frame %.0f ms, "
+            "audio underruns %u, resyncs %u, discarded %.0f ms",
+            (double)advanced / (double)wall, 100.0 * (double)f->perf_busy_us / (double)wall,
+            (double)instructions / (double)wall, (double)instructions / busy_d,
+            (double)f->m->ips / 1e6, wall > advanced ? (wall - advanced) / 1000.0 : 0.0,
+            f->perf_longest_us / 1000.0, audio.underruns, audio.resyncs,
+            audio_rate(f->m) ? audio.dropped_frames * 1000.0 / audio_rate(f->m) : 0.0);
+    f->perf_window_us = now;
+    f->perf_virtual_us = f->m->virtual_us;
+    f->perf_instructions = f->m->cpu.instructions;
+    f->perf_busy_us = 0;
+    f->perf_longest_us = 0;
+}
+
 static void platform_sleep_us(void *ctx, uint64_t us)
 {
     Frontend *f = ctx;
     f->yields++;
+    perf_before_sleep(f);
 #ifdef __EMSCRIPTEN__
     if (us < 1000)
         browser_turn();
@@ -465,6 +514,11 @@ static void platform_sleep_us(void *ctx, uint64_t us)
 #else
     SDL_Delay((uint32_t)(us / 1000));
 #endif
+    /* The sleep itself is pacing, not work. The next slice starts when the browser resumes. */
+    if (f->perf && f->m) {
+        f->perf_mark_us = frame_clock_now_us();
+        f->perf_mark_virtual_us = f->m->virtual_us;
+    }
 }
 
 static void end_windowed(Frontend *f)
