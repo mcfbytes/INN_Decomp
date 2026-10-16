@@ -1,6 +1,7 @@
 /* BIOS keyboard: INT 09h turns set-1 scancodes from port 60h into BIOS key words in the BDA
  * ring buffer and tracks shift states; INT 16h reads them back. */
 #include "bios_internal.h"
+#include "host_input.h"
 
 enum {
     PORT_KBD_DATA = 0x60,
@@ -178,7 +179,7 @@ static bool modifier(Machine *m, uint8_t sc, bool down, bool ext)
 
 static CallbackResult int09_keyboard(Machine *m)
 {
-    uint8_t raw = (uint8_t)port_in(m, PORT_KBD_DATA, 1);
+    uint8_t raw = m->native ? host_input_kbd_data(m) : (uint8_t)port_in(m, PORT_KBD_DATA, 1);
     uint8_t mode = bda_rd8(m, BDA_KBD_MODE);
     if (raw == SC_EXTENDED || raw == SC_PAUSE_PREFIX) {
         bda_wr8(m, BDA_KBD_MODE, (uint8_t)(mode | KM_LAST_E0));

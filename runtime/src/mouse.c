@@ -3,6 +3,7 @@
 #include <stdlib.h>
 
 #include "bios_internal.h"
+#include "lift.h"
 
 enum {
     VEC_MOUSE = 0x33, VEC_MOUSE_IRQ = 0x74,
@@ -106,6 +107,60 @@ void mouse_host_button(Machine *m, int button, bool down)
         s->release_x[button] = s->x, s->release_y[button] = s->y;
     }
     post_event(m, (uint16_t)((down ? EV_PRESS0 : EV_RELEASE0) << (button * 2)));
+}
+
+/* pusha; push ds; push es, as the IRQ12 trampoline does. IF is clear across the call:
+ * a safe point must not deliver an IRQ after the event registers are loaded. */
+bool mouse_native_deliver(Machine *m)
+{
+    if (!m->mouse)
+        return false;
+    Mouse *s = mouse_state(m);
+    if (!s->q_count || !s->handler_mask)
+        return false;
+    MouseEvent e = s->queue[s->q_head];
+    s->q_head = (s->q_head + 1) % EVENT_QUEUE;
+    s->q_count--;
+
+    uint32_t flags = m->cpu.flags;
+    uint16_t sp = SP;
+    cpu_push16(m, AX);
+    cpu_push16(m, CX);
+    cpu_push16(m, DX);
+    cpu_push16(m, BX);
+    cpu_push16(m, sp);
+    cpu_push16(m, BP);
+    cpu_push16(m, SI);
+    cpu_push16(m, DI);
+    cpu_push16(m, DS);
+    cpu_push16(m, ES);
+
+    AX = e.mask & s->handler_mask;
+    BX = e.buttons;
+    CX = e.x;
+    DX = e.y;
+    SI = (uint16_t)e.mx;
+    DI = (uint16_t)e.my;
+    m->cpu.flags &= ~(uint32_t)F_IF;
+    guest_call_far(m, s->handler_seg, s->handler_off);
+
+    cpu_set_seg(&m->cpu, S_ES, cpu_pop16(m));
+    cpu_set_seg(&m->cpu, S_DS, cpu_pop16(m));
+    DI = cpu_pop16(m);
+    SI = cpu_pop16(m);
+    BP = cpu_pop16(m);
+    (void)cpu_pop16(m);
+    BX = cpu_pop16(m);
+    DX = cpu_pop16(m);
+    CX = cpu_pop16(m);
+    AX = cpu_pop16(m);
+    m->cpu.flags = flags;
+    return true;
+}
+
+int mouse_queued(Machine *m)
+{
+    return m->mouse ? mouse_state(m)->q_count : 0;
 }
 
 bool mouse_cursor_visible(Machine *m) { return mouse_state(m)->show_count >= 0; }

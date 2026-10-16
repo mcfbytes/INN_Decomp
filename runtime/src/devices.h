@@ -89,6 +89,10 @@ void gameport_init(Machine *m);
 void mouse_host_motion(Machine *m, int x, int y, int frame_w, int frame_h);
 /* Button 0 left, 1 right, 2 middle. */
 void mouse_host_button(Machine *m, int button, bool down);
+/* One queued event, the way the IRQ 12 trampoline enters the user handler. False when none is waiting. */
+bool mouse_native_deliver(Machine *m);
+/* Events waiting for that handler; 0 before mouse_init. */
+int mouse_queued(Machine *m);
 /* The driver's show/hide state, for a frontend-drawn cursor overlay. */
 bool mouse_cursor_visible(Machine *m);
 /* Pointer position in frame pixels, for the overlay. */

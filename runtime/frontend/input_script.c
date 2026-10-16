@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "devices.h"
+#include "host_input.h"
 #include "input_script.h"
 
 enum { MAX_EVENTS = 4096, HOLD_US = 60000, TYPE_GAP_US = 120000, LINE_MAX = 512, PATH_MAX_LEN = 256 };
@@ -145,14 +146,14 @@ static void apply_event(Machine *m, const Event *e)
     static uint32_t frame[VGA_MAX_W * VGA_MAX_H];
     int w, h;
     switch (e->kind) {
-    case EV_KEY_DOWN: kbd_host_key(m, (uint16_t)e->a, true); break;
-    case EV_KEY_UP: kbd_host_key(m, (uint16_t)e->a, false); break;
+    case EV_KEY_DOWN: host_input_key(m, (uint16_t)e->a, true); break;
+    case EV_KEY_UP: host_input_key(m, (uint16_t)e->a, false); break;
     case EV_MOVE:
         vga_render(m, frame, &w, &h);
-        mouse_host_motion(m, e->a, e->b, w, h);
+        host_input_mouse_motion(m, e->a, e->b, w, h);
         break;
-    case EV_BUTTON_DOWN: mouse_host_button(m, e->a, true); break;
-    case EV_BUTTON_UP: mouse_host_button(m, e->a, false); break;
+    case EV_BUTTON_DOWN: host_input_mouse_button(m, e->a, true); break;
+    case EV_BUTTON_UP: host_input_mouse_button(m, e->a, false); break;
     case EV_SHOT:
         if (vga_write_ppm(m, e->path) != 0)
             log_msg("script: cannot write %s", e->path);

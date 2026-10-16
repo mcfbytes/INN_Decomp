@@ -3,6 +3,7 @@
 #include <stdlib.h>
 
 #include "devices.h"
+#include "host_kbd_queue.h"
 
 enum {
     PORT_KBD_DATA = 0x60, PORT_KBD_STATUS = 0x64,
@@ -29,9 +30,15 @@ typedef struct Kbd {
     bool full, enabled, last_was_cmd;
     uint8_t cmd_byte, output_port;
     PendingWrite pending;
+    HostKbdQueue native_q; /* native mode only; the 8042 queue above is the emulated path */
 } Kbd;
 
 static Kbd *kbd_state(Machine *m) { return m->kbd; }
+
+HostKbdQueue *kbd_host_queue(Machine *m)
+{
+    return m->kbd ? &kbd_state(m)->native_q : NULL;
+}
 
 static void enqueue(Kbd *k, uint8_t b)
 {
