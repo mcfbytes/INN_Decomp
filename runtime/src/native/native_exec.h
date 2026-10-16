@@ -20,7 +20,8 @@ void native_run_top(Machine *m);
  * packed program's unpacker ends there). False when it stops elsewhere first. */
 bool native_unpack_to_start(Machine *m);
 
-/* Mixed-mode device hand-off around a child that runs on the emulator (package 10b fills them in). */
+/* Mixed-mode device hand-off around a child that runs on the emulator, only while INN runs natively
+ * (docs/native.md section 11 lists what moves each way). */
 void native_handoff_to_emulator(Machine *m);
 void native_handoff_from_emulator(Machine *m);
 

@@ -4,8 +4,13 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "devices.h"
 #include "dos_int.h"
+#include "host_link.h"
+#include "host_timer.h"
+#include "host_video.h"
 #include "lift_internal.h"
+#include "native.h"
 #include "native_exec.h"
 
 enum { EXEC_FRAMES = 4, TERMINATE_KEEP_NONE = -1, SP_TOP_BYTES = 4 };
@@ -176,7 +181,9 @@ static void run_child(Machine *m, ExecCtx *fr)
         dos_terminate(m, 0, 0, TERMINATE_KEEP_NONE); /* ends the frame through the hook */
         return;
     }
-    native_handoff_to_emulator(m);
+    bool mixed = m->native; /* INN runs natively: the devices change hands around the game */
+    if (mixed)
+        native_handoff_to_emulator(m);
     m->native = false;
     s->c_depth = 0;
     while (!fr->finished && !m->exit_requested && !s->nested_abort) {
@@ -184,11 +191,99 @@ static void run_child(Machine *m, ExecCtx *fr)
         if (s->nested_yield && !s->in_shadow)
             s->nested_yield(m);
     }
-    native_handoff_from_emulator(m);
+    if (mixed)
+        native_handoff_from_emulator(m);
 }
 
-void native_handoff_to_emulator(Machine *m) { (void)m; }
-void native_handoff_from_emulator(Machine *m) { (void)m; }
+/* ---- mixed mode (docs/native.md section 11): the devices change hands around a game ---- */
+
+enum { IVT_VECTORS = 256, IVT_BYTES = IVT_VECTORS * 4, PORT61_GATES = 0x03, PORT61 = 0x61, FIRST_FREE_PARA = 0xA000 };
+
+static uint8_t handoff_ivt[IVT_BYTES]; /* the vectors at hand-off; one game runs at a time */
+static uint16_t handoff_divisor;
+
+/* The machine's tickers stand in for the safe points the game does not have. */
+static void link_ticker(Machine *m) { host_link_pump(m); }
+
+/* True when linear lies in a free block of the DOS arena, memory a program that ended gave back. */
+static bool in_free_memory(Machine *m, uint32_t linear)
+{
+    uint32_t para = linear >> 4;
+    uint16_t mcb = mem_rd16(m, real_addr(DOS_DATA_SEG, DD_FIRST_MCB));
+    for (int guard = 0; guard < 4096; guard++) {
+        uint8_t type = mem_rd8(m, real_addr(mcb, MCB_TYPE));
+        if (type != 'M' && type != 'Z')
+            return false;
+        uint32_t start = (uint32_t)mcb + 1u, end = start + mem_rd16(m, real_addr(mcb, MCB_SIZE));
+        if (para >= start && para < end)
+            return mem_rd16(m, real_addr(mcb, MCB_OWNER)) == 0;
+        if (type == 'Z')
+            return para >= end && para < FIRST_FREE_PARA;
+        mcb = (uint16_t)end;
+    }
+    return false;
+}
+
+/* A vector the game left pointing into memory that is free again is put back to what it was; native
+ * code would otherwise call into whatever DOS loads there next. */
+static void restore_stale_vectors(Machine *m)
+{
+    for (int v = 0; v < IVT_VECTORS; v++) {
+        uint32_t now = mem_rd32(m, (uint32_t)v * 4), before;
+        memcpy(&before, handoff_ivt + v * 4, sizeof before);
+        if (now == before)
+            continue;
+        uint16_t off = (uint16_t)now, seg = (uint16_t)(now >> 16);
+        if (!in_free_memory(m, real_addr(seg, off)))
+            continue;
+        log_msg("native: vector %02X left at %04X:%04X by the game", v, seg, off);
+        mem_wr32(m, (uint32_t)v * 4, before);
+    }
+    uint16_t seg, off;
+    if (mouse_handler(m, &seg, &off) && in_free_memory(m, real_addr(seg, off))) {
+        log_msg("native: mouse handler left at %04X:%04X by the game", seg, off);
+        mouse_drop_handler(m);
+    }
+}
+
+/* In this order: the mode switch (video follows it), the timer, port 61h's speaker gates, the PIC and
+ * the keyboard bytes, a mouse event waiting for its IRQ, the link ticker. Nothing of the native model
+ * keeps a copy of what it gave away. */
+void native_handoff_to_emulator(Machine *m)
+{
+    mem_read_block(m, 0, handoff_ivt, IVT_BYTES);
+    handoff_divisor = host_timer_divisor(m);
+    uint8_t port61 = native_port61(m);
+    uint64_t next_tick = host_timer_next_due_us(m); /* the PIT goes on counting where the native timer is */
+    native_set_active(m, false); /* m->native and m->native_video off; host_video_to_vga */
+    pit_set_timer_divisor(m, handoff_divisor, next_tick > m->virtual_us ? next_tick - m->virtual_us : 0);
+    port_out(m, PORT61, port61 & PORT61_GATES, 1);
+    native_irq_to_pic(m);
+    if (mouse_queued(m))
+        pic_raise_irq(m, PIC_IRQ_MOUSE);
+    machine_add_ticker(m, link_ticker);
+}
+
+/* The reverse: the ticker goes, the video comes back in the mode the VGA device has (text mode if a game
+ * left one the host video does not carry), the native timer takes the PIT's divisor, the speaker gates
+ * come back, masks come from the PIC, and vectors and the mouse handler that point into freed memory are
+ * put right. */
+void native_handoff_from_emulator(Machine *m)
+{
+    machine_remove_ticker(m, link_ticker);
+    m->cpu.halted = m->cpu.yielded = false;
+    uint8_t mode = vga_mode(m);
+    if (mode != HOST_VIDEO_TEXT80 && mode != HOST_VIDEO_320X200X8) {
+        log_msg("native: the game left video mode %02X; back to text mode", mode);
+        vga_set_mode(m, HOST_VIDEO_TEXT80, true);
+    }
+    uint8_t gates = (uint8_t)port_in(m, PORT61, 1) & PORT61_GATES;
+    native_set_active(m, true); /* host_video_init takes the VGA device's picture */
+    host_timer_set_divisor(m, pit_timer_divisor(m));
+    native_set_port61(m, (uint8_t)((native_port61(m) & ~PORT61_GATES) | gates));
+    native_irq_from_pic(m);
+    restore_stale_vectors(m);
+}
 
 int native_exec(Machine *m, const char *dos_path, const uint8_t *tail, uint16_t env_seg, uint16_t *dos_error)
 {

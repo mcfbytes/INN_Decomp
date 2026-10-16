@@ -69,6 +69,21 @@ static void kbd_deliver(Machine *m)
     pic_raise_irq(m, PIC_IRQ_KEYBOARD);
 }
 
+/* Mixed-mode hand-off: a scancode byte the native queue had not delivered goes to the 8042 as it is. */
+void kbd_host_raw(Machine *m, uint8_t byte)
+{
+    enqueue(kbd_state(m), byte);
+    kbd_deliver(m);
+}
+
+/* Forgets what the 8042 holds (output buffer and queue): the native model starts without it. */
+void kbd_clear(Machine *m)
+{
+    Kbd *k = kbd_state(m);
+    k->head = k->count = 0;
+    k->full = false;
+}
+
 void kbd_host_key(Machine *m, uint16_t set1_scancode, bool down)
 {
     Kbd *k = kbd_state(m);

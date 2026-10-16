@@ -43,6 +43,8 @@ enum {
     NESTED_CHECK_US = 1000,
     LONG_FRAME_US = 100000,    /* --perf reports frames longer than this */    /* emulated time between wall-clock checks in a nested wait */
     NESTED_PRESENT_US = 16667,
+    MIXED_AHEAD_US = 10000,    /* a game on the emulator: sleep once emulated time is this far ahead */
+    MIXED_BEHIND_US = 50000,   /* and drop the lost time once it is this far behind */
     DEFAULT_RUN_MS = 10000,
     ARGS_MAX = 128,
 };
@@ -78,6 +80,7 @@ typedef struct Frontend {
     uint64_t step_wall_us, step_virtual_us; /* at the start of the current frame */
     uint64_t last_present_us;
     uint64_t nested_checked_us;
+    uint64_t mixed_anchor_wall_us, mixed_anchor_virtual_us; /* a game on the emulator: time that corresponds */
     uint64_t slept_us, yields; /* in the current frame, for --perf long-frame reports */
     bool perf; /* emulated time of the last wall-clock check in a nested wait */
     bool quit;
@@ -474,6 +477,34 @@ static void end_windowed(Frontend *f)
 #endif
 }
 
+static void platform_poll_events(void *ctx, Machine *m);
+
+/* A game runs on the emulator inside native_exec (docs/native.md section 11): native_exec steps the machine
+ * and calls this after every step, which does what frame_step does per frame: keep emulated time with the
+ * wall clock, take input, pump audio, draw the VGA device's frame. */
+static void mixed_yield(Machine *m)
+{
+    Frontend *f = g_frontend;
+    if (m->virtual_us - f->nested_checked_us < NESTED_CHECK_US)
+        return;
+    f->nested_checked_us = m->virtual_us;
+    uint64_t now = frame_clock_now_us();
+    int64_t ahead = (int64_t)(m->virtual_us - f->mixed_anchor_virtual_us) -
+                    (int64_t)(now - f->mixed_anchor_wall_us);
+    if (ahead > MIXED_AHEAD_US) {
+        platform_sleep_us(f, (uint64_t)ahead);
+        now = frame_clock_now_us();
+    } else if (ahead < -(int64_t)MIXED_BEHIND_US) {
+        f->mixed_anchor_wall_us = now, f->mixed_anchor_virtual_us = m->virtual_us;
+    }
+    if (now - f->last_present_us < NESTED_PRESENT_US)
+        return;
+    platform_poll_events(f, m);
+    frontend_audio_pump(m);
+    present(f);
+    platform_sleep_us(f, 0); /* a poll loop may take no emulated time; the browser still needs its turn */
+}
+
 static void platform_poll_events(void *ctx, Machine *m)
 {
     Frontend *f = ctx;
@@ -546,6 +577,8 @@ static int run_native(Frontend *f)
     }
     if (run_to_native_start(m)) {
         native_set_active(m, true);
+        f->mixed_anchor_wall_us = frame_clock_now_us(), f->mixed_anchor_virtual_us = m->virtual_us;
+        lift_set_nested_yield(m, f->o->headless ? headless_nested_yield : mixed_yield);
         native_run_top(m);
         native_set_active(m, false);
         if (!f->o->headless)

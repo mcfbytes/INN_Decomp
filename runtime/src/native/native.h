@@ -37,6 +37,11 @@ void native_pic_eoi(Machine *m, int chip, int irq); /* chip 0 master, 1 slave; i
 void native_pic_set_mask(Machine *m, int chip, uint8_t mask);
 uint8_t native_pic_mask(const Machine *m, int chip);
 void native_int(Machine *m, uint8_t vector);       /* INT n without a CPU */
+/* Mixed-mode hand-off (native_exec.c): the native model's masks, in-service bits and undelivered requests go
+ * to the PIC device (and its undelivered keyboard bytes to the 8042), whose copy is empty again afterwards;
+ * and back, where only the masks come over and the device's requests and in-service bits are dropped. */
+void native_irq_to_pic(Machine *m);
+void native_irq_from_pic(Machine *m);
 /* Delivers the highest-priority deliverable request (IF is the caller's concern); false when none. */
 bool native_deliver_irq(Machine *m);
 

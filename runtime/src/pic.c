@@ -216,3 +216,23 @@ void pic_init(Machine *m)
     port_register(m, PIC_SLAVE_CMD, PIC_SLAVE_DATA, pic_in, pic_out);
     pic_update(m);
 }
+
+/* Mixed-mode hand-off: the native interrupt model takes over the chip's masks and requests (docs/native.md
+ * section 11). Lines count as low afterwards, so a device raises its next edge normally. */
+void pic_get_state(Machine *m, int chip, uint8_t *irr, uint8_t *isr, uint8_t *imr)
+{
+    const Pic8259 *p = &pic_state(m)->chip[chip ? 1 : 0];
+    *irr = p->irr;
+    *isr = p->isr;
+    *imr = p->imr;
+}
+
+void pic_set_state(Machine *m, int chip, uint8_t irr, uint8_t isr, uint8_t imr)
+{
+    Pic8259 *p = &pic_state(m)->chip[chip ? 1 : 0];
+    p->irr = irr;
+    p->isr = isr;
+    p->imr = imr;
+    p->lines = 0;
+    pic_update(m);
+}

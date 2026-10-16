@@ -217,6 +217,27 @@ static void pit_tick(Machine *m)
     }
 }
 
+/* Mixed-mode hand-off: channel 0 keeps counting with the divisor the native timer was running (0 =
+ * 65536), in a periodic mode, and its next period ends next_tick_us from now: a counter does not restart
+ * when a program starts. */
+void pit_set_timer_divisor(Machine *m, uint16_t divisor, uint64_t next_tick_us)
+{
+    PitChannel *c = &pit_state(m)->ch[0];
+    if (!periodic(c))
+        c->mode = 3;
+    c->access = ACCESS_LOHI;
+    c->latched = c->read_hi = c->write_hi = false;
+    channel_load(m, c, divisor);
+    uint64_t ahead = next_tick_us * PIT_CLOCK_HZ / 1000000;
+    if (ahead < c->reload)
+        c->start_clock += ahead - c->reload; /* wraps like the clock itself */
+}
+
+uint16_t pit_timer_divisor(Machine *m)
+{
+    return (uint16_t)pit_state(m)->ch[0].reload; /* 65536 reads back as 0 */
+}
+
 double pit_timer_hz(Machine *m)
 {
     return (double)PIT_CLOCK_HZ / pit_state(m)->ch[0].reload;
