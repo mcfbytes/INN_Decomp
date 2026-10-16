@@ -236,7 +236,7 @@ const Adv = (() => {
   // The server side is "Sign-in (server contract)" in docs/web.md; auth.js makes the calls. The flow:
   // cards -> popup (on hold) -> account -> credential written into the install -> dial with the token.
 
-  const sign = { busy: false, cancel: null, last: null, own: false, pick: false, provider: '', pdlgReturn: null };
+  const sign = { busy: false, cancel: null, last: null, own: false, pick: false, provider: '' };
   const signedIn = () => !!InnAuth.token();
   const providerName = (id) => (providers.find((p) => p.id === id) || {}).name || id;
   const who = () => {
@@ -375,32 +375,52 @@ const Adv = (() => {
     if (page.started) return;
     if (!s.accounts.length) {
       if (!s.canCreate) return signFail(new InnAuth.AuthError('closed', 'No lines on this card.'));
-      if (sign.pick) {
-        sign.pick = false;
-        return say(`${intro}No name, no service, I'm afraid. The town directory is very strict about that.`, { actions: [{ label: 'Pick a name', fn: openPersonaDialog }, { label: 'My own number', fn: ownNumber }], focus: true });
-      }
-      say(`${intro}Hello, ${name}. New in town? Then you'll need a name for the directory. Pencil ready.`, { sticky: true });
-      return openPersonaDialog();
+      return openNewLine(`${intro}Welcome, ${name}!`, true);
     }
     if (s.accounts.length === 1 && !sign.pick) {
       const a = s.accounts[0];
-      say(`${intro}Hello, ${name}. Ah, it's ${a.persona}. Putting you through.`, { sticky: true });
+      const who = a.persona ? `Ah, it's ${a.persona}.` : `Line ${a.id}, still unnamed: the client will ask who you are.`;
+      say(`${intro}Hello, ${name}. ${who} Putting you through.`, { sticky: true });
       return setTimeout(() => connectAs(a), lead ? (reduced() ? 1600 : 2600) : 0);
     }
     sign.pick = false;
-    const actions = s.accounts.map((a) => ({ label: `${a.persona} (${a.id})`, fn: () => connectAs(a) }));
-    if (s.canCreate) actions.push({ label: 'Someone new, please', fn: openPersonaDialog });
+    const actions = s.accounts.map((a) => ({ label: a.persona ? `${a.persona} (${a.id})` : `New caller (${a.id})`, fn: () => connectAs(a) }));
+    if (s.canCreate) actions.push({ label: 'Someone new, please', fn: () => openNewLine('', false) });
     actions.push({ label: 'My own number', fn: ownNumber });
     say(`${intro}Hello, ${name}. And who's playing today?`, { actions, focus: true, near: sparkX('phone') });
   }
 
+  // A new line is only an account number and a password. Its persona (name, face, hobbies) is made by the
+  // client's own Select Player screen after the dial, as in the original; the server takes the name it presents.
+  async function openNewLine(lead, first) {
+    say(lead ? `${lead} One moment, the operator is finding you a number…` : 'One moment, the operator is finding you a number…', { sticky: true });
+    try {
+      const a = await attested(() => InnAuth.createAccount());
+      if (!a || !Number.isInteger(a.id)) throw new InnAuth.AuthError('server', 'The new line was not understood.', 201);
+      a.persona = a.persona || null;
+      if (sign.last) sign.last.accounts.push(a);
+      const welcome = first
+        ? `${lead} Your number is ${a.id}. The client will ask who you are, so dress nicely.`
+        : `A new line: number ${a.id}. The client will ask who's calling, so have a name ready.`;
+      say(welcome, { sticky: true });
+      return setTimeout(() => connectAs(a), reduced() ? 1600 : 2600);
+    } catch (e) {
+      if (e.kind === 'limit' && sign.last && sign.last.accounts.length) {
+        sign.last.canCreate = false;
+        sign.pick = true;
+        return chooseLine(sign.last, 'No new lines today: this card has reached its limit (the server answered 429).');
+      }
+      return signFail(e);
+    }
+  }
+
   async function connectAs(a) {
     if (!canDial()) return;
-    say(`Putting ${a.persona} through…`, { sticky: true });
+    say(`Putting ${a.persona || `line ${a.id}`} through…`, { sticky: true });
     try {
       const c = await attested(() => InnAuth.credential(a.id));
       if (!c || c.account !== a.id || typeof c.password !== 'string') throw new InnAuth.AuthError('server', 'The credential answer was not understood.', 200);
-      await writeCredentials(a.id, c.password, a.persona);
+      await writeCredentials(a.id, c.password);
     } catch (e) {
       if (e instanceof InnAuth.AuthError && e.code === 'no_such_account') {
         sign.pick = true;
@@ -427,45 +447,6 @@ const Adv = (() => {
     if (!haveDisks()) return say('Disks first, please. The operator cannot connect an empty box.', { near: sparkX('disks') });
     sign.pick = true;
     withSession((s) => chooseLine(s, ''));
-  }
-
-  // ---- the new-name dialog (the same period dialog as the server address) ----
-
-  function openPersonaDialog() {
-    sign.pdlgReturn = document.activeElement;
-    ui.pers.value = '';
-    ui.persErr.textContent = '';
-    ui.pdlg.hidden = false;
-    ui.pers.focus();
-  }
-
-  function closePersonaDialog(back) {
-    ui.pdlg.hidden = true;
-    if (back && sign.last) { sign.pick = true; chooseLine(sign.last, ''); }
-    else if (sign.pdlgReturn && sign.pdlgReturn.focus && document.contains(sign.pdlgReturn)) sign.pdlgReturn.focus();
-  }
-
-  async function savePersonaDialog() {
-    const name = ui.pers.value.trim();
-    const bad = InnAuth.personaProblem(name);
-    if (bad) { ui.persErr.textContent = bad; ui.pers.focus(); return; }
-    ui.persOk.disabled = true;
-    try {
-      const a = await attested(() => InnAuth.createAccount(name));
-      ui.pdlg.hidden = true;
-      if (!a || !Number.isInteger(a.id)) throw new InnAuth.AuthError('server', 'The new line was not understood.', 201);
-      if (sign.last) sign.last.accounts.push(a);
-      return connectAs(a);
-    } catch (e) {
-      if (e.kind === 'refused') { ui.persErr.textContent = e.message || 'The server did not accept that name.'; ui.pers.focus(); return; }
-      ui.pdlg.hidden = true;
-      if (e.kind === 'limit' && sign.last && sign.last.accounts.length) {
-        sign.last.canCreate = false;
-        sign.pick = true;
-        return chooseLine(sign.last, 'No new names today: this card has reached its limit (the server answered 429).');
-      }
-      return signFail(e);
-    } finally { ui.persOk.disabled = false; }
   }
 
   // ---- coming back: a page load can carry a redirect login, a saved token or a redial ----
@@ -771,7 +752,6 @@ const Adv = (() => {
 
   const openDialog = () => [
     { root: ui.dlg, ctl: [ui.srv, ui.srvOk, ui.srvCancel], input: ui.srv, close: closeServerDialog, save: saveServerDialog },
-    { root: ui.pdlg, ctl: [ui.pers, ui.persOk, ui.persCancel], input: ui.pers, close: () => closePersonaDialog(true), save: savePersonaDialog },
   ].find((d) => !d.root.hidden);
 
   function dialogKey(e, d) {
@@ -1014,21 +994,8 @@ const Adv = (() => {
         el('p', { className: 'hint', textContent: 'Where the game server listens, such as ws://host:2316. Leave it empty for the default.' }),
         ui.srv, ui.srvErr, el('div', { className: 'acts' }, ui.srvOk, ui.srvCancel)));
     ui.dlg.firstChild.setAttribute('aria-labelledby', 'dlg-title');
-    ui.pers = el('input', { id: 'adv-pers', className: 'input', type: 'text', maxLength: 10, spellcheck: false, autocomplete: 'off' });
-    ui.persErr = el('p', { className: 'err', role: 'alert' });
-    ui.persOk = el('button', { type: 'button', className: 'abtn primary', textContent: 'OK' });
-    ui.persCancel = el('button', { type: 'button', className: 'abtn', textContent: 'Cancel' });
-    ui.pdlg = el('div', { id: 'pdlg', className: 'adv dlg', hidden: true },
-      el('div', { role: 'dialog', ariaModal: 'true', className: 'box' },
-        el('h2', { id: 'pdlg-title', textContent: 'Your name in town' }),
-        el('p', { className: 'hint', textContent: 'The name other players will see, and the one on your player card: 1 to 10 letters or digits.' }),
-        ui.pers, ui.persErr, el('div', { className: 'acts' }, ui.persOk, ui.persCancel)));
-    ui.pdlg.firstChild.setAttribute('aria-labelledby', 'pdlg-title');
     ui.iris = el('div', { id: 'iris', hidden: true });
-    document.body.append(files, bar, ui.pop, ui.inv, ui.narr, ui.nowp, ui.term, ui.dlg, ui.pdlg, ui.iris);
-    ui.persOk.addEventListener('click', savePersonaDialog);
-    ui.persCancel.addEventListener('click', () => closePersonaDialog(true));
-    ui.pdlg.addEventListener('pointerdown', (e) => { if (e.target === ui.pdlg) closePersonaDialog(true); });
+    document.body.append(files, bar, ui.pop, ui.inv, ui.narr, ui.nowp, ui.term, ui.dlg, ui.iris);
     ui.narr.addEventListener('keydown', (e) => {
       if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
       const list = [...ui.narr.querySelectorAll('button')];

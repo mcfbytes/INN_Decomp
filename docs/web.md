@@ -203,8 +203,9 @@ repository; this is the browser side.
   `INN\LL` and `INN\SL` (CasinoLand and SierraLand personas) and the CasinoLand bankroll `INN\LL$$<n>.DAT`
   (`LLSYSTEM.DAT`, CasinoLand's access password, stays local). The host
   enforces the same list. Names are matched without regard to case against the drive's own spelling.
-  While a signed-in line is dialed the list narrows to the character files and that persona's own `.DTA`
-  files, and `INN\PLAYER.DIR` stays out (see "The persona on the drive").
+  While a signed-in line is dialed `PLAYER.DIR` and the `.DTA` files are that account's own: the drive shows
+  one view of them at a time (see "The persona on the drive"). On the way back from the host, a `.DTA` is
+  written only when the `PLAYER.DIR` beside it names it.
 - **When.** The host sends a manifest as soon as the line has logged on (`LoginAccepted`); before that it
   answers `not_logged_on`. For each path, comparing the local SHA-256 with the hash and version last
   synced (kept in `localStorage` per account):
@@ -315,11 +316,13 @@ list) nothing changes: phone, then dial. With providers, the flow below runs (co
    operator has put you on hold (tiny hold-music notes; "Hang up on the operator" closes the popup). If the popup
    is blocked, the page redirects in the same window instead and takes the result from the address fragment.
 3. *The card.* On success a calling-card icon joins the disk icon in the inventory and the score gains 5. Each
-   INN account a sign-in owns is one persona (the account number and its name in town). A first sign-in has none,
-   so the narrator asks for a name straight away ("Your name in town": 1 to 10 of A-Z, a-z, 0-9; the innkeeper
-   docs set no persona rule, so this is the page's own, and the server may be stricter); cancelling offers
-   "Pick a name" or "My own number". One account is used straight away; several give "And who's playing today?"
-   with a button per persona, plus "Someone new, please" when the server says `canCreate`, and "My own number".
+   INN account a sign-in owns is a line: an account number and a password, and a persona (a name, a face) that the
+   original client makes at its own Select Player screen after the dial (see "The persona on the drive"). A first
+   sign-in has no account, so the page opens one with no name and no dialog, and the narrator says "Welcome,
+   Caller 7F3A! Your number is 100003. The client will ask who you are, so dress nicely." before dialing. One account
+   is used straight away; several give "And who's playing today?" with a button per line (the persona, or "New
+   caller (100003)" while it has none), plus "Someone new, please" (another empty account) when the server says
+   `canCreate`, and "My own number".
 4. *Credentials, then dial.* The page fetches the account's credential and writes it into the browser's copy of
    the install (below), then dials with the session token on the WebSocket address. The modem box gains an
    `AT+CARD=<provider id>` line before `ATDT`.
@@ -368,9 +371,9 @@ page shows `message` for a 4xx it does not know):
 |---|---|---|
 | `GET /auth/providers` | 200 `[{"id": "example", "name": "Example Phone Co.", "url": "/auth/login?provider=example"}]` | anything else, or `[]`: sign-in stays off. `url` is relative to the auth origin or absolute on it; any other origin is ignored. `name` is shown as text only. |
 | `GET <url>&return=<page URL>&mode=popup` | the login (consent) page; ends on `/auth/callback` | 400 for an unknown provider or a `return` whose origin is not an allowed page origin |
-| `GET /auth/session`, `Authorization: Bearer <token>` | 200 `{"identity": {"handle": "Caller 7F3A", "provider": "<id>"}, "accounts": [{"id": 100001, "persona": "Guybrush"}], "canCreate": true, "attested": {"age": 18, "terms": 1}}` (`attested` is `null` when none is on record) | 401: token missing, unknown or expired |
+| `GET /auth/session`, `Authorization: Bearer <token>` | 200 `{"identity": {"handle": "Caller 7F3A", "provider": "<id>"}, "accounts": [{"id": 100001, "persona": "Guybrush"}, {"id": 100002, "persona": null}], "canCreate": true, "attested": {"age": 18, "terms": 1}}` (`attested` is `null` when none is on record) | 401: token missing, unknown or expired |
 | `POST /auth/attest`, `{"attest": "18+v2"}` | 204; the answer is stored on the identity | 400 `bad_attest`; 401 |
-| `POST /auth/accounts`, `{"persona": "Elaine"}` | 201 `{"id": 100002, "persona": "Elaine"}` | 401; 403 `enrolment_closed`; 403 `attest_required`; 400 `bad_persona`; 409 `persona_taken`; 429 `rate_limited` |
+| `POST /auth/accounts`, `{}` (an empty body works too) | 201 `{"id": 100002, "persona": null}`: an account with a number and a password and no persona yet. A body `{"persona": "Elaine"}` still works (1 to 10 of A-Z, a-z, 0-9, unique without regard to case) and answers `"persona": "Elaine"`; the page no longer sends it | 401; 403 `enrolment_closed`; 403 `attest_required`; 400 `bad_persona`; 409 `persona_taken` (only with a given persona); 429 `rate_limited` |
 | `POST /auth/accounts/<id>/credential` | 200 `{"account": 100002, "password": "K3J9QWZ7"}`; every call rotates the password | 401; 404 when the identity does not own `<id>` |
 | `GET /auth/accounts/<id>/saves` | 200 `{"account": 100002, "files": [{"path": "INN\\ELAINE.DTA", "version": 3, "hash": "<sha-256 hex>", "size": 69, "mtime": 1760000000000, "current": true, "data": "<base64>"}]}`: the files the save channel would hand that account, with `data` for as many as fit in 2 MiB in all (the rest come without it); `?path=<DOS path, URL-encoded>` answers one entry, always with `data` | 401; 404 `no_such_account` when the identity does not own `<id>`; with `?path=`: 400 `bad_path`, 404 `no_such_file` |
 | `POST /auth/logout` | 204 and the token is revoked | the page forgets the token whatever the answer |
@@ -389,6 +392,11 @@ What the page does with the answers it does not just show:
 | any other callback code | "Sign-in did not finish (<code>)" |
 
 Every message is a narrator box with the fact first (what failed, the status or code), then a dry remark.
+
+`persona` is `null` until the original client has named one: its Select Player screen makes the persona (name,
+face, hobbies), and the name it presents on its 40/4 after the Login becomes the account's persona on the server
+(TSN-INN-Decomp `docs/server/innkeeperd.md` sections 5 and 8.4). The page shows it, or "New caller (<id>)" while it is
+`null`.
 
 `id` is a positive integer below 2^32 (it becomes the `id` key of `LSCI.CFG`). `password` is 6 to 10 of A-Z and
 0-9 (the stored form is 6 to 10 characters; innkeeper `docs/protocol/messages.md` section 4.1); the page refuses
@@ -466,95 +474,92 @@ with no live token is a 401. One known leak: if the runtime cannot open the sock
   (captures.md section 4). `tools/test_auth.js` checks the encoder against that capture: `SWORDFISH` gives
   `1d 7a 01 66 16 66 18 73 03 00`.
 
-The client sends the persona name it holds in `PLAYER.DIR` on its Login; `innkeeperd` accepts it and keeps the
-persona chosen on the web as the stored one. "I have my own number" uses whatever the install now holds, which
-after a sign-in dial is the last credential written (and the persona files of that line, below).
-`writeCredentials` also writes the persona.
+The client sends the persona it picked in Select Player as the Login's name and again in a 40/4; `innkeeperd`
+accepts the Login and stores the 40/4 name as the account's persona. "I have my own number" uses whatever the install
+now holds, which after a sign-in dial is the last credential written. `writeCredentials` then gives the drive the
+account's own view of the persona files and fetches them (below). It writes no persona of its own.
+
+**The first sign-in.** After the sign-in, an identity with no account gets one at once, with no question: the page
+posts `{}`, the narrator says "Welcome, Caller 7F3A! Your number is 100003. The client will ask who you are, so dress
+nicely.", and the line is dialed. Several accounts: "And who's playing today?" shows one button per account, the
+persona or "New caller (100003)", then "Someone new, please" (another empty account, no dialog) and "My own number".
 
 ### The persona on the drive
 
-Without this the client would offer, and log on with, whatever personas the install zip held (`PLAYER.DIR`,
-`<NAME>.DTA`), not the persona of the web account. Reading the client's own scripts (the hub scripts: the character
-editor, the "Select Player" screen and the persona record's `readFrom` and `writeTo` methods) gave the whole
-format, and persona files the client itself had written agree with it byte for byte, so the page writes the
-files itself. Nothing here is Sierra data: the format is described below, and the faces are made by the page.
+The web makes only the account. The persona is made by the original client itself: Select Player lists what
+`INN\PLAYER.DIR` names and reads each persona from its `.DTA`, and its Create button runs the client's own editor
+(name, age and town, then the look, hobbies and skills). A brand-new account therefore starts with no `PLAYER.DIR`
+at all: the client says its welcome, offers the INN Guide, and opens a Select Player screen with only Create enabled.
+(Checked with a missing `PLAYER.DIR`, in headless Chromium: Play, Change and Delete are greyed out and Create is
+live.) The page writes `GUIDE.CFG` (two zero bytes) when it is missing; the welcome and the Guide question still
+come, since they follow from having no persona.
 
-*PLAYER.DIR* is a text file: one persona name per line, each ended by CR LF (`Elaine`, CR, LF). "Select Player"
-shows one card per line.
+*PLAYER.DIR* is a text file: one persona name per line, each ended by CR LF (`Zelda`, CR, LF). The *persona
+file* is `<first 8 characters of the name, upper case>.DTA` in the same directory. Its layout, which the client
+writes and the page only copies: the word 12, the home town (length word, text, zero), eight words (three look
+words, two hobby words, age, two mail box words), 16 skill levels, 8 preference bytes and 9 words of cursor
+positions, 65 bytes plus the town. The same pair of files exists in `INN\LL` and `INN\SL`.
 
-*The persona file* is `<first 8 characters of the name, upper case>.DTA` in the same directory (the client keeps
-only 8 characters: its Create screen says "That file name is already in use (the first 8 characters)"). All numbers
-are little-endian:
+**One view of the persona files at a time.** One INN account can hold several personas, and the drive is one
+install shared by every account that signs in on this browser, so the page keeps only one view's `PLAYER.DIR` and
+persona `.DTA` files (the hub's, CasinoLand's and SierraLand's; never `PASS_SET.DTA`) in the places the client reads.
+A *view* is `own` (whatever the install came with, say the zip's Guybrush) or an account number. The other views
+wait in `INNVIEWS/<view>/INN/...` at the top of the drive, with their modification times, and
+`INNVIEWS/ACTIVE` names the view on the drive (missing means `own`). `InnSaves.useView(view)` (`saves.js`) stashes
+the active view's files and restores the wanted view's, moving files and never deleting them, so the install's
+personas are never lost and are put back byte for byte:
 
-| Offset | Size | Content |
-|---|---|---|
-| 0 | word | 12, the format marker (any other value makes the client treat the file as unreadable) |
-| 2 | word | the home town's length, counting the zero below |
-| 4 | text | the home town, then one zero byte |
-| next | 8 words | look 1, look 2, look 3, hobbies, hobbies, age, mail box (low), mail box (high) |
-| next | word + 16 bytes | 16, then 16 skill levels (3 for a new persona) |
-| next | 8 bytes | preferences: 12, 0, 0, 7, 15, 3, 0, 0 |
-| next | 9 words | two cursor positions (999, 997) and seven zeros |
+- `writeCredentials` (a signed-in line) calls `useView(<account>)` and then `prefetchSaves`. The client sees only
+  that account's personas. Two accounts on one install never see each other's, and a new account's view is empty.
+- `start()` without a session (a classic dial, "My own number") calls `useView('own')`.
+- None of this is uploaded: files in `INNVIEWS` are not on the save allowlist. What syncs is the active view's
+  files, as before (`INN\PLAYER.DIR`, `INN\*.DTA`, the `LL` and `SL` pairs), now in the account's save space, so a
+  persona created in one browser is there in another.
 
-That is 65 bytes plus the length of the home town. The three look words are bit fields, each limited by the
-character editor to 0 to count-1: *look 1* has bit 0 for female (the face-hair button then reads "Jewelry"),
-skin in bits 1 to 3 (5 choices), head in bits 4 to 6 (8), face hair 7 to 9 (8), eyebrows 10 to 12 (8);
-*look 2* has glasses in bits 0 to 2 (8), eyes 3 to 5 (8), nose 6 to 8 (8), mouth 9 to 11 (8), hair colour 12 to 15
-(14); *look 3* has clothes in bits 0 to 3 (13), hair style 4 to 8 (25), hats 9 to 12 (12), clothes colour 13 to 15
-(8). The two hobby words are 0xFEFF for "none chosen"; the age is 1 to 999 (the page writes 18); the mail box is
-zero when blank. `tools/test_auth.js` checks the writer against that table.
+A persona the client creates reaches the server at the first manifest after the Login (the page then uploads every
+changed file), and the client's 40/4 sets the account's persona name there.
 
-**What the page does**, when it puts a line through (`writePersona` in `page.js`, after `writeCredentials`):
+**PLAYER.DIR is authoritative.** The save channel has no delete. If the player deletes a persona in the client
+(Select Player, Delete), the client rewrites `PLAYER.DIR` without the name and removes the `.DTA`, but the host still
+holds the `.DTA`. A `.DTA` therefore comes back from the host (the HTTP prefetch or the manifest) only when the
+`PLAYER.DIR` on the drive names it (`mayRestore`; `PLAYER.DIR` itself is handled first). The new, shorter
+`PLAYER.DIR` is uploaded as the account's current one. A stray `.DTA` that is already on the drive still follows the
+ordinary rules, and the host keeps its history for a restore by the operator.
 
-1. `PLAYER.DIR` is rewritten to name only this line's persona. The file is the page's: while a signed-in line is
-   dialed it is not part of the save space (`InnSaves.setLine`), so it is neither uploaded nor replaced. Other
-   personas' files stay on the drive, unlisted.
-2. If the drive has no `<STEM>.DTA` for the persona, a new one is written, with the face chosen by a small seeded
-   generator from the account number (the same account always gets the same face in any browser), the home town
-   `Town`, age 18, no hobbies and default skills. An existing file (the same account's earlier session) is
-   not touched.
-3. `GUIDE.CFG` (two zero bytes) is written if missing, so the client does not run its first-run welcome.
-4. The saves (above) take only the character files and this persona's `.DTA` files while the line is dialed. The
-   made-up file is recorded as a *seed* for the account (`inn.seed.<account>` in `localStorage`): when the host's
-   manifest arrives, a seeded file that the host also holds is replaced by the host's copy whatever the clocks
-   say, and one the host does not hold is uploaded as the account's first copy. `tools/test_saves.js` runs that
-   against a scripted host.
-5. "I have my own number" and the classic card clear the filter: everything in the install syncs as before.
+**Fetched before the dial.** The client reads its personas once, at Select Player, before the host's manifest
+exists (the manifest comes after the Login), so a browser that has never held the account would show an empty list
+(and its Create would then write over the host's files). `writeCredentials` therefore calls `prefetchSaves`
+(`page.js`) after `useView`: `GET /auth/accounts/<id>/saves` with the session token (8 s timeout), then
+`InnSaves.prefetch` (`saves.js`) writes each file the line may sync (never `PASS_SET.DTA`, never `INNVIEWS`; a `.DTA`
+only if `PLAYER.DIR` names it) into the drive with the host's modification time and records its version and hash as
+synced (the per-account `localStorage` record), so the first manifest neither uploads nor downloads. Files the
+listing left without bytes are fetched one by one with `?path=`. A hash that does not match is refused and counted. A
+local file is replaced when it is missing or has not changed since the last sync, and also when this browser has never
+synced the account at all, since then nothing in the install can be a newer copy of the account's (the install's own
+starting `MYCHARS.DAT`, say): the browser's file is kept beside it with the extension `.OLD`, which is not a save name
+and never syncs. Any other differing file is left for the manifest and the host's modification-time rule.
 
-Two accounts that share an install therefore never see each other's personas, and the install's own personas
-(say the one in the zip) are never uploaded to a web account.
+If the call fails (the server does not answer, 5xx, a hash mismatch) the line is dialed anyway: the narrator says in
+a box that the saved files could not be fetched and why, then dials after a pause of about 3 s, and the modem output
+gets `; SAVES NOT FETCHED (...)`. "I have my own number" does not call the route. `tools/test_saves.js` covers the
+views, the prefetch rules and the `PLAYER.DIR` rule against a scripted host and an in-memory drive;
+`tools/mock_auth.py --save ID:PATH=FILE` serves the route for page-only runs, and its `POST /auth/accounts` takes
+`{}`.
 
-**Fetched before the dial.** The client reads its persona once, at "Select Player", before the host's manifest
-exists (the manifest comes after the Login), so a browser that has never held the account used to show and keep
-the made-up persona, and write it back over the file the sync had just restored (verified: version 5 restored,
-then the client uploaded version 6). Now `connectAs` goes through `writeCredentials`, which, after the credential
-call and before `writePersona`, calls `prefetchSaves` (`page.js`): `GET /auth/accounts/<id>/saves` with the session
-token (8 s timeout), then `InnSaves.prefetch` (`saves.js`) writes each file the line may sync (the same filter
-as above, so never `PASS_SET.DTA`, `PLAYER.DIR` or another persona's file) into the drive with the host's
-modification time and records its version and hash as synced (the per-account `localStorage` record), so the
-first manifest neither uploads nor downloads. Files the listing left without bytes are fetched one by one with
-`?path=`. A hash that does not match is refused and counted. A local file is replaced when it is missing, is a
-made-up seed, or has not changed since the last sync; and also when this browser has never synced the account
-at all, since then nothing in the install can be a newer copy of the account's (the install's own starting
-`MYCHARS.DAT`, say): the browser's file is kept beside it with the extension `.OLD`, which is not a save name
-and never syncs. Any other differing file is left for the manifest and the host's modification-time rule, as
-before. Because the persona file is already there, `writePersona` finds it and writes no made-up one.
+Verified 2026-10-16 in headless Chromium against the real `innkeeperd` and `dev-oidc` (one run plain, one with
+`--public --sandbox`; "My own number" needs the plain run, since a public host takes no line without a sign-in): a
+first sign-in with a new subject showed no dialog, the narrator welcome, and a Select Player with only Create. The
+persona Zelda was created in the client's editor (name, age, town, a changed hair style and clothes, Save) and
+played to the town map; the host held the account's persona as Zelda and the session JSON listed it. After the game's
+Exit, `ZELDA.DTA` (71 bytes) and `PLAYER.DIR` were on the host. A fresh browser profile with the same subject showed
+Zelda with the same looks, her `.DTA` and `PLAYER.DIR` byte-identical, and the host's versions did not change at its
+logon. In that profile "My own number" showed the zip's own `GUYBRUSH.DTA` and `PLAYER.DIR`, byte-identical to the
+zip's, with no Zelda; "Someone new, please" made a second account whose Select Player was empty (only Create).
 
-If the call fails (the server does not answer, 5xx, a hash mismatch) the line is dialed anyway as it always was:
-the narrator says in a box that the saved files could not be fetched and why, then dials after a pause of about
-3 s, and the modem output gets `; SAVES NOT FETCHED (...)`. "I have my own number" does not call the route.
-`tools/test_saves.js` covers the rules against a scripted listing; `tools/mock_auth.py --save ID:PATH=FILE`
-serves the route for page-only runs.
-
-Verified 2026-10-16 in headless Chromium against the real `innkeeperd --public --sandbox` (seccomp kill mode) and
-`dev-oidc`: profile A signed in, opened the line Elaine, dialed, changed the persona's skin bits and wrote a
-`MYCHARS.DAT` through the drive, and pushed (host: `ELAINE.DTA` version 3). A fresh profile B signed in with the
-same subject and dialed: before the Login its `ELAINE.DTA` and `MYCHARS.DAT` were byte-identical to A's, Select
-Player showed A's looks, and the host's versions were unchanged after B's logon. With the saves call aborted or
-answered 503 the dial went on with the note.
-
-*Known limits.* Two personas whose first 8 characters match (`Abcdefgh1`,
-`Abcdefgh2`) share one file name; the page does not try to tell them apart.
+*Known limits.* Two personas whose first 8 characters match (`Abcdefgh1`, `Abcdefgh2`) share one file name; the
+page does not try to tell them apart. The client's first-run welcome and Guide question come for every new account,
+as in the original. A persona made while the server is unreachable stays in the browser until the next manifest. The
+CasinoLand and SierraLand pairs follow the same views, but only the hub's was exercised.
 
 ## Legal pages and the age notice
 
@@ -595,8 +600,8 @@ server-side record exist so the operator can show that adults were asked and agr
 ```
 python3 tools/mock_auth.py --port 2843 --page-origin http://127.0.0.1:8080 --accounts 100001:Guybrush --enrol open
 # page: http://127.0.0.1:8080/inn.html?auth=http://127.0.0.1:2843&com1=ws://127.0.0.1:2316
-node tools/test_auth.js          # encoder, LSCI.CFG edit, persona rule and persona files
-node tools/test_saves.js         # the signed-in line's save filter and the seeded persona file
+node tools/test_auth.js          # encoder, LSCI.CFG edit, the null persona and the empty account call
+node tools/test_saves.js         # the persona views, the prefetch and the PLAYER.DIR rule
 ```
 
 Flags for the error paths: `--attest-required` makes `POST /auth/accounts` answer 403 `attest_required` until the

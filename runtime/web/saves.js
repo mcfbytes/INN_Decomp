@@ -2,7 +2,8 @@
 // project's docs/server/saves.md). Characters, automaps and persona files in the C: drive are kept per
 // account on the host over the same WebSocket as COM1, as JSON text frames. The runtime hands those
 // frames to Module.onControlText and sends them with Module.sendControl; closing a file the program
-// wrote arrives as Module.onFileClosed.
+// wrote arrives as Module.onFileClosed. Each account (and the install's own number) has its own view of the
+// persona files on the drive, PLAYER.DIR and the .DTA files: see useView.
 'use strict';
 
 const InnSaves = (() => {
@@ -20,13 +21,14 @@ const InnSaves = (() => {
   const PERSONA = /^INN\\(?:LL\\|SL\\)?([A-Z0-9_$-]{1,8})\.DTA$/;
   const BANKROLL = /^INN\\LL\$\$[0-9]{1,4}\.DAT$/;
   const PASSWORD_STEM = 'PASS_SET';
-  const SEED_PREFIX = 'inn.seed.';
+  // The drive's persona files belong to one view at a time: the install's own, or one signed-in account's.
+  // The other views' files wait in VIEW_DIR/<view>/..., and VIEW_DIR/ACTIVE names the view on the drive.
+  const VIEW_DIR = 'INNVIEWS';
+  const PERSONA_DIRS = ['INN', 'INN\\LL', 'INN\\SL'];
 
   let env = null;            // { fs, drive, log, notify, persist, send, status, saved }
   let account = null;        // set by the first manifest of this connection
   let state = {};            // path -> { version, hash }: what this browser last synced
-  let seeds = {};            // path -> hash of a file the page made up for this account (the host's copy wins over it)
-  let line = null;           // { stem } while a signed-in account's line is dialed: only that persona's files sync
   let nextId = 1;
   const pending = new Map(); // request id -> { resolve, timer }
   const timers = new Map();  // path -> debounce timer
@@ -47,15 +49,25 @@ const InnSaves = (() => {
     return m && m[1] !== PASSWORD_STEM ? path : null;
   }
 
-  // While a signed-in line is dialed, the install is shared with other accounts and with whatever personas the
-  // zip held, so only this persona's files (by the file name stem) and the character files go through the
-  // account's save space. The hub's PLAYER.DIR is written by the page for the line and never synced.
-  function allowed(path) {
-    if (!line) return true;
-    if (path === 'INN\\PLAYER.DIR') return false;
-    const m = PERSONA.exec(path);
-    return !m || m[1] === line.stem;
+  // The persona names a PLAYER.DIR lists (the first 8 characters, upper case: the client's file stems). The
+  // list is authoritative for what comes back from the host: a persona the player deleted in the client is
+  // gone from the list, and its .DTA must not return from the host's copy.
+  function listedStems(dirRel) {
+    const dir = readLocal(`${dirRel}\\PLAYER.DIR`);
+    if (!dir) return new Set();
+    const names = new TextDecoder('latin1').decode(dir.data).split(/\r?\n/).map((n) => n.trim()).filter(Boolean);
+    return new Set(names.map((n) => n.slice(0, 8).toUpperCase()));
   }
+
+  // True for a persona file the host may put back: PLAYER.DIR itself, or a .DTA its PLAYER.DIR names.
+  function mayRestore(path) {
+    const m = PERSONA.exec(path);
+    if (!m) return true;
+    return listedStems(path.slice(0, path.lastIndexOf('\\'))).has(m[1]);
+  }
+
+  // PLAYER.DIR first, so the lists are in place when the .DTA files are judged.
+  const dirsFirst = (paths) => [...paths].sort((a, b) => Number(/PLAYER\.DIR$/.test(b)) - Number(/PLAYER\.DIR$/.test(a)));
 
   function toBase64(bytes) {
     let text = '';
@@ -150,13 +162,13 @@ const InnSaves = (() => {
 
   // Every allowlisted file the drive has now.
   function localPaths() {
-    const found = FIXED.filter((rel) => allowed(rel) && hostPath(rel));
+    const found = FIXED.filter((rel) => hostPath(rel));
     for (const dir of ['INN', 'INN\\LL', 'INN\\SL']) {
       const host = hostPath(dir);
       if (!host) continue;
       for (const name of env.fs.readdir(host)) {
         const rel = canonical(`${dir}\\${name}`);
-        if (rel && allowed(rel) && !found.includes(rel)) found.push(rel);
+        if (rel && !found.includes(rel)) found.push(rel);
       }
     }
     return found;
@@ -168,18 +180,9 @@ const InnSaves = (() => {
     try { state = JSON.parse(localStorage.getItem(STATE_PREFIX + account)) || {}; } catch { state = {}; }
   }
 
-  function loadSeeds() {
-    try { seeds = JSON.parse(localStorage.getItem(SEED_PREFIX + account)) || {}; } catch { seeds = {}; }
-  }
-
-  function saveSeeds() {
-    try { localStorage.setItem(SEED_PREFIX + account, JSON.stringify(seeds)); } catch { /* kept for this visit only */ }
-  }
-
   function remember(path, version, hash) {
     state[path] = { version, hash };
     try { localStorage.setItem(STATE_PREFIX + account, JSON.stringify(state)); } catch { /* kept for this visit only */ }
-    if (seeds[path]) { delete seeds[path]; saveSeeds(); }
   }
 
   // ---- talking to the host ----
@@ -261,12 +264,9 @@ const InnSaves = (() => {
     const local = readLocal(path);
     if (!server && !local) return;
     if (!server) return upload(path);
-    if (!local) return download(path);
+    if (!local) return mayRestore(path) ? download(path) : undefined;
     if (local.hash === server.hash) { remember(path, server.version, server.hash); return; }
     const synced = state[path];
-    // A file the page made up for this account (a new persona's looks): the host's copy, if it has one,
-    // is the real one, whatever the clocks say.
-    if (!synced && seeds[path] === local.hash) return download(path);
     const localChanged = !synced || synced.hash !== local.hash;
     const serverChanged = !synced || synced.version !== server.version;
     if (!localChanged && serverChanged) return download(path);
@@ -274,9 +274,9 @@ const InnSaves = (() => {
   }
 
   async function onManifest(message) {
-    if (account !== message.account) { account = message.account; loadState(); loadSeeds(); }
-    const byPath = new Map(message.files.filter((f) => allowed(f.path)).map((f) => [f.path, f]));
-    const paths = new Set([...byPath.keys(), ...localPaths()]);
+    if (account !== message.account) { account = message.account; loadState(); }
+    const byPath = new Map(message.files.filter((f) => canonical(f.path) === f.path).map((f) => [f.path, f]));
+    const paths = dirsFirst(new Set([...byPath.keys(), ...localPaths()]));
     restored = 0;
     env.status(`Syncing ${paths.size} save file${paths.size === 1 ? '' : 's'} with the server...`);
     for (const path of paths) {
@@ -307,7 +307,7 @@ const InnSaves = (() => {
   // The program closed a file it wrote, or renamed one onto this DOS path.
   function onFileClosed(dosPath) {
     const rel = canonical(dosPath.replace(/^[A-Za-z]:/, ''));
-    if (rel && allowed(rel) && account !== null) schedule(rel);
+    if (rel && account !== null) schedule(rel);
   }
 
   function cancelTimers() {
@@ -371,56 +371,99 @@ const InnSaves = (() => {
   // The page may bind the drive early (before the dial, for `prefetch`) and the rest later; later values win.
   function init(environment) { env = Object.assign({}, env, environment); }
 
-  // The page's own account for this connection: persona is the line's persona name, or null for a line that
-  // has no sign-in (everything in the install syncs, as before).
-  function setLine(persona) { line = persona ? { stem: persona.slice(0, 8).toUpperCase() } : null; }
+  // ---- one view of the persona files at a time ----
 
-  // A file the page just made for this account. `hash` is its SHA-256; the account number is the one the
-  // server will send in its manifest (the page knows it from sign-in).
-  function seed(forAccount, path, hash) {
-    let all = {};
-    try { all = JSON.parse(localStorage.getItem(SEED_PREFIX + forAccount)) || {}; } catch { all = {}; }
-    all[path] = hash;
-    try { localStorage.setItem(SEED_PREFIX + forAccount, JSON.stringify(all)); } catch { /* the seed is lost with the visit */ }
+  // The client's Select Player lists whatever PLAYER.DIR names in the install, so each signed-in account sees
+  // its own personas, and "my own number" the install's, by keeping only one view's persona files (PLAYER.DIR
+  // and the .DTA files of the hub, CasinoLand and SierraLand; never PASS_SET.DTA) on the drive. The others wait
+  // in INNVIEWS/<view>/, moved there whole with their modification times and never uploaded; INNVIEWS/ACTIVE
+  // names the view on the drive (missing means the install's own, "own"). A view is "own" or an account number.
+  // Returns true when the drive changed (the caller persists it). A new account's view is empty, so Select
+  // Player offers only Create.
+  function activeView() {
+    try { return new TextDecoder().decode(env.fs.readFile(`${env.drive}/${VIEW_DIR}/ACTIVE`)).trim() || 'own'; } catch { return 'own'; }
+  }
+
+  function personaFiles() {
+    const found = [];
+    for (const dir of PERSONA_DIRS) {
+      const host = hostPath(dir);
+      if (!host) continue;
+      for (const name of env.fs.readdir(host)) {
+        const rel = canonical(`${dir}\\${name}`);
+        if (rel && (rel.endsWith('\\PLAYER.DIR') || PERSONA.test(rel))) found.push({ dir, name, from: `${host}/${name}` });
+      }
+    }
+    return found;
+  }
+
+  function moveFile(from, to) {
+    const slash = to.lastIndexOf('/');
+    env.fs.mkdirTree(to.slice(0, slash));
+    const mtime = +env.fs.stat(from).mtime;
+    env.fs.writeFile(to, env.fs.readFile(from));
+    env.fs.utime(to, mtime, mtime);
+    env.fs.unlink(from);
+  }
+
+  function useView(view) {
+    view = String(view);
+    const now = activeView();
+    if (now === view) return false;
+    const stash = `${env.drive}/${VIEW_DIR}`;
+    for (const f of personaFiles()) moveFile(f.from, `${stash}/${now}/${f.dir.replace(/\\/g, '/')}/${f.name}`);
+    const back = `${stash}/${view}`;
+    for (const dir of PERSONA_DIRS) {
+      const sub = `${back}/${dir.replace(/\\/g, '/')}`;
+      let names = [];
+      try { names = env.fs.readdir(sub).filter((n) => n !== '.' && n !== '..'); } catch { names = []; }
+      const into = hostPath(dir) || `${env.drive}/${dir.replace(/\\/g, '/')}`;
+      for (const name of names) {
+        if (env.fs.isDir(env.fs.stat(`${sub}/${name}`).mode)) continue; // INN\\LL is its own entry
+        moveFile(`${sub}/${name}`, `${into}/${name}`);
+      }
+    }
+    env.fs.mkdirTree(stash);
+    env.fs.writeFile(`${stash}/ACTIVE`, new TextEncoder().encode(view));
+    env.log(`saves: the drive now shows ${view === 'own' ? "the install's own personas" : `account ${view}'s personas`}`);
+    return true;
   }
 
   // Before a signed-in line dials: write the account's files from the server's HTTP listing (innkeeperd
   // `GET /auth/accounts/<id>/saves`, docs/web.md "The persona on the drive") into the drive and record each as
-  // synced, so the client's one read of its persona at Select Player already sees the real looks and the first
+  // synced, so the client's one read of its personas at Select Player already sees the real ones and the first
   // manifest finds nothing to upload. `listing` is the parsed answer; `fetchOne(path)` returns one entry with
-  // its data, for the files the listing left without bytes. Call it after `setLine`. A local file is replaced
-  // only by the rules of a download: it is missing, it is a made-up seed, it has not changed since the last
-  // sync, or this browser has never synced the account (then the local file is kept as .OLD); any other
-  // differing file is left for the manifest to decide. Resolves { restored, failed }.
+  // its data, for the files the listing left without bytes. Call it after useView. A .DTA file is written only
+  // when the PLAYER.DIR on the drive (the host's, once it is written) names it. A local file is replaced
+  // only by the rules of a download: it is missing, it has not changed since the last sync, or this browser has
+  // never synced the account (then the local file is kept as .OLD); any other differing file is left for the
+  // manifest to decide. Resolves { restored, failed }.
   async function prefetch(forAccount, listing, fetchOne) {
     const key = STATE_PREFIX + forAccount;
     let synced = {};
-    let made = {};
     try { synced = JSON.parse(localStorage.getItem(key)) || {}; } catch { synced = {}; }
-    try { made = JSON.parse(localStorage.getItem(SEED_PREFIX + forAccount)) || {}; } catch { made = {}; }
     const fresh = Object.keys(synced).length === 0;
     const result = { restored: 0, failed: 0 };
     const files = listing && Array.isArray(listing.files) ? listing.files : [];
-    for (const entry of files) {
-      const path = entry && typeof entry.path === 'string' ? canonical(entry.path) : null;
-      if (!path || path !== entry.path || !allowed(path)) continue;
+    const byPath = new Map(files.filter((f) => f && typeof f.path === 'string' && canonical(f.path) === f.path).map((f) => [f.path, f]));
+    for (const path of dirsFirst(byPath.keys())) {
+      const entry = byPath.get(path);
       try {
         const local = readLocal(path);
         if (local && local.hash === entry.hash) { synced[path] = { version: entry.version, hash: entry.hash }; continue; }
-        const stale = !!local && (made[path] === local.hash
-          || (synced[path] && synced[path].hash === local.hash && synced[path].version !== entry.version));
+        const stale = !!local && synced[path] && synced[path].hash === local.hash && synced[path].version !== entry.version;
         // A browser that has never synced this account holds nothing of the account's: a file here (say the
         // install's own starting character file) is not a newer copy of it, so the host's wins, and the
         // browser's is kept beside it with the extension .OLD (not a save name, so it never syncs).
         const unrelated = !!local && !stale && fresh && !synced[path];
         if (local && !stale && !unrelated) continue; // changed here since the last sync: the manifest decides
+        if (!local && !mayRestore(path)) continue;   // the player deleted that persona: PLAYER.DIR no longer names it
         const full = typeof entry.data === 'string' ? entry : await fetchOne(path);
         const data = fromBase64(full.data);
         if (sha256Hex(data) !== entry.hash) throw new Error('the download does not match its hash');
         if (unrelated) writeLocal(path.replace(/\.[^.\\]*$/, '.OLD'), local.data, local.mtime);
         writeLocal(path, data, entry.mtime);
         synced[path] = { version: entry.version, hash: entry.hash };
-        delete made[path];
         result.restored++;
         env.log(`saves: fetched ${path} before dialing (version ${entry.version})`);
       } catch (err) {
@@ -428,13 +471,10 @@ const InnSaves = (() => {
         env.log(`saves: ${path}: ${err.message}`);
       }
     }
-    try {
-      localStorage.setItem(key, JSON.stringify(synced));
-      localStorage.setItem(SEED_PREFIX + forAccount, JSON.stringify(made));
-    } catch { /* kept for this visit only: the manifest then reconciles by hash */ }
+    try { localStorage.setItem(key, JSON.stringify(synced)); } catch { /* kept for this visit only: the manifest then reconciles by hash */ }
     return result;
   }
 
-  return { init, reset, config, setLine, seed, prefetch, onControl, onFileClosed, flushAll, flushFinal, sweep, sha256Hex, canonical, lastSaved: () => lastSaved };
+  return { init, reset, config, useView, activeView, prefetch, onControl, onFileClosed, flushAll, flushFinal, sweep, sha256Hex, canonical, lastSaved: () => lastSaved };
 })();
 if (typeof module !== 'undefined' && module.exports) module.exports = InnSaves;

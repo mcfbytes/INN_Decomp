@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-// Checks for the signed-in line's part of runtime/web/saves.js: the persona filter and the made-up files
-// whose server copy wins. Runs against a small in-memory drive and a scripted host.
+// Checks for the signed-in line's part of runtime/web/saves.js: one view of the persona files on the drive at
+// a time (an account's, or the install's own), the HTTP prefetch, and PLAYER.DIR as the authority for which
+// .DTA files come back. Runs against a small in-memory drive and a scripted host.
 // Run: node tools/test_saves.js
 'use strict';
 const assert = require('node:assert/strict');
@@ -35,6 +36,7 @@ const fs = {
   writeFile: (p, data) => files.set(p, Uint8Array.from(data)),
   mkdirTree: () => {},
   utime: () => {},
+  unlink: (p) => { if (!files.delete(p)) throw new Error('ENOENT'); },
 };
 const put = (rel, text) => files.set(`${D}/${rel.replace(/\\/g, '/')}`, Buffer.from(text));
 const get = (rel) => { const d = files.get(`${D}/${rel.replace(/\\/g, '/')}`); return d && Buffer.from(d).toString(); };
@@ -57,70 +59,110 @@ const b64 = (text) => Buffer.from(text).toString('base64');
 const wait = () => new Promise((r) => setTimeout(r, 50));
 
 (async () => {
-  // Setting the line: another persona's file and the hub's PLAYER.DIR stay out; this persona's goes in.
-  put('INN/PLAYER.DIR', 'Elaine\r\n');
-  put('INN/GUYBRUSH.DTA', 'someone else');
-  put('INN/ELAINE.DTA', 'made up');
-  put('INN/PASS_SET.DTA', 'secret');
-  InnSaves.setLine('Elaine');
-  InnSaves.seed(100002, 'INN\\ELAINE.DTA', hashOf('made up'));
+  const reset = () => { sent.length = 0; InnSaves.reset(); };
+  // The persona files among what was sent (the character files are not this test's concern).
+  const persona = () => sent.filter((m) => /PLAYER\.DIR$|\.DTA$/.test(m.path || ''));
+  const snapshot = () => [...files.keys()].map((k) => k.slice(D.length + 1)).sort();
 
-  // The host already has the account's real ELAINE.DTA (another browser) and a PLAYER.DIR of its own.
-  const host = { 'INN\\ELAINE.DTA': 'real looks', 'INN\\PLAYER.DIR': 'Elaine\r\nOther\r\n' };
+  // ---- views: the install's own personas, then a brand-new account, then back ----
+  put('INN/PLAYER.DIR', 'Guybrush\r\n');
+  put('INN/GUYBRUSH.DTA', 'own looks');
+  put('INN/PASS_SET.DTA', 'secret');
+  put('INN/LL/PLAYER.DIR', 'Guybrush\r\n');
+  put('INN/YSERBIUS/MYCHARS.DAT', 'starter');
+  assert.equal(InnSaves.activeView(), 'own');
+  assert.equal(InnSaves.useView('own'), false, 'already showing the install\'s own personas');
+  assert.equal(InnSaves.useView(100003), true);
+  assert.equal(InnSaves.activeView(), '100003');
+  assert.deepEqual(snapshot(), [
+    'INN/PASS_SET.DTA', 'INN/YSERBIUS/MYCHARS.DAT', 'INNVIEWS/ACTIVE',
+    'INNVIEWS/own/INN/GUYBRUSH.DTA', 'INNVIEWS/own/INN/LL/PLAYER.DIR', 'INNVIEWS/own/INN/PLAYER.DIR',
+  ], 'a new account sees no PLAYER.DIR and no persona; the password and character files stay');
+  // The client creates its persona for this account.
+  put('INN/PLAYER.DIR', 'Zelda\r\n');
+  put('INN/ZELDA.DTA', 'zelda looks');
+  // Another account on the same install must not see Zelda; she waits for her account.
+  assert.equal(InnSaves.useView(100004), true);
+  assert.equal(get('INN/ZELDA.DTA'), undefined);
+  assert.equal(get('INN/PLAYER.DIR'), undefined);
+  assert.equal(get('INNVIEWS/100003/INN/ZELDA.DTA'), 'zelda looks');
+  assert.equal(InnSaves.useView(100003), true);
+  assert.equal(get('INN/ZELDA.DTA'), 'zelda looks');
+  assert.equal(get('INN/PLAYER.DIR'), 'Zelda\r\n');
+  assert.equal(get('INN/GUYBRUSH.DTA'), undefined, 'the install\'s persona is not in her view');
+  // "My own number": the install's personas are back, byte for byte, and Zelda is stashed.
+  assert.equal(InnSaves.useView('own'), true);
+  assert.equal(get('INN/GUYBRUSH.DTA'), 'own looks');
+  assert.equal(get('INN/PLAYER.DIR'), 'Guybrush\r\n');
+  assert.equal(get('INN/LL/PLAYER.DIR'), 'Guybrush\r\n');
+  assert.equal(get('INN/ZELDA.DTA'), undefined);
+  assert.equal(get('INN/PASS_SET.DTA'), 'secret');
+
+  // ---- a signed-in manifest syncs the persona files of the view, and only those ----
+  InnSaves.useView(100003);
+  const host = { 'INN\\ZELDA.DTA': 'zelda looks', 'INN\\PLAYER.DIR': 'Zelda\r\n' };
   reply = (m) => {
     if (m.op === 'get') return { id: m.id, op: 'file', path: m.path, data: b64(host[m.path]), hash: hashOf(host[m.path]), version: 3, mtime: 1000 };
     if (m.op === 'put') return { id: m.id, op: 'stored', version: 1, hash: hashOf('x') };
     throw new Error(`unexpected ${m.op}`);
   };
-  const manifest = Object.entries(host).map(([p, d]) => ({ path: p, hash: hashOf(d), version: 3, size: d.length, mtime: 1000 }));
-  InnSaves.onControl(JSON.stringify({ op: 'manifest', account: 100002, files: manifest }));
+  const entries = (h, version = 3) => Object.entries(h).map(([p, d]) => ({ path: p, hash: hashOf(d), version, size: d.length, mtime: 1000 }));
+  reset();
+  InnSaves.onControl(JSON.stringify({ op: 'manifest', account: 100003, files: entries(host) }));
   await wait(); await wait();
-  assert.equal(get('INN/ELAINE.DTA'), 'real looks', 'the host copy replaces the made-up one');
-  assert.equal(get('INN/PLAYER.DIR'), 'Elaine\r\n', 'PLAYER.DIR is not taken from the host');
-  assert.equal(get('INN/GUYBRUSH.DTA'), 'someone else');
-  assert.ok(sent.every((m) => m.op === 'get' && m.path === 'INN\\ELAINE.DTA'), `only ELAINE.DTA was asked for: ${JSON.stringify(sent)}`);
-  assert.equal(JSON.parse(store.get('inn.seed.100002')).hasOwnProperty('INN\\ELAINE.DTA'), false, 'the seed is spent');
+  assert.deepEqual(persona(), [], 'the account already holds what the host has');
 
-  // A new account whose host has nothing: the made-up file is uploaded, the other persona and PLAYER.DIR are not.
-  sent.length = 0;
-  InnSaves.reset();
-  put('INN/ELAINE.DTA', 'made up');
-  InnSaves.seed(100005, 'INN\\ELAINE.DTA', hashOf('made up'));
+  // A brand-new account: the client's new persona is uploaded at the first manifest.
+  InnSaves.useView(100005);
+  put('INN/PLAYER.DIR', 'Link\r\n');
+  put('INN/LINK.DTA', 'link looks');
+  reset();
   InnSaves.onControl(JSON.stringify({ op: 'manifest', account: 100005, files: [] }));
   await wait(); await wait();
-  const puts = sent.filter((m) => m.op === 'put').map((m) => m.path);
-  assert.deepEqual(puts, ['INN\\ELAINE.DTA']);
+  assert.deepEqual(persona().filter((m) => m.op === 'put').map((m) => m.path).sort(), ['INN\\LINK.DTA', 'INN\\PLAYER.DIR']);
 
-  // Without a line (the classic "my own number"), everything is in the save space again.
-  sent.length = 0;
-  InnSaves.reset();
-  InnSaves.setLine(null);
-  InnSaves.onControl(JSON.stringify({ op: 'manifest', account: 100001, files: [] }));
+  // ---- PLAYER.DIR is authoritative: a persona the client deleted does not come back ----
+  InnSaves.useView(100006);
+  const full = { 'INN\\PLAYER.DIR': 'Elaine\r\n', 'INN\\ELAINE.DTA': 'elaine looks', 'INN\\OLDPERS.DTA': 'deleted in the client' };
+  const listing = { account: 100006, files: entries(full, 4).map((e, i) => ({ ...e, data: b64(Object.values(full)[i]) })) };
+  const done = await InnSaves.prefetch(100006, listing, async () => { throw new Error('unused'); });
+  assert.deepEqual(done, { restored: 2, failed: 0 });
+  assert.equal(get('INN/ELAINE.DTA'), 'elaine looks');
+  assert.equal(get('INN/PLAYER.DIR'), 'Elaine\r\n');
+  assert.equal(get('INN/OLDPERS.DTA'), undefined, 'a .DTA PLAYER.DIR does not name is not written');
+  reset();
+  InnSaves.onControl(JSON.stringify({ op: 'manifest', account: 100006, files: entries(full, 4) }));
   await wait(); await wait();
-  const all = sent.filter((m) => m.op === 'put').map((m) => m.path).sort();
-  assert.deepEqual(all, ['INN\\ELAINE.DTA', 'INN\\GUYBRUSH.DTA', 'INN\\PLAYER.DIR']);
-  // Before the dial: the HTTP listing lands in the drive, recorded as synced, and the first manifest does nothing.
-  sent.length = 0;
-  InnSaves.reset();
-  for (const k of [...files.keys()]) files.delete(k);
-  put('INN/GUYBRUSH.DTA', 'someone else');
-  InnSaves.setLine('Elaine');
-  const real = { 'INN\\ELAINE.DTA': 'real looks', 'INN\\YSERBIUS\\MYCHARS.DAT': 'hero', 'INN\\PASS_SET.DTA': 'x', 'INN\\GUYBRUSH.DTA': 'no' };
-  const listing = {
+  assert.deepEqual(persona(), [], 'the manifest does not fetch it either');
+  assert.equal(get('INN/OLDPERS.DTA'), undefined);
+  // The client deletes Elaine (PLAYER.DIR is rewritten, the .DTA removed): nothing returns, and the new
+  // empty list is uploaded.
+  files.delete(`${D}/INN/ELAINE.DTA`);
+  put('INN/PLAYER.DIR', '');
+  reset();
+  InnSaves.onControl(JSON.stringify({ op: 'manifest', account: 100006, files: entries(full, 4) }));
+  await wait(); await wait();
+  assert.equal(get('INN/ELAINE.DTA'), undefined, 'a deleted persona is not restored');
+  assert.deepEqual(persona().map((m) => `${m.op} ${m.path}`), ['put INN\\PLAYER.DIR']);
+
+  // ---- prefetch details ----
+  // Files outside the allowlist or the password file are never taken; a file listed without bytes is fetched.
+  InnSaves.useView(100007);
+  reset();
+  const real = { 'INN\\PLAYER.DIR': 'Elaine\r\n', 'INN\\ELAINE.DTA': 'real looks', 'INN\\YSERBIUS\\MYCHARS.DAT': 'hero', 'INN\\PASS_SET.DTA': 'x' };
+  const list7 = {
     account: 100007,
     files: Object.entries(real).map(([p, d]) => ({ path: p, hash: hashOf(d), version: 4, size: d.length, mtime: 2000, ...(d === 'hero' ? {} : { data: b64(d) }) })),
   };
   const asked = [];
-  const done = await InnSaves.prefetch(100007, listing, async (p) => { asked.push(p); return { data: b64(real[p]) }; });
-  assert.deepEqual(done, { restored: 2, failed: 0 });
-  assert.deepEqual(asked, ['INN\\YSERBIUS\\MYCHARS.DAT'], 'a file listed without bytes is fetched by path');
+  const got = await InnSaves.prefetch(100007, list7, async (p) => { asked.push(p); return { data: b64(real[p]) }; });
+  assert.deepEqual(got, { restored: 3, failed: 0 });
+  assert.deepEqual(asked, ['INN\\YSERBIUS\\MYCHARS.DAT']);
   assert.equal(get('INN/ELAINE.DTA'), 'real looks');
-  assert.equal(get('INN/YSERBIUS/MYCHARS.DAT'), 'hero');
-  assert.equal(get('INN/PASS_SET.DTA'), undefined, 'the password file is never taken');
-  assert.equal(get('INN/GUYBRUSH.DTA'), 'someone else', 'another persona is left alone');
+  assert.equal(get('INN/PASS_SET.DTA'), 'secret', 'the password file is never taken');
   assert.deepEqual(JSON.parse(store.get('inn.saves.100007'))['INN\\ELAINE.DTA'], { version: 4, hash: hashOf('real looks') });
-  const entries = Object.entries(real).filter(([p]) => !/PASS_SET|GUYBRUSH/.test(p));
-  InnSaves.onControl(JSON.stringify({ op: 'manifest', account: 100007, files: entries.map(([p, d]) => ({ path: p, hash: hashOf(d), version: 4, size: d.length, mtime: 2000 })) }));
+  const sync7 = Object.entries(real).filter(([p]) => !/PASS_SET/.test(p));
+  InnSaves.onControl(JSON.stringify({ op: 'manifest', account: 100007, files: entries(Object.fromEntries(sync7), 4) }));
   await wait(); await wait();
   assert.deepEqual(sent, [], 'the first manifest neither uploads nor downloads');
 
@@ -129,12 +171,11 @@ const wait = () => new Promise((r) => setTimeout(r, 50));
   put('INN/ELAINE.DTA', 'edited here');
   const bad = { files: [{ path: 'INN\\ELAINE.DTA', hash: hashOf('real looks'), version: 5, size: 10, mtime: 1, data: b64('real looks') },
     { path: 'INN\\TWINION\\TWINCHAR.DAT', hash: hashOf('abc'), version: 1, size: 3, mtime: 1, data: b64('abd') }] };
-  const second = await InnSaves.prefetch(100007, bad, async () => { throw new Error('unused'); });
-  assert.deepEqual(second, { restored: 0, failed: 1 });
+  assert.deepEqual(await InnSaves.prefetch(100007, bad, async () => { throw new Error('unused'); }), { restored: 0, failed: 1 });
   assert.equal(get('INN/ELAINE.DTA'), 'edited here');
   assert.equal(get('INN/TWINION/TWINCHAR.DAT'), undefined);
   // An account this browser has never synced: the install's own character file gives way to the host's and is
-  // kept as .OLD; the next account of the same browser, already synced once, would not be touched this way.
+  // kept as .OLD.
   InnSaves.reset();
   put('INN/YSERBIUS/MYCHARS.DAT', 'starter');
   const fresh = { files: [{ path: 'INN\\YSERBIUS\\MYCHARS.DAT', hash: hashOf('mine'), version: 2, size: 4, mtime: 9, data: b64('mine') }] };

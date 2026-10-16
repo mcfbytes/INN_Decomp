@@ -7,9 +7,6 @@
 const InnAuth = (() => {
   const SESSION_KEY = 'inn.session', LINE_KEY = 'inn.line', PENDING_KEY = 'inn.signing';
   const POPUP_POLL_MS = 400, POPUP_GRACE_MS = 600;
-  // Name rule. The innkeeper docs set none for personas (docs/protocol/messages.md section 4.1 only
-  // fixes the password), so this is the page's own: 1 to 10 of A-Z, a-z and 0-9. The server may be stricter.
-  const PERSONA_RE = /^[A-Za-z0-9]{1,10}$/;
   // docs/protocol/messages.md section 4.1 item 2 (script.095 export 4); same table as PASSWORD_KEY in
   // TSN-INN-Decomp tools/dosbox/install_client.py.
   const PASSWORD_KEY = 'M34546788S';
@@ -53,89 +50,6 @@ const InnAuth = (() => {
     if (/^[ \t]*id[ \t]*=/im.test(text)) return text.replace(/^[ \t]*id[ \t]*=[^\r\n]*/im, line);
     return text + (text === '' || text.endsWith('\n') ? '' : eol) + line + eol;
   }
-
-  // ---------- the persona files ----------
-  // What the client's "Select Player" screen reads (docs/web.md, "The persona on the drive"). PLAYER.DIR is
-  // the list of names, one per line, each ended by CR LF. A persona is <first 8 characters, upper case>.DTA,
-  // all little-endian: the word 12 (the format marker), the home town as a word length (counting a
-  // terminating zero byte), the text and the zero; eight words (shape, face features, misc features, two
-  // hobby words, age, two words for the mail box number); the skills as a word 16 and 16 bytes; eight
-  // preference bytes; nine words (two cursor positions and seven zeros).
-  const PERSONA_MARK = 12, SKILLS = 16, SKILL_DEFAULT = 3, HOBBY_NONE = 0xfeff;
-  const PREF_BYTES = [12, 0, 0, 7, 15, 3, 0, 0];
-  const CURSOR_WORDS = [999, 997];
-  const DEFAULT_CITY = 'Town', DEFAULT_AGE = 18;
-  // The look is three words of bit fields, which the character editor limits to 0 .. count - 1:
-  // [word, name, lowest bit, width, count]
-  const LOOK = [
-    ['shape', 'female', 0, 1, 2], ['shape', 'skin', 1, 3, 5], ['shape', 'head', 4, 3, 8],
-    ['shape', 'faceHair', 7, 3, 8], ['shape', 'eyebrows', 10, 3, 8],
-    ['faceFeature', 'glasses', 0, 3, 8], ['faceFeature', 'eyes', 3, 3, 8], ['faceFeature', 'nose', 6, 3, 8],
-    ['faceFeature', 'mouth', 9, 3, 8], ['faceFeature', 'hairColor', 12, 4, 14],
-    ['miscFeature', 'clothes', 0, 4, 13], ['miscFeature', 'hairStyle', 4, 5, 25], ['miscFeature', 'hats', 9, 4, 12],
-    ['miscFeature', 'clothesColor', 13, 3, 8],
-  ];
-
-  // A small seeded generator (mulberry32) so one account always gets the same face.
-  function rng(seed) {
-    let a = seed >>> 0;
-    return () => {
-      a = (a + 0x6d2b79f5) >>> 0;
-      let t = a;
-      t = Math.imul(t ^ (t >>> 15), t | 1);
-      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-    };
-  }
-
-  // Packs choices ({ name: value }, missing ones 0) into the three words.
-  function packLook(choices) {
-    const words = { shape: 0, faceFeature: 0, miscFeature: 0 };
-    for (const [word, name, shift, , count] of LOOK) {
-      const v = choices[name] || 0;
-      if (!Number.isInteger(v) || v < 0 || v >= count) throw new Error(`The look "${name}" must be 0 to ${count - 1}.`);
-      words[word] |= v << shift;
-    }
-    return words;
-  }
-
-  function unpackLook(words) {
-    const out = {};
-    for (const [word, name, shift, bits] of LOOK) out[name] = (words[word] >> shift) & ((1 << bits) - 1);
-    return out;
-  }
-
-  const randomLook = (seed) => {
-    const next = rng(seed), choices = {};
-    for (const [, name, , , count] of LOOK) choices[name] = Math.floor(next() * count);
-    return packLook(choices);
-  };
-
-  // The first 8 characters, upper case: the client's file name for a persona.
-  const personaStem = (persona) => persona.slice(0, 8).toUpperCase();
-  const playerDir = (persona) => new TextEncoder().encode(`${persona}\r\n`);
-
-  function personaFile(persona, account, opts = {}) {
-    const city = new TextEncoder().encode(opts.city === undefined ? DEFAULT_CITY : opts.city);
-    const look = opts.look || randomLook(account);
-    const out = new Uint8Array(4 + city.length + 1 + 16 + 2 + SKILLS + PREF_BYTES.length + 18);
-    const view = new DataView(out.buffer);
-    let at = 0;
-    const word = (v) => { view.setUint16(at, v, true); at += 2; };
-    const byte = (v) => { out[at++] = v; };
-    word(PERSONA_MARK);
-    word(city.length + 1);
-    out.set(city, at); at += city.length; byte(0);
-    [look.shape, look.faceFeature, look.miscFeature, HOBBY_NONE, HOBBY_NONE, opts.age || DEFAULT_AGE, 0, 0].forEach(word);
-    word(SKILLS);
-    for (let i = 0; i < SKILLS; i++) byte(SKILL_DEFAULT);
-    PREF_BYTES.forEach(byte);
-    CURSOR_WORDS.forEach(word);
-    for (let i = 0; i < 7; i++) word(0);
-    return out;
-  }
-
-  const personaProblem = (name) => (PERSONA_RE.test(name) ? '' : 'Use 1 to 10 letters or digits, with no spaces.');
 
   // ---------- the session ----------
 
@@ -232,14 +146,15 @@ const InnAuth = (() => {
     return {
       identity: s.identity,
       attested: at && Number.isInteger(at.age) && Number.isInteger(at.terms) ? { age: at.age, terms: at.terms } : null,
-      accounts: s.accounts.filter((a) => a && Number.isInteger(a.id) && typeof a.persona === 'string'),
+      accounts: s.accounts.filter((a) => a && Number.isInteger(a.id) && (a.persona === null || typeof a.persona === 'string')),
       canCreate: !!s.canCreate,
     };
   }
 
   // Records the player's answer on the identity when the server holds an older (or no) attestation.
   const attestNow = (value) => call('POST', '/auth/attest', { attest: value });
-  const createAccount = (persona) => call('POST', '/auth/accounts', { persona });
+  // The account has no persona yet: the client's own Select Player screen makes one (docs/web.md, "The persona on the drive").
+  const createAccount = () => call('POST', '/auth/accounts', {});
   const credential = (id) => call('POST', `/auth/accounts/${id}/credential`);
 
   // The account's saved files, before the dial (innkeeperd `GET /auth/accounts/<id>/saves`): a listing with
@@ -293,8 +208,7 @@ const InnAuth = (() => {
   if (typeof location !== 'undefined') readFragment();
 
   const api = {
-    encodePassword, passwordFile, setCfgId, personaProblem, PERSONA_RE,
-    personaFile, playerDir, personaStem, packLook, unpackLook, randomLook, LOOK,
+    encodePassword, passwordFile, setCfgId,
     configure, setAttest: (fn) => { st.attest = fn; }, attestNow, loadToken, saveToken, forget, loginUrl, call, fetchSession, createAccount, credential, saves, saveFile, logout,
     popupLogin, redirectLogin, AuthError,
     state: st,

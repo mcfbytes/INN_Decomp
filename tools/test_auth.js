@@ -26,46 +26,27 @@ assert.equal(A.setCfgId(' hostid = X\r\n', 7), ' hostid = X\r\n id = 7\r\n', 'ho
 assert.throws(() => A.setCfgId(cfg, 0));
 assert.throws(() => A.setCfgId(cfg, 1.5));
 
-assert.equal(A.personaProblem('Guybrush'), '');
-assert.equal(A.personaProblem('A'), '');
-assert.equal(A.personaProblem('Abcdefghij'), '');
-for (const bad of ['', 'Abcdefghijk', 'two words', 'a-b', 'é'])
-  assert.notEqual(A.personaProblem(bad), '', bad);
+// The page no longer writes persona files: the account has none until the client's Select Player makes one.
+for (const gone of ['personaFile', 'playerDir', 'personaProblem', 'randomLook']) assert.equal(A[gone], undefined, gone);
 
-// The persona files (docs/web.md, "The persona on the drive").
-assert.equal(hex(A.playerDir('Elaine')), Buffer.from('Elaine\r\n').toString('hex'));
-assert.equal(A.personaStem('Elaine'), 'ELAINE');
-assert.equal(A.personaStem('Abcdefghij'), 'ABCDEFGH', 'the client keeps the first 8 characters');
-const mine = A.packLook({ female: 1, skin: 4, head: 7, faceHair: 5, eyebrows: 3, glasses: 2, eyes: 6, nose: 1, mouth: 7,
-  hairColor: 13, clothes: 12, hairStyle: 24, hats: 11, clothesColor: 7 });
-assert.deepEqual(A.unpackLook(mine), { female: 1, skin: 4, head: 7, faceHair: 5, eyebrows: 3, glasses: 2, eyes: 6, nose: 1, mouth: 7,
-  hairColor: 13, clothes: 12, hairStyle: 24, hats: 11, clothesColor: 7 });
-assert.throws(() => A.packLook({ hairColor: 14 }), /0 to 13/);
-assert.throws(() => A.packLook({ hairStyle: 25 }), /0 to 24/);
-for (const account of [100001, 100002, 4294967295, 7]) {
-  const look = A.randomLook(account);
-  const fields = A.unpackLook(look);
-  for (const [, name, , , count] of A.LOOK) assert.ok(fields[name] >= 0 && fields[name] < count, `${name} in range`);
-  assert.equal(hex(Buffer.from(JSON.stringify(look))), hex(Buffer.from(JSON.stringify(A.randomLook(account)))), 'same account, same face');
-}
-assert.notEqual(JSON.stringify(A.randomLook(100001)), JSON.stringify(A.randomLook(100002)));
-const dta = A.personaFile('Elaine', 100002, { look: mine, age: 21, city: 'Maine' });
-assert.equal(dta.length, 65 + 'Maine'.length, 'a persona file is 65 bytes plus the home town');
-const dv = new DataView(dta.buffer);
-assert.equal(dv.getUint16(0, true), 12, 'format marker');
-assert.equal(dv.getUint16(2, true), 6, 'town length counts the zero');
-assert.equal(Buffer.from(dta.subarray(4, 10)).toString('latin1'), 'Maine\0');
-assert.equal(dv.getUint16(10, true), mine.shape);
-assert.equal(dv.getUint16(12, true), mine.faceFeature);
-assert.equal(dv.getUint16(14, true), mine.miscFeature);
-assert.equal(dv.getUint16(16, true), 0xfeff);
-assert.equal(dv.getUint16(18, true), 0xfeff);
-assert.equal(dv.getUint16(20, true), 21, 'age');
-assert.equal(dv.getUint16(26, true), 16, 'skills');
-assert.deepEqual([...dta.subarray(28, 44)], Array(16).fill(3));
-assert.deepEqual([...dta.subarray(44, 52)], [12, 0, 0, 7, 15, 3, 0, 0]);
-assert.equal(dv.getUint16(52, true), 999);
-assert.equal(dv.getUint16(54, true), 997);
-assert.equal(A.personaFile('Elaine', 1).length, 69, 'the default home town is four letters');
-
-console.log('test_auth: ok');
+// A session answer carries `persona: null` for an account the client has not named yet, and a new account is
+// asked for with an empty body object.
+(async () => {
+  const calls = [];
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url, method: init.method, body: init.body });
+    const json = (status, body) => ({ status, ok: status < 300, json: async () => body });
+    if (url.endsWith('/auth/session')) {
+      return json(200, { identity: { handle: 'Caller 7F3A', provider: 'x' }, canCreate: true, attested: null,
+        accounts: [{ id: 100003, persona: null }, { id: 100004, persona: 'Zelda' }, { id: 'bad', persona: 'No' }] });
+    }
+    return json(201, { id: 100005, persona: null });
+  };
+  A.configure('http://127.0.0.1:1');
+  const s = await A.fetchSession();
+  assert.deepEqual(s.accounts, [{ id: 100003, persona: null }, { id: 100004, persona: 'Zelda' }]);
+  const made = await A.createAccount();
+  assert.deepEqual(made, { id: 100005, persona: null });
+  assert.equal(calls[1].body, '{}');
+  console.log('test_auth: ok');
+})().catch((e) => { console.error(e); process.exit(1); });

@@ -13,7 +13,7 @@ It implements the page <-> server contract in docs/web.md ("Sign-in (server cont
     GET  /auth/session                        Bearer token -> {identity: {handle, provider}, accounts, canCreate,
                                               attested: {age, terms} | null}
     POST /auth/attest                         {attest: "18+v1"} -> 204 (records the age/terms answer)
-    POST /auth/accounts                       {persona} -> 201 {id, persona}; 403 attest_required with
+    POST /auth/accounts                       {} or {persona} -> 201 {id, persona|null}; 403 attest_required with
                                               --attest-required; 429 rate_limited with --accounts-per-day
     POST /auth/accounts/<id>/credential       -> {account, password} (rotates)
     GET  /auth/accounts/<id>/saves[?path=P]   Bearer token -> {account, files: [{path, version, hash, size, mtime,
@@ -102,8 +102,8 @@ def parse_accounts(items):
         parts = item.split(":")
         if len(parts) == 3:
             provider, parts = parts[0], parts[1:]
-        if len(parts) != 2 or not parts[0].isdigit() or provider not in PROVIDERS or not PERSONA_RE.match(parts[1]):
-            raise SystemExit(f"--accounts: bad entry {item!r}; use [provider:]ID:Persona, e.g. 100001:Guybrush")
+        if len(parts) != 2 or not parts[0].isdigit() or provider not in PROVIDERS or (parts[1] and not PERSONA_RE.match(parts[1])):
+            raise SystemExit(f"--accounts: bad entry {item!r}; use [provider:]ID:Persona, e.g. 100001:Guybrush (or ID: for an account with no persona yet)")
         out.append((provider, int(parts[0]), parts[1]))
     return out
 
@@ -223,7 +223,7 @@ def make_handler(state):
                 owned = state.accounts.get(provider, {})
                 return self.reply(200, {
                     "identity": {"handle": state.handle(provider), "provider": provider},
-                    "accounts": [{"id": i, "persona": p} for i, p in sorted(owned.items())],
+                    "accounts": [{"id": i, "persona": p or None} for i, p in sorted(owned.items())],
                     "canCreate": state.can_create(provider),
                     "attested": state.attested.get(state.identity_key(provider)),
                 })
@@ -280,6 +280,8 @@ def make_handler(state):
                 return self.reply(204)
             if path == "/auth/accounts":
                 data = self.read_json()
+                # No body, {} or a null persona opens an account with no persona yet: the client's own Select
+                # Player screen names one. A given persona is checked, as before.
                 persona = data.get("persona") if isinstance(data, dict) else None
                 if state.enrol != "open":
                     return self.err(403, "enrolment_closed", "New accounts are not being taken.")
@@ -287,16 +289,16 @@ def make_handler(state):
                     return self.err(403, "attest_required", "Answer the age and terms notice first.")
                 if not state.can_create(provider):
                     return self.err(429, "rate_limited", "This sign-in has opened enough lines for today.")
-                if not isinstance(persona, str) or not PERSONA_RE.match(persona):
+                if persona is not None and (not isinstance(persona, str) or not PERSONA_RE.match(persona)):
                     return self.err(400, "bad_persona", "Use 1 to 10 letters or digits.")
                 with state.lock:
-                    if state.persona_taken(persona):
+                    if persona is not None and state.persona_taken(persona):
                         return self.err(409, "persona_taken", f"The name {persona} is already in use.")
                     number = state.next_id
                     state.next_id += 1
-                    state.accounts.setdefault(provider, {})[number] = persona
+                    state.accounts.setdefault(provider, {})[number] = persona or ""
                     state.opened[provider] = state.opened.get(provider, 0) + 1
-                return self.reply(201, {"id": number, "persona": persona})
+                return self.reply(201, {"id": number, "persona": persona or None})
             m = re.fullmatch(r"/auth/accounts/(\d+)/credential", path)
             if m:
                 number = int(m.group(1))

@@ -182,8 +182,9 @@ async function loadProviders() {
 
 // Writes the account number into every LSCI.CFG (the root one and the land copies LSCIGET made) and
 // the stored password into INN\PASS_SET.DTA, so the client's own logon runs unchanged (innkeeper
-// docs/protocol/messages.md section 4.1; the encoder is in auth.js). Then the persona (below).
-async function writeCredentials(account, password, persona) {
+// docs/protocol/messages.md section 4.1; the encoder is in auth.js). Then the account's own view of the persona
+// files (below): the account has no persona until the client's Select Player screen makes one.
+async function writeCredentials(account, password) {
   const file = InnAuth.passwordFile(password);
   const configs = findConfigs(DRIVE);
   if (!configs.length) throw new Error('LSCI.CFG not found in the installation.');
@@ -195,22 +196,21 @@ async function writeCredentials(account, password, persona) {
   const existing = FS.readdir(dir).find((n) => /^pass_set\.dta$/i.test(n)) || 'PASS_SET.DTA';
   FS.writeFile(`${dir}/${existing}`, file);
   log(`signed-in account ${account} written to LSCI.CFG and ${existing}`);
-  if (persona) {
-    await prefetchSaves(account, persona);
-    writePersona(account, persona);
-  }
+  InnSaves.init({ fs: FS, drive: DRIVE, log });
+  InnSaves.useView(account);
+  await prefetchSaves(account);
+  // Without GUIDE.CFG the client opens with its welcome and INN Guide questions, which belong to a first run.
+  if (!FS.readdir(dir).some((n) => n.toUpperCase() === 'GUIDE.CFG')) FS.writeFile(`${dir}/GUIDE.CFG`, new Uint8Array(2));
   return syncDrive(false);
 }
 
-// A browser that has never held this account would otherwise dial with a made-up persona: the client reads its
-// persona once, at Select Player, before the host's manifest exists, and writes it back over the host's copy.
+// The client reads its personas once, at Select Player, before the host's manifest exists, so a browser that has
+// never held this account would show an empty list and its Create would write over the host's copy.
 // So the account's files are fetched over HTTP first (innkeeperd `GET /auth/accounts/<id>/saves`, authorised by
 // the session token) and written into the drive, recorded as synced. If that fails the line is dialed anyway,
 // as it used to be, with a narrator note and a line in the modem output. Format and reasons: docs/web.md.
-async function prefetchSaves(account, persona) {
+async function prefetchSaves(account) {
   page.prefetchNote = '';
-  InnSaves.init({ fs: FS, drive: DRIVE, log });
-  InnSaves.setLine(persona);
   let why = '';
   try {
     const listing = await InnAuth.saves(account);
@@ -225,31 +225,9 @@ async function prefetchSaves(account, persona) {
   }
   if (!why) return;
   page.prefetchNote = `; SAVES NOT FETCHED (${why})`;
-  adv('say', `Your saved files could not be fetched from the server (${why}). Dialing anyway with what this browser holds, so a persona may start out blank. The operator suggests patience.`);
+  adv('say', `Your saved files could not be fetched from the server (${why}). Dialing anyway with what this browser holds, so Select Player may start out empty. The operator suggests patience.`);
   const reduced = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
   await new Promise((resolve) => setTimeout(resolve, reduced ? 1200 : 2800));
-}
-
-// The client's "Select Player" shows what INN\PLAYER.DIR lists and reads each persona from its .DTA, so for a
-// signed-in line the page makes PLAYER.DIR name only the line's persona (the file is the page's, never
-// synced) and, when the drive has no .DTA for it, writes a fresh one (looks chosen from the account number).
-// Other personas' .DTA files stay on the drive, unlisted and out of this account's save space.
-// Format and reasons: docs/web.md, "The persona on the drive".
-function writePersona(account, persona) {
-  const dir = `${DRIVE}/${PROGRAM.dir}`;
-  const names = FS.readdir(dir);
-  const find = (want) => names.find((n) => n.toUpperCase() === want);
-  FS.writeFile(`${dir}/${find('PLAYER.DIR') || 'PLAYER.DIR'}`, InnAuth.playerDir(persona));
-  const stem = InnAuth.personaStem(persona);
-  if (!find(`${stem}.DTA`)) {
-    const bytes = InnAuth.personaFile(persona, account);
-    FS.writeFile(`${dir}/${stem}.DTA`, bytes);
-    InnSaves.seed(account, `INN\\${stem}.DTA`, InnSaves.sha256Hex(bytes));
-    log(`new persona ${persona} written to ${stem}.DTA`);
-  }
-  // Without GUIDE.CFG the client opens with its welcome and INN Guide questions, which belong to a first run.
-  if (!find('GUIDE.CFG')) FS.writeFile(`${dir}/GUIDE.CFG`, new Uint8Array(2));
-  InnSaves.setLine(persona);
 }
 
 function toast(text, kind = '') {
@@ -688,7 +666,6 @@ function keepServerSaves() {
 function start(session) {
   if (page.started || page.drive === 'none' || Site.blocking()) return;
   page.started = true;
-  if (!session) InnSaves.setLine(null);
   const server = $('com1').value.trim() || defaultServer();
   page.server = server;
   page.session = session || '';
@@ -705,6 +682,8 @@ function start(session) {
   $('canvas').focus();
   keepSaving();
   keepServerSaves();
+  // The classic path: the drive shows the install's own personas again.
+  if (!session && InnSaves.useView('own')) syncDrive(false);
   setLink('connecting');
   setStatus(statusRunning());
   Module.callMain(runtimeArgs(server));
