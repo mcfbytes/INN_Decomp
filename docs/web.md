@@ -13,7 +13,7 @@ cmake --build build-web
 ```
 
 Output in `build-web/`: `inn.html` (from `runtime/web/shell.html`), `inn.js`, `inn.wasm`, and the page
-scripts `page.js`, `saves.js` and `zip.js` copied from `runtime/web/`. The default build type is `Release` (`-O3`).
+scripts `page.js`, `saves.js`, `auth.js`, `adv.js`, `scene.js` (and `scenes/`) and `zip.js` copied from `runtime/web/`. The default build type is `Release` (`-O3`).
 
 The native client (INN as C, games still on the emulator) is the same page with two cache variables.
 JSPI is required; Asyncify does not link this configuration:
@@ -177,8 +177,8 @@ Setup is a small point-and-click game (`adv.js`; `page.js` calls its hooks):
 
 The menu bar slides down when the pointer touches the top edge (always visible on touch screens and narrow windows, and
 while a menu is open). F10 or Alt opens it; the arrow keys move, Enter picks, Esc closes. It carries the ARIA menubar
-roles and does everything the picture does: Game (Load disks..., Load disk image (.zip)..., Dial, Hang up, and a
-"Sign in with ..." item per provider), Options (Server address..., Remember on this device, Animation), Scene (the five
+roles and does everything the picture does: Game (Load disks..., Load disk image (.zip)..., Dial, Hang up, and with
+sign-in configured "Sign in..." or, once signed in, "Choose line..." and "Sign out"), Options (Server address..., Remember on this device, Animation), Scene (the five
 scenes) and Help (How do I play?, About). Server address opens a small dialog with the field the card's Advanced section
 had; it accepts only `ws://` or `wss://` addresses (empty means the default) and uses the same `inn.com1` key, stored
 when you dial. "Remember" is the same `inn.remember` checkbox. A playful score on the right ("Score: 0 of 1993") is kept
@@ -190,12 +190,36 @@ Animation switch is kept in `localStorage` (`inn.anim`).
 `page.js` is the one place for a name: empty (the default) shows no wordmark and the title "Online world"; a value is
 used for both.
 
-**Providers.** Off by default: `AUTH_SERVER` at the top of `page.js` is empty, and innkeeperd's WebSocket
+**Sign-in.** Off by default: `AUTH_SERVER` at the top of `page.js` is empty, and innkeeperd's WebSocket
 port does not answer HTTP. With `AUTH_SERVER` set to a URL, or `?auth=<url>` in the page's address, the
 page fetches `<that origin>/auth/providers`; any other non-empty `?auth=` value asks the game server's
-address with `ws` turned into `http` (same host and port). A JSON array of `{id, name, url}` shows a "Sign in with ..." button per
-entry. Any error, a 404 or an empty list keeps the section hidden, so there are no buttons without
-providers.
+address with `ws` turned into `http` (same host and port). With no providers (an error, a 404 or an empty
+list) nothing changes: phone, then dial. With providers, the flow below runs (contract in the next section).
+
+1. *Who's calling.* Clicking the telephone (or Game, Dial) with the disks loaded makes the operator ask
+   "Who's calling, please?". The narrator box offers a row of calling cards: a small pixel card per provider with
+   its configured name as lettering (no logos or brand marks), plus a dashed "I have my own number" card, which is
+   the classic path: no sign-in, the account already in the install. Game, "Sign in..." offers the provider cards
+   only, and works without disks.
+2. *On hold.* A card opens the login in a popup (`window.open` straight from the click) and the narrator says the
+   operator has put you on hold (tiny hold-music notes; "Hang up on the operator" closes the popup). If the popup
+   is blocked, the page redirects in the same window instead and takes the result from the address fragment.
+3. *The card.* On success a calling-card icon joins the disk icon in the inventory and the score gains 5. One
+   account is used straight away; several give "Which line, please?" with a button per persona; when the server
+   says `canCreate`, "A new line, please" opens a dialog for a persona name (1 to 10 of A-Z, a-z, 0-9: the
+   innkeeper docs set no persona rule, so this is the page's own, and the server may be stricter). "My own
+   number" is always in the list too.
+4. *Credentials, then dial.* The page fetches the account's credential and writes it into the browser's copy of
+   the install (below), then dials with the session token on the WebSocket address. The modem box gains an
+   `AT+CARD=<provider id>` line before `ATDT`.
+5. *Errors* are narrator boxes, the facts first: the popup closed without signing in, the provider's Deny
+   (`access_denied`), an expired session (401: the token is dropped and the cards come back), closed enrolment, and
+   an unreachable server. Everything is reachable by keyboard: F10, Game, "Sign in...", Enter on a card, the
+   buttons of the narrator box (Left and Right move between them), the dialog.
+
+Game, "Sign out" calls `POST /auth/logout`, forgets the token and has the narrator say goodbye; Help, About names
+the signed-in identity. `?classic=1` keeps only the old "Sign in with ..." links (full redirect, `mode=redirect`),
+and the token that comes back is kept but the classic card does not use it.
 
 **Dialing.** Dial starts the client and opens a period-style terminal box near the telephone (`termAt`; docked at
 the bottom on a phone): `ATZ`, `OK`, `ATDT <server>`, then `CONNECT` when the runtime logs `uart: websocket open`. 1.4 s
@@ -214,6 +238,98 @@ to start again.
 Native music is `adl.drv`. If `LSCI.CFG` names another music driver, the page shows a notice and
 rewrites that line to `adl.drv` in the browser's copy of the file. Sound Blaster digital audio is
 not played.
+
+## Sign-in (server contract)
+
+What the page expects from `innkeeperd` (or any server that offers sign-in). The server side is PLAN.md "Sign-in with
+common providers" in the TSN-INN-Decomp repository, not built yet; `tools/mock_auth.py` implements this contract for
+development, and nothing else does. Terms: the *page origin* is where `inn.html` is served, the *auth origin* is the
+server's HTTP origin (`?auth=`, `AUTH_SERVER`, or the game server address with `ws` turned into `http`).
+
+**Endpoints** (all on the auth origin; JSON bodies; errors are `{"error": "<code>", "message": "<words>"}`, and the
+page shows `message` for a 4xx it does not know):
+
+| Request | Success | Other |
+|---|---|---|
+| `GET /auth/providers` | 200 `[{"id": "example", "name": "Example Phone Co.", "url": "/auth/login?provider=example"}]` | anything else, or `[]`: sign-in stays off. `url` is relative to the auth origin or absolute on it; any other origin is ignored. `name` is shown as text only. |
+| `GET <url>&return=<page URL>&mode=popup` | the login (consent) page; ends on `/auth/callback` | 400 for an unknown provider or a `return` whose origin is not an allowed page origin |
+| `GET /auth/session`, `Authorization: Bearer <token>` | 200 `{"identity": {"name": "...", "provider": "<id>"}, "accounts": [{"id": 100001, "persona": "Guybrush"}], "canCreate": true}` | 401: token missing, unknown or expired |
+| `POST /auth/accounts`, `{"persona": "Elaine"}` | 201 `{"id": 100002, "persona": "Elaine"}` | 401; 403 `enrolment_closed`; 400 `bad_persona`; 409 `persona_taken`; 429 rate limited |
+| `POST /auth/accounts/<id>/credential` | 200 `{"account": 100002, "password": "K3J9QWZ7"}`; every call rotates the password | 401; 404 when the identity does not own `<id>` |
+| `POST /auth/logout` | 204 and the token is revoked | the page forgets the token whatever the answer |
+
+`id` is a positive integer below 2^32 (it becomes the `id` key of `LSCI.CFG`). `password` is 6 to 10 of A-Z and
+0-9 (the stored form is 6 to 10 characters; innkeeper `docs/protocol/messages.md` section 4.1); the page refuses
+anything else. `identity.provider` is one of the listed provider ids and appears in the modem line as
+`AT+CARD=<provider>`. `canCreate` is true when enrolment lets this identity open another account.
+
+**Login handshake.** The page opens `<url>&return=<page URL without fragment>&mode=popup` with `window.open` on the
+click. The server runs the provider's login, then on `/auth/callback` serves a tiny page whose script does
+`window.opener.postMessage(msg, <origin of return>)` and `window.close()`, where `msg` is
+`{"type": "inn-auth", "session": "<token>"}` or, when the player declined or the provider failed,
+`{"type": "inn-auth", "error": "access_denied"}` (any other code is shown as "did not finish"). The page accepts a
+message only when `event.origin` is the auth origin, `event.source` is the popup it opened and `type` is `inn-auth`.
+The `return` address must be checked against the configured page origins (an open redirect and a wildcard
+`postMessage` target would leak the token). If the popup is closed with no message the page says so.
+
+*Fallback.* When `window.open` returns null the page navigates itself to the same URL with `mode=redirect`. The
+server answers the callback with a 302 to `<return>#inn-session=<token>` (or `#inn-error=<code>`). On load the page
+reads the fragment, stores the token, cleans the address with `history.replaceState` and continues from the account
+step. The disks are still there if "Remember on this device" was on (the saved install); otherwise the narrator asks
+for them again.
+
+**The token** is opaque to the page. It is kept in `sessionStorage` (`inn.session`), and also in `localStorage`
+when "Remember on this device" is on; every storage access is in try/catch. A 401 from any call drops it from both.
+The page also keeps the last chosen line in `sessionStorage` (`inn.line`) so "Try again" after a failed dial
+redials the same account (it fetches a fresh credential, which rotates the password).
+
+**CORS.** The page origin differs from the auth origin, and requests carry `Authorization` and a JSON body, so the
+browser preflights. For the `/auth/*` JSON calls the server answers `OPTIONS` with 204 and sets on every answer:
+`Access-Control-Allow-Origin: <the page origin, exactly, never *>`, `Vary: Origin`,
+`Access-Control-Allow-Methods: GET, POST, OPTIONS`, `Access-Control-Allow-Headers: Authorization, Content-Type`
+(and optionally `Access-Control-Max-Age`). No cookies are used, so no `Allow-Credentials`. The login and callback
+pages are plain navigations and need no CORS. Send `Cache-Control: no-store` on all of it.
+
+**The WebSocket.** Browsers cannot set headers on a WebSocket. The page appends the token to the address it gives
+the runtime as `?session=<token>` (`ws://host:port/?session=...`); `page.server`, the modem lines and the status
+text keep the plain address. A subprotocol (`inn-session.<token>`) would keep the token out of access logs, but
+`uart_link_ws.c` opens the socket through `emscripten_websocket_new` with no protocol list and the address is the
+only thing `--com1` carries, so the query parameter is what the page does. The server should take the token only on
+the upgrade request, keep it out of its logs, give it a short lifetime and bind that connection to the identity
+(accept a Login only for an account the identity owns). `innkeeperd` ignores the token today: the session binding
+is a server task, and a headless run against `innkeeperd` with no data directory accepts the written credentials.
+One known leak: if the runtime cannot open the socket it prints the address it was given, which the page's log
+(Copy log) then holds.
+
+**What goes into the install.** Before dialing, `page.js` (`writeCredentials`) writes, for the account chosen:
+
+- every `LSCI.CFG` in the drive (the root one and the `SL` and `LL` copies the installer made): the line
+  ` id = <account>` is replaced, or appended with the file's own line ending. The account number is the `id` key
+  (`docs/protocol/messages.md` section 4.1 item 3; `docs/dosbox.md` section 2 shows ` id = 100001`).
+- `INN\PASS_SET.DTA`: `AB` followed by the 10-byte stored form of the password (messages.md section 4.1 items 1 and 2:
+  uppercase it, XOR byte i with `"M34546788S"[i]`, zero-pad to 10 bytes, then for i = 0..n-1 XOR byte
+  `(i+1) mod n` with byte i). With `AB` the client sends it unchanged as the Login's password with `fromFile` 1
+  (captures.md section 4). `tools/test_auth.js` checks the encoder against that capture: `SWORDFISH` gives
+  `1d 7a 01 66 16 66 18 73 03 00`.
+
+The client sends the persona name it holds in `PLAYER.DIR`, not the one chosen on the card; a server that binds a
+session to accounts has to accept (or map) that. "I have my own number" uses whatever the install now holds, which
+after a sign-in dial is the last credential written.
+
+## Developing against the mock
+
+```
+python3 tools/mock_auth.py --port 2843 --page-origin http://127.0.0.1:8080 --accounts 100001:Guybrush --enrol open
+# page: http://127.0.0.1:8080/inn.html?auth=http://127.0.0.1:2843&com1=ws://127.0.0.1:2316
+node tools/test_auth.js          # encoder, LSCI.CFG edit and persona rule
+```
+
+`tools/mock_auth.py` is for local development and tests only, never production: Python standard library, binds
+127.0.0.1, in memory, no real authentication (its consent page has Allow and Deny buttons), and it prints the
+passwords it issues. It serves two fake providers ("Example Phone Co." and "Test Telegraph"), CORS for
+`--page-origin`, `--accounts [provider:]ID:Persona,...` (default `100001:Guybrush`, owned by the `example`
+identity) and `--enrol open|closed`. `?mode=redirect` on the login URL exercises the fallback. It does not touch
+the WebSocket.
 
 ## Keyboard and screen
 

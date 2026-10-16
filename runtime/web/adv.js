@@ -10,7 +10,7 @@ const Adv = (() => {
   const CLASSIC = new URLSearchParams(location.search).has('classic');
   const SCORE_KEY = 'inn.score', ANIM_KEY = 'inn.anim';
   const SCORE_MAX = 1993;
-  const POINTS = { disks: 10, dial: 5, connect: 25, gag: 1 };
+  const POINTS = { disks: 10, dial: 5, connect: 25, signin: 5, gag: 1 };
   const HINT_IDLE_MS = 10000, HINT_MAX = 2, TYPE_MS = 22, SHOW_MS = 7000, BAR_HIDE_MS = 1400;
   const IRIS_CLOSE_MS = 480, IRIS_OPEN_MS = 320;
 
@@ -98,7 +98,10 @@ const Adv = (() => {
       b.addEventListener('click', (e) => { e.stopPropagation(); a.fn(); });
       return b;
     }));
-    const sticky = o.sticky || o.bad || (o.actions && o.actions.length);
+    ui.cards.replaceChildren(...(o.cards || []).map(callingCard));
+    ui.cards.hidden = !(o.cards && o.cards.length);
+    ui.hold.hidden = !o.hold;
+    const sticky = o.sticky || o.bad || o.hold || (o.actions && o.actions.length) || (o.cards && o.cards.length);
     if (reduced()) {
       ui.narrText.textContent = text;
     } else {
@@ -112,6 +115,19 @@ const Adv = (() => {
     if (!sticky) narr.timer = setTimeout(narrHide, SHOW_MS + (reduced() ? 0 : text.length * TYPE_MS));
     if (ui.term.dataset.open === '1') ui.narr.hidden = true;
     adv.lastAct = Date.now();
+    if (o.focus && !ui.narr.hidden) { const first = ui.narr.querySelector('button'); if (first) first.focus(); }
+  }
+
+  // A calling card is a button drawn as a small pixel card: a band, a heading, the name in text and a
+  // magnetic stripe. Original art; a provider is only ever its configured name in lettering, never a mark.
+  function callingCard(c, i) {
+    const b = el('button', { type: 'button', className: `ccard${c.own ? ' own' : ''}` });
+    b.dataset.hue = String(i % 4);
+    b.setAttribute('aria-label', c.own ? c.label : `Calling card: ${c.label}`);
+    b.append(el('span', { className: 'ct', textContent: c.own ? 'PRIVATE LINE' : 'CALLING CARD' }),
+      el('span', { className: 'cn', textContent: c.label }), el('span', { className: 'cs' }));
+    b.addEventListener('click', (e) => { e.stopPropagation(); c.fn(); });
+    return b;
   }
 
   // ---------- the scene's own objects ----------
@@ -164,19 +180,30 @@ const Adv = (() => {
     if (page.started) return say(o.busy || 'The line is already in use. By you.', { near: sparkX('phone') });
     if (!adv.ready) return say('The telephone is still warming up. Give it a moment.');
     if (!haveDisks()) return say(o.refuse || REFUSAL, { near: sparkX('phone') });
+    if (providers.length) return phoneFlow();
     dial();
   }
 
-  function dial() {
+  // The checks before any dial. Says why and returns false when the line cannot be placed.
+  function canDial() {
     const o = objects().phone || {};
-    if (page.started) return;
-    if (!adv.ready) return say('The telephone is still warming up. Give it a moment.');
-    if (!haveDisks()) return say(o.refuse || REFUSAL, { near: sparkX('phone') });
+    const no = (text, opts) => { say(text, opts); return false; };
+    if (page.started) return false;
+    if (!adv.ready) return no('The telephone is still warming up. Give it a moment.');
+    if (!haveDisks()) return no(o.refuse || REFUSAL, { near: sparkX('phone') });
     const bad = serverProblem($('com1').value.trim() || defaultServer());
-    if (bad) return say(bad, { bad: true, actions: [{ label: 'Server address', fn: openServerDialog }] });
+    if (bad) return no(bad, { bad: true, actions: [{ label: 'Server address', fn: openServerDialog }] });
+    return true;
+  }
+
+  // opts.session is a sign-in token for the WebSocket, opts.card the provider id for the modem line.
+  function dial(opts = {}) {
+    if (!canDial()) return;
+    const o = objects().phone || {};
     ui.who.textContent = o.answer ? `"${o.answer}"` : '';
     award('dial', POINTS.dial);
-    start();
+    page.cardId = opts.card || '';
+    start(opts.session);
   }
 
   function hangUp() {
@@ -202,6 +229,225 @@ const Adv = (() => {
     if (h.role) return;
     foundGag(h);
     say(InnScenes.nextQuip(h), { near: h.x + h.w / 2 });
+  }
+
+  // ---------- sign-in: the operator asks who is calling ----------
+  // The server side is "Sign-in (server contract)" in docs/web.md; auth.js makes the calls. The flow:
+  // cards -> popup (on hold) -> account -> credential written into the install -> dial with the token.
+
+  const sign = { busy: false, cancel: null, last: null, own: false, pick: false, provider: '', pdlgReturn: null };
+  const signedIn = () => !!InnAuth.token();
+  const providerName = (id) => (providers.find((p) => p.id === id) || {}).name || id;
+  const who = () => {
+    const i = InnAuth.state.identity;
+    return i ? `${i.name} (${providerName(i.provider)})` : '';
+  };
+  const SIGN_QUIP = 'The operator recognises your voice. Mostly.';
+
+  function cardChoices(own) {
+    const list = providers.map((p) => ({ label: p.name, fn: () => signIn(p) }));
+    if (own) list.push({ label: 'I have my own number', own: true, fn: ownNumber });
+    return list;
+  }
+
+  function askWho(o = {}) {
+    sign.own = !!o.own;
+    say(o.text || 'Operator. And who\'s calling, please?', {
+      cards: cardChoices(sign.own), bad: o.bad, focus: true, near: sparkX('phone'),
+      actions: sign.own ? [] : [{ label: 'Never mind', fn: narrHide }],
+    });
+  }
+
+  // The classic path: whatever account the install already holds, no sign-in.
+  function ownNumber() {
+    InnAuth.setLine('own');
+    dial();
+  }
+
+  function phoneFlow() {
+    if (sign.busy) return;
+    if (!signedIn()) return askWho({ own: true });
+    withSession((s) => chooseLine(s, ''));
+  }
+
+  async function withSession(next) {
+    try {
+      const s = await InnAuth.fetchSession();
+      sign.last = s;
+      refreshInv();
+      return next(s);
+    } catch (e) { return signFail(e); }
+  }
+
+  function signFail(e) {
+    sign.busy = false;
+    const kind = e && e.kind;
+    if (kind === 'expired') {
+      InnAuth.forget();
+      refreshInv();
+      return askWho({ own: true, bad: true, text: 'Your sign-in has expired (the server answered 401). The operator would like to see some identification.' });
+    }
+    const tail = { network: ' The operator\'s line is mostly static.', closed: ' The operator suggests a larger switchboard.', server: ' The operator is looking into it.', refused: '' }[kind] || '';
+    const head = {
+      network: `Could not reach the sign-in server at ${InnAuth.state.base}. Check that it is running and that the ?auth= address is right.`,
+      closed: 'The server is not taking new accounts: enrolment is closed. Existing lines still work.',
+      server: `The sign-in server had a problem (it answered ${e.status}). Try again in a moment.`,
+      refused: `${e.message}`,
+    }[kind] || `Sign-in failed: ${e && e.message ? e.message : e}.`;
+    say(`${head}${/[.!?]$/.test(head) ? '' : '.'}${tail}`, { bad: true, actions: signedIn() ? [{ label: 'OK', fn: narrHide }] : [{ label: 'Pick a card', fn: () => askWho({ own: sign.own }) }, { label: 'OK', fn: narrHide }] });
+  }
+
+  // Called straight from the click, so the browser lets the popup open.
+  async function signIn(p) {
+    if (sign.busy) return;
+    const pending = InnAuth.popupLogin(p.href);
+    if (!pending) {
+      say('The pop-up was blocked, so the operator will transfer you in this window. Your disks come back with you if "Remember on this device" is on.', { sticky: true });
+      setTimeout(() => InnAuth.redirectLogin(p.href), 900);
+      return;
+    }
+    sign.busy = true;
+    sign.cancel = pending.cancel;
+    sign.provider = p.id;
+    say('The operator puts you on hold. A sign-in window has opened; finish there.', {
+      hold: true, actions: [{ label: 'Hang up on the operator', fn: () => pending.cancel() }], focus: true });
+    const r = await pending;
+    sign.busy = false;
+    sign.cancel = null;
+    if (r.session) return signedInNow(SIGN_QUIP);
+    if (r.error) return signDeclined(r.error, p.name);
+    say('The sign-in window was closed before you signed in. You are not signed in, and nothing was changed. The operator is still holding, out of habit.', {
+      bad: true, actions: [{ label: 'Pick a card', fn: () => askWho({ own: sign.own }) }, { label: 'OK', fn: narrHide }] });
+  }
+
+  function signDeclined(code, name) {
+    const what = code === 'access_denied' ? `Sign-in was declined at ${name || 'the provider'}` : `Sign-in did not finish (${code})`;
+    say(`${what}. You are not signed in. The operator hangs up with great dignity.`, {
+      bad: true, actions: [{ label: 'Pick a card', fn: () => askWho({ own: sign.own }) }, { label: 'OK', fn: narrHide }] });
+  }
+
+  // A fresh token: keep it, show the card in the inventory, then pick the line.
+  function signedInNow(lead) {
+    InnAuth.saveToken($('remember').checked);
+    award('signin', POINTS.signin);
+    refreshInv();
+    return withSession((s) => chooseLine(s, lead));
+  }
+
+  function chooseLine(s, lead) {
+    const name = s.identity.name;
+    const intro = lead ? `${lead} ` : '';
+    if (!haveDisks()) {
+      return say(`${intro}Signed in as ${name}. Now the disks, then the telephone.`, { near: sparkX('disks') });
+    }
+    if (page.started) return;
+    if (!s.accounts.length) {
+      if (!s.canCreate) return signFail(new InnAuth.AuthError('closed', 'No lines on this card.'));
+      return say(`${intro}This card has no lines yet. A new one, then.`, { actions: [{ label: 'Continue', fn: openPersonaDialog }], focus: true });
+    }
+    if (s.accounts.length === 1 && !sign.pick) {
+      const a = s.accounts[0];
+      say(`${intro}Line ${a.persona}, then.`, { sticky: true });
+      return setTimeout(() => connectAs(a), lead ? (reduced() ? 1600 : 2600) : 0);
+    }
+    sign.pick = false;
+    const actions = s.accounts.map((a) => ({ label: `${a.persona} (${a.id})`, fn: () => connectAs(a) }));
+    if (s.canCreate) actions.push({ label: 'A new line, please', fn: openPersonaDialog });
+    actions.push({ label: 'My own number', fn: ownNumber });
+    say(`${intro}Which line, please?`, { actions, focus: true, near: sparkX('phone') });
+  }
+
+  async function connectAs(a) {
+    if (!canDial()) return;
+    say(`Putting you through on the ${a.persona} line…`, { sticky: true });
+    try {
+      const c = await InnAuth.credential(a.id);
+      if (!c || c.account !== a.id || typeof c.password !== 'string') throw new InnAuth.AuthError('server', 'The credential answer was not understood.', 200);
+      await writeCredentials(a.id, c.password);
+    } catch (e) {
+      if (e instanceof InnAuth.AuthError) return signFail(e);
+      return say(`Could not prepare the line: ${e.message}`, { bad: true, actions: [{ label: 'OK', fn: narrHide }] });
+    }
+    InnAuth.setLine(a.id);
+    const id = InnAuth.state.identity;
+    dial({ session: InnAuth.token(), card: id ? id.provider : sign.provider });
+  }
+
+  async function signOut() {
+    const name = who();
+    narrHide();
+    await InnAuth.logout();
+    refreshInv();
+    say(`Signed out${name ? ` (was ${name})` : ''}. The calling card goes back in the drawer. Goodbye, and mind the cables.`, { actions: [{ label: 'OK', fn: narrHide }] });
+  }
+
+  // Choose a different line (or make one) while signed in.
+  function menuLine() {
+    if (!haveDisks()) return say('Disks first, please. The operator cannot connect an empty box.', { near: sparkX('disks') });
+    sign.pick = true;
+    withSession((s) => chooseLine(s, ''));
+  }
+
+  // ---- the new-line dialog (the same period dialog as the server address) ----
+
+  function openPersonaDialog() {
+    sign.pdlgReturn = document.activeElement;
+    ui.pers.value = '';
+    ui.persErr.textContent = '';
+    ui.pdlg.hidden = false;
+    ui.pers.focus();
+  }
+
+  function closePersonaDialog(back) {
+    ui.pdlg.hidden = true;
+    if (back && sign.last) { sign.pick = true; chooseLine(sign.last, ''); }
+    else if (sign.pdlgReturn && sign.pdlgReturn.focus && document.contains(sign.pdlgReturn)) sign.pdlgReturn.focus();
+  }
+
+  async function savePersonaDialog() {
+    const name = ui.pers.value.trim();
+    const bad = InnAuth.personaProblem(name);
+    if (bad) { ui.persErr.textContent = bad; ui.pers.focus(); return; }
+    ui.persOk.disabled = true;
+    try {
+      const a = await InnAuth.createAccount(name);
+      ui.pdlg.hidden = true;
+      if (!a || !Number.isInteger(a.id)) throw new InnAuth.AuthError('server', 'The new line was not understood.', 201);
+      if (sign.last) sign.last.accounts.push(a);
+      return connectAs(a);
+    } catch (e) {
+      if (e.kind === 'refused') { ui.persErr.textContent = e.message || 'The server did not accept that name.'; ui.pers.focus(); return; }
+      ui.pdlg.hidden = true;
+      return signFail(e);
+    } finally { ui.persOk.disabled = false; }
+  }
+
+  // ---- coming back: a page load can carry a redirect login, a saved token or a redial ----
+
+  function go() {
+    if (adv.went || !adv.ready || !adv.provLoaded) return;
+    adv.went = true;
+    const err = InnAuth.takeFragmentError();
+    const pend = InnAuth.takePending();
+    if (!providers.length) { if (store.get('inn.redial') === '1' && haveDisks()) { store.set('inn.redial', ''); dial(); } return; }
+    if (err) { signDeclined(err, ''); return; }
+    const redial = store.get('inn.redial') === '1' && haveDisks();
+    if (redial) store.set('inn.redial', '');
+    if (pend) { sign.own = true; signedInNow(SIGN_QUIP); return; }
+    if (!signedIn()) { if (redial) dial(); return; }
+    // A token from earlier in the session (or remembered): learn who it is, quietly.
+    InnAuth.fetchSession().then((s) => {
+      sign.last = s;
+      refreshInv();
+      if (!redial) return;
+      const a = s.accounts.find((x) => x.id === Number(InnAuth.line()));
+      if (a) return connectAs(a);
+      if (InnAuth.line() === 'own') return dial();
+      return chooseLine(s, '');
+    }, (e) => {
+      if (e.kind === 'expired') { InnAuth.forget(); refreshInv(); }
+      if (redial) dial();
+    });
   }
 
   // ---------- the server address ----------
@@ -254,6 +500,7 @@ const Adv = (() => {
     adv.anim = !adv.anim;
     store.set(ANIM_KEY, adv.anim ? '1' : '0', localStorage);
     InnScenes.setAnimation(adv.anim);
+    document.body.classList.toggle('still', !adv.anim);
   }
 
   // ---------- the menu bar ----------
@@ -265,12 +512,15 @@ const Adv = (() => {
       { label: 'Load disks…', fn: chooseFolder },
       { label: 'Load disk image (.zip)…', fn: chooseZip },
       { sep: true },
-      { label: 'Dial', fn: dial, off: () => page.started },
+      { label: 'Dial', fn: phoneClicked, off: () => page.started },
       { label: 'Hang up', fn: hangUp, off: () => !page.started },
     ];
     if (providers.length) {
       game.push({ sep: true });
-      for (const p of providers) game.push({ label: `Sign in with ${p.name}`, fn: () => { location.href = p.href; } });
+      if (signedIn()) {
+        game.push({ label: 'Choose line…', fn: menuLine, off: () => page.started });
+        game.push({ label: 'Sign out', fn: signOut, off: () => page.started });
+      } else game.push({ label: 'Sign in…', fn: () => (sign.busy ? say('The operator already has you on hold.') : askWho({ own: false })), off: () => page.started });
     }
     return [
       { name: 'Game', items: game },
@@ -286,7 +536,7 @@ const Adv = (() => {
           'Click the glinting things: first the disks, then the telephone. The rest is scenery with opinions. Drop a folder or a .zip anywhere on the picture to hand over the disks. The menu bar lives at the top edge (F10 on the keyboard) and can do everything the picture can.',
           { sticky: true, actions: [{ label: 'OK', fn: narrHide }] }) },
         { label: 'About', fn: () => say(
-          'Online world, an unofficial browser port of an old online-game client. It runs your own copy of the original files, which stay on this device. Free software, GPL-3.0-or-later.',
+          `Online world, an unofficial browser port of an old online-game client. It runs your own copy of the original files, which stay on this device. Free software, GPL-3.0-or-later.${signedIn() ? ` You are signed in as ${who() || 'a calling card holder'}.` : ''}`,
           { sticky: true, actions: [{ label: 'OK', fn: narrHide }] }) },
       ] },
     ];
@@ -385,7 +635,8 @@ const Adv = (() => {
     document.addEventListener('keydown', (e) => {
       if (!landing()) return;
       adv.lastAct = Date.now();
-      if (!ui.dlg.hidden) return dialogKey(e);
+      const dlg = openDialog();
+      if (dlg) return dialogKey(e, dlg);
       if (e.key === 'Alt') { altAlone = true; return; }
       altAlone = false;
       const inBar = ui.bar.contains(document.activeElement) || ui.pop.contains(document.activeElement);
@@ -397,7 +648,7 @@ const Adv = (() => {
       if (e.key === 'Escape') {
         if (bar.open >= 0) { e.preventDefault(); closeMenu(true); }
         else if (inBar) { e.preventDefault(); closeMenu('page'); }
-        else narrHide();
+        else if (!sign.busy) narrHide();
         return;
       }
       if (!inBar) return;
@@ -427,7 +678,7 @@ const Adv = (() => {
       }
     }, true);
     document.addEventListener('keyup', (e) => {
-      if (e.key === 'Alt' && altAlone && landing() && ui.dlg.hidden) {
+      if (e.key === 'Alt' && altAlone && landing() && !openDialog()) {
         e.preventDefault();
         if (ui.bar.contains(document.activeElement) || ui.pop.contains(document.activeElement)) closeMenu('page'); else focusBar();
       }
@@ -441,11 +692,16 @@ const Adv = (() => {
     ui.bar.addEventListener('focusout', () => barLater());
   }
 
-  function dialogKey(e) {
-    if (e.key === 'Escape') { e.preventDefault(); closeServerDialog(); return; }
-    if (e.key === 'Enter' && e.target === ui.srv) { e.preventDefault(); saveServerDialog(); return; }
+  const openDialog = () => [
+    { root: ui.dlg, ctl: [ui.srv, ui.srvOk, ui.srvCancel], input: ui.srv, close: closeServerDialog, save: saveServerDialog },
+    { root: ui.pdlg, ctl: [ui.pers, ui.persOk, ui.persCancel], input: ui.pers, close: () => closePersonaDialog(true), save: savePersonaDialog },
+  ].find((d) => !d.root.hidden);
+
+  function dialogKey(e, d) {
+    if (e.key === 'Escape') { e.preventDefault(); d.close(); return; }
+    if (e.key === 'Enter' && e.target === d.input) { e.preventDefault(); d.save(); return; }
     if (e.key !== 'Tab') return;
-    const ctl = [ui.srv, ui.srvOk, ui.srvCancel];
+    const ctl = d.ctl;
     const i = ctl.indexOf(document.activeElement);
     e.preventDefault();
     ctl[(i + (e.shiftKey ? ctl.length - 1 : 1)) % ctl.length].focus();
@@ -522,9 +778,19 @@ const Adv = (() => {
   function refresh() {
     if (!ui) return;
     const has = haveDisks();
-    ui.inv.hidden = !has;
+    refreshInv();
     InnScenes.setSpark('disks', adv.ready && !has && !page.started);
     InnScenes.setSpark('phone', adv.ready && has && !page.started);
+  }
+
+  function refreshInv() {
+    if (!ui) return;
+    ui.disk.hidden = !haveDisks();
+    ui.card.hidden = !signedIn();
+    ui.inv.hidden = ui.disk.hidden && ui.card.hidden;
+    const name = who();
+    ui.card.title = name ? `Calling card: ${name}` : 'You have a calling card';
+    ui.card.setAttribute('aria-label', `Inventory: ${ui.card.title}`);
   }
 
   const hooks = {
@@ -537,7 +803,7 @@ const Adv = (() => {
       adv.welcomed = true;
       if (page.drive === 'saved') say('Welcome back. The disks are right where you left them, and slightly warmer.');
       else if (page.drive === 'preloaded') say('The disks came packed with this build. Convenient. Now, about that telephone.');
-      if (store.get('inn.redial') === '1' && haveDisks()) { store.set('inn.redial', ''); dial(); }
+      go();
     },
 
     drive: refresh,
@@ -588,13 +854,14 @@ const Adv = (() => {
 
     providers(list) {
       providers = list;
+      adv.provLoaded = true;
+      if (ui) refreshInv();
+      go();
     },
-
-    providersChanged: () => {},
 
     sceneChanged() {
       if (!ui) return;
-      narrHide();
+      if (!sign.busy) narrHide();
       refresh();
       if (ui.term.dataset.open === '1') placeTerm();
     },
@@ -623,14 +890,27 @@ const Adv = (() => {
     ui.score = el('span', { className: 'score' }, el('span', { className: 'lbl', textContent: 'Score: ' }), ui.scoreText);
     bar.append(el('span', { className: 'spacer' }), ui.score);
     ui.pop = el('div', { id: 'menupop', className: 'adv', role: 'menu', hidden: true });
-    ui.inv = el('div', { id: 'inv', className: 'adv', hidden: true, title: 'You have the disks', role: 'img', ariaLabel: 'Inventory: the disks' });
-    ui.inv.innerHTML = '<svg viewBox="0 0 12 12" shape-rendering="crispEdges" aria-hidden="true"><path fill="#1c2260" d="M0 0h10l2 2v10H0z"/>'
+    const item = (title, svg) => {
+      const n = el('div', { className: 'item', title, role: 'img', hidden: true });
+      n.setAttribute('aria-label', `Inventory: ${title}`);
+      n.innerHTML = svg;
+      return n;
+    };
+    ui.disk = item('You have the disks', '<svg viewBox="0 0 12 12" shape-rendering="crispEdges" aria-hidden="true"><path fill="#1c2260" d="M0 0h10l2 2v10H0z"/>'
       + '<path fill="#3c4cc0" d="M1 1h9l1 1v9H1z"/><path fill="#c8ccd8" d="M3 1h6v3H3z"/><path fill="#5c6074" d="M7 1.5h1v2H7z"/>'
-      + '<path fill="#f6f0dc" d="M2 6h8v5H2z"/><path fill="#2c2c44" d="M3 7.5h5v1H3z"/></svg>';
+      + '<path fill="#f6f0dc" d="M2 6h8v5H2z"/><path fill="#2c2c44" d="M3 7.5h5v1H3z"/></svg>');
+    // The calling card: a cream card with a red band, a name line and a dark stripe.
+    ui.card = item('You have a calling card', '<svg viewBox="0 0 12 12" shape-rendering="crispEdges" aria-hidden="true"><path fill="#3a2a1a" d="M0 2h12v8H0z"/>'
+      + '<path fill="#f6f0dc" d="M1 3h10v6H1z"/><path fill="#c4401c" d="M1 3h10v2H1z"/><path fill="#2c2c44" d="M2 6h5v1H2z"/>'
+      + '<path fill="#8f7e62" d="M2 8h3v.5H2z"/><path fill="#2c2c44" d="M8 6h2v2H8z"/></svg>');
+    ui.inv = el('div', { id: 'inv', className: 'adv', hidden: true, role: 'group', ariaLabel: 'Inventory' }, ui.disk, ui.card);
+    ui.cards = el('div', { className: 'cards', role: 'group', ariaLabel: 'Calling cards', hidden: true });
+    ui.hold = el('div', { className: 'hold', ariaHidden: 'true', hidden: true });
+    ui.hold.innerHTML = '<svg viewBox="0 0 8 10" shape-rendering="crispEdges"><path d="M3 0h4v2H5v6H3v1H1V8H0V6h1V5h2z"/></svg>'.repeat(3);
     ui.narrText = el('p', { className: 'text', ariaHidden: 'true' });
     ui.narrSr = el('p', { className: 'sr' });
     ui.acts = el('div', { className: 'acts' });
-    ui.narr = el('div', { id: 'narr', className: 'adv', hidden: true, role: 'status' }, ui.narrText, ui.narrSr, ui.acts);
+    ui.narr = el('div', { id: 'narr', className: 'adv', hidden: true, role: 'status' }, ui.narrText, ui.narrSr, ui.hold, ui.cards, ui.acts);
     ui.narr.addEventListener('click', (e) => { if (!e.target.closest('button')) narrHide(); });
     ui.who = el('p', { className: 'who' });
     ui.termTitle = el('span', { textContent: 'Dialing' });
@@ -643,14 +923,35 @@ const Adv = (() => {
     ui.srvErr = el('p', { className: 'err', role: 'alert' });
     ui.srvOk = el('button', { type: 'button', className: 'abtn primary', textContent: 'OK' });
     ui.srvCancel = el('button', { type: 'button', className: 'abtn', textContent: 'Cancel' });
-    ui.dlg = el('div', { id: 'dlg', className: 'adv', hidden: true },
+    ui.dlg = el('div', { id: 'dlg', className: 'adv dlg', hidden: true },
       el('div', { role: 'dialog', ariaModal: 'true', className: 'box' },
         el('h2', { id: 'dlg-title', textContent: 'Server address' }),
         el('p', { className: 'hint', textContent: 'Where the game server listens, such as ws://host:2316. Leave it empty for the default.' }),
         ui.srv, ui.srvErr, el('div', { className: 'acts' }, ui.srvOk, ui.srvCancel)));
     ui.dlg.firstChild.setAttribute('aria-labelledby', 'dlg-title');
+    ui.pers = el('input', { id: 'adv-pers', className: 'input', type: 'text', maxLength: 10, spellcheck: false, autocomplete: 'off' });
+    ui.persErr = el('p', { className: 'err', role: 'alert' });
+    ui.persOk = el('button', { type: 'button', className: 'abtn primary', textContent: 'OK' });
+    ui.persCancel = el('button', { type: 'button', className: 'abtn', textContent: 'Cancel' });
+    ui.pdlg = el('div', { id: 'pdlg', className: 'adv dlg', hidden: true },
+      el('div', { role: 'dialog', ariaModal: 'true', className: 'box' },
+        el('h2', { id: 'pdlg-title', textContent: 'A new line, please' }),
+        el('p', { className: 'hint', textContent: 'Name for the new line: 1 to 10 letters or digits.' }),
+        ui.pers, ui.persErr, el('div', { className: 'acts' }, ui.persOk, ui.persCancel)));
+    ui.pdlg.firstChild.setAttribute('aria-labelledby', 'pdlg-title');
     ui.iris = el('div', { id: 'iris', hidden: true });
-    document.body.append(files, bar, ui.pop, ui.inv, ui.narr, ui.term, ui.dlg, ui.iris);
+    document.body.append(files, bar, ui.pop, ui.inv, ui.narr, ui.term, ui.dlg, ui.pdlg, ui.iris);
+    ui.persOk.addEventListener('click', savePersonaDialog);
+    ui.persCancel.addEventListener('click', () => closePersonaDialog(true));
+    ui.pdlg.addEventListener('pointerdown', (e) => { if (e.target === ui.pdlg) closePersonaDialog(true); });
+    ui.narr.addEventListener('keydown', (e) => {
+      if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+      const list = [...ui.narr.querySelectorAll('button')];
+      const i = list.indexOf(document.activeElement);
+      if (i < 0) return;
+      e.preventDefault();
+      list[(i + (e.key === 'ArrowRight' ? 1 : list.length - 1)) % list.length].focus();
+    });
     ui.srvOk.addEventListener('click', saveServerDialog);
     ui.srvCancel.addEventListener('click', closeServerDialog);
     ui.dlg.addEventListener('pointerdown', (e) => { if (e.target === ui.dlg) closeServerDialog(); });
@@ -666,10 +967,10 @@ const Adv = (() => {
     build();
     wireMenu();
     adv.anim = store.get(ANIM_KEY, localStorage) !== '0';
-    if (!adv.anim) InnScenes.setAnimation(false);
+    if (!adv.anim) { InnScenes.setAnimation(false); document.body.classList.add('still'); }
     window.addEventListener('resize', () => { if (ui.term.dataset.open === '1') placeTerm(); });
     setInterval(() => {
-      if (!landing() || page.started || adv.hints >= HINT_MAX || bar.open >= 0 || !ui.dlg.hidden) return;
+      if (!landing() || page.started || sign.busy || adv.hints >= HINT_MAX || bar.open >= 0 || openDialog()) return;
       if (Date.now() - adv.lastAct < HINT_IDLE_MS) return;
       const role = haveDisks() ? 'phone' : 'disks';
       const spark = InnScenes.scene() && InnScenes.scene().spark && InnScenes.scene().spark[role];

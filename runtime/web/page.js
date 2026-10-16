@@ -99,6 +99,7 @@ function dialBegin(server) {
   dialLine('ATZ');
   dialLine('OK');
   if (page.musicNote) dialLine(page.musicNote);
+  if (page.cardId) dialLine(`AT+CARD=${page.cardId}`);
   dialLine(`ATDT ${server.replace(/^wss?:\/\//, '')}`);
   adv('dialBegin');
 }
@@ -152,19 +153,43 @@ async function loadProviders() {
     }
   } catch { /* no providers: the section stays hidden */ }
   found = Array.isArray(found) ? found.filter((p) => p && typeof p.name === 'string' && typeof p.url === 'string') : [];
+  InnAuth.configure(base);
   list.replaceChildren();
+  const usable = [];
   for (const p of found) {
     let href;
     try { href = new URL(p.url, base).href; } catch { continue; }
-    if (!/^https?:/.test(href)) continue;
+    // The login must live on the auth server's origin: the popup's message is accepted only from there.
+    if (!/^https?:/.test(href) || new URL(href).origin !== new URL(base).origin) continue;
     const a = document.createElement('a');
     a.className = 'btn';
-    a.href = href;
+    a.href = InnAuth.loginUrl(href, 'redirect');
     a.textContent = `Sign in with ${p.name}`;
     list.append(a);
+    usable.push({ id: typeof p.id === 'string' ? p.id : p.name, name: p.name, href });
   }
   $('providers').hidden = !list.children.length;
-  adv('providers', [...list.children].map((a) => ({ name: a.textContent.replace(/^Sign in with /, ''), href: a.href })));
+  adv('providers', usable);
+}
+
+// ---- the signed-in account: its number and password go into the browser's copy of the install ----
+
+// Writes the account number into every LSCI.CFG (the root one and the land copies LSCIGET made) and
+// the stored password into INN\PASS_SET.DTA, so the client's own logon runs unchanged (innkeeper
+// docs/protocol/messages.md section 4.1; the encoder is in auth.js).
+function writeCredentials(account, password) {
+  const file = InnAuth.passwordFile(password);
+  const configs = findConfigs(DRIVE);
+  if (!configs.length) throw new Error('LSCI.CFG not found in the installation.');
+  for (const cfg of configs) {
+    const text = new TextDecoder('latin1').decode(FS.readFile(cfg));
+    FS.writeFile(cfg, InnAuth.setCfgId(text, account));
+  }
+  const dir = `${DRIVE}/${PROGRAM.dir}`;
+  const existing = FS.readdir(dir).find((n) => /^pass_set\.dta$/i.test(n)) || 'PASS_SET.DTA';
+  FS.writeFile(`${dir}/${existing}`, file);
+  log(`signed-in account ${account} written to LSCI.CFG and ${existing}`);
+  return syncDrive(false);
 }
 
 function toast(text, kind = '') {
@@ -445,7 +470,15 @@ function showDriveState() {
 // ---- running ----
 
 function runtimeArgs(server) {
-  const args = ['--com1', server];
+  // The session token rides on the WebSocket address as ?session= (docs/web.md, Sign-in). page.server,
+  // the modem lines and the status text keep the plain address.
+  let spec = server;
+  if (page.session) {
+    const url = new URL(server);
+    url.searchParams.set('session', page.session);
+    spec = url.href;
+  }
+  const args = ['--com1', spec];
   if (params.get('perf')) args.push('--perf');
   if (params.get('ips')) args.push('--ips', params.get('ips'));
   return args.concat([DRIVE, `${PROGRAM.dir}\\${PROGRAM.exe}`], PROGRAM.args);
@@ -577,11 +610,12 @@ function keepServerSaves() {
   window.addEventListener('pagehide', () => InnSaves.flushAll());
 }
 
-function start() {
+function start(session) {
   if (page.started || page.drive === 'none') return;
   page.started = true;
   const server = $('com1').value.trim() || defaultServer();
   page.server = server;
+  page.session = session || '';
   storageSet(SERVER_KEY, server);
   storageSet(REMEMBER_KEY, $('remember').checked ? '1' : '0');
   $('stage').hidden = false;
@@ -613,7 +647,7 @@ function wirePage() {
   $('remember').checked = storageGet(REMEMBER_KEY) !== '0';
   $('pick-zip').addEventListener('change', (e) => e.target.files[0] && pick(filesFromZip, e.target.files[0]));
   $('pick-dir').addEventListener('change', (e) => e.target.files.length && pick(filesFromFolder, e.target.files));
-  $('start').addEventListener('click', start);
+  $('start').addEventListener('click', () => start());
   $('forget').addEventListener('click', forget);
   $('change').addEventListener('click', () => { page.changing = true; showDriveState(); });
   $('restart').addEventListener('click', () => location.reload());
