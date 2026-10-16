@@ -212,7 +212,7 @@ function clearDir(dir) {
 function installRoot(paths) {
   const pattern = new RegExp(`(^|/)${PROGRAM.exe.replace('.', '\\.')}$`, 'i');
   const hit = paths.filter((p) => pattern.test(p)).sort((a, b) => a.length - b.length)[0];
-  if (!hit) throw new Error(`${PROGRAM.exe} not found: pick the INN directory or a zip of it`);
+  if (!hit) throw new Error(`${PROGRAM.exe} not found: pick the folder that contains it, or a zip of it`);
   return hit.slice(0, hit.length - PROGRAM.exe.length);
 }
 
@@ -369,7 +369,7 @@ function onDrop(e) {
   const zip = [...e.dataTransfer.files].find((f) => /\.zip$/i.test(f.name));
   if (entries.some((entry) => entry.isDirectory)) pick(filesFromDrop, entries);
   else if (zip) pick(filesFromZip, zip);
-  else toast('Drop the INN folder itself, or a .zip of it.', 'bad');
+  else toast('Drop the install folder itself, or a .zip of it.', 'bad');
 }
 
 function wireDrop() {
