@@ -372,6 +372,7 @@ page shows `message` for a 4xx it does not know):
 | `POST /auth/attest`, `{"attest": "18+v2"}` | 204; the answer is stored on the identity | 400 `bad_attest`; 401 |
 | `POST /auth/accounts`, `{"persona": "Elaine"}` | 201 `{"id": 100002, "persona": "Elaine"}` | 401; 403 `enrolment_closed`; 403 `attest_required`; 400 `bad_persona`; 409 `persona_taken`; 429 `rate_limited` |
 | `POST /auth/accounts/<id>/credential` | 200 `{"account": 100002, "password": "K3J9QWZ7"}`; every call rotates the password | 401; 404 when the identity does not own `<id>` |
+| `GET /auth/accounts/<id>/saves` | 200 `{"account": 100002, "files": [{"path": "INN\\ELAINE.DTA", "version": 3, "hash": "<sha-256 hex>", "size": 69, "mtime": 1760000000000, "current": true, "data": "<base64>"}]}`: the files the save channel would hand that account, with `data` for as many as fit in 2 MiB in all (the rest come without it); `?path=<DOS path, URL-encoded>` answers one entry, always with `data` | 401; 404 `no_such_account` when the identity does not own `<id>`; with `?path=`: 400 `bad_path`, 404 `no_such_file` |
 | `POST /auth/logout` | 204 and the token is revoked | the page forgets the token whatever the answer |
 
 What the page does with the answers it does not just show:
@@ -523,12 +524,36 @@ zero when blank. `tools/test_auth.js` checks the writer against that table.
 Two accounts that share an install therefore never see each other's personas, and the install's own personas
 (say the one in the zip) are never uploaded to a web account.
 
-*Known limits.* The client reads its persona once, at "Select Player", before the host's manifest exists (the
-manifest comes after the Login). In a browser that has never held the account, the client therefore shows and
-keeps the made-up persona, and writes it back over the file the sync has just restored: looks changed with
-"Change", and skills earned elsewhere, do not carry to a new browser (verified: the host's copy was restored,
-then overwritten by the client's). A first fix would be for the server to hand the persona files over HTTP,
-with the session token, before the page dials. Two personas whose first 8 characters match (`Abcdefgh1`,
+**Fetched before the dial.** The client reads its persona once, at "Select Player", before the host's manifest
+exists (the manifest comes after the Login), so a browser that has never held the account used to show and keep
+the made-up persona, and write it back over the file the sync had just restored (verified: version 5 restored,
+then the client uploaded version 6). Now `connectAs` goes through `writeCredentials`, which, after the credential
+call and before `writePersona`, calls `prefetchSaves` (`page.js`): `GET /auth/accounts/<id>/saves` with the session
+token (8 s timeout), then `InnSaves.prefetch` (`saves.js`) writes each file the line may sync (the same filter
+as above, so never `PASS_SET.DTA`, `PLAYER.DIR` or another persona's file) into the drive with the host's
+modification time and records its version and hash as synced (the per-account `localStorage` record), so the
+first manifest neither uploads nor downloads. Files the listing left without bytes are fetched one by one with
+`?path=`. A hash that does not match is refused and counted. A local file is replaced when it is missing, is a
+made-up seed, or has not changed since the last sync; and also when this browser has never synced the account
+at all, since then nothing in the install can be a newer copy of the account's (the install's own starting
+`MYCHARS.DAT`, say): the browser's file is kept beside it with the extension `.OLD`, which is not a save name
+and never syncs. Any other differing file is left for the manifest and the host's modification-time rule, as
+before. Because the persona file is already there, `writePersona` finds it and writes no made-up one.
+
+If the call fails (the server does not answer, 5xx, a hash mismatch) the line is dialed anyway as it always was:
+the narrator says in a box that the saved files could not be fetched and why, then dials after a pause of about
+3 s, and the modem output gets `; SAVES NOT FETCHED (...)`. "I have my own number" does not call the route.
+`tools/test_saves.js` covers the rules against a scripted listing; `tools/mock_auth.py --save ID:PATH=FILE`
+serves the route for page-only runs.
+
+Verified 2026-10-16 in headless Chromium against the real `innkeeperd --public --sandbox` (seccomp kill mode) and
+`dev-oidc`: profile A signed in, opened the line Elaine, dialed, changed the persona's skin bits and wrote a
+`MYCHARS.DAT` through the drive, and pushed (host: `ELAINE.DTA` version 3). A fresh profile B signed in with the
+same subject and dialed: before the Login its `ELAINE.DTA` and `MYCHARS.DAT` were byte-identical to A's, Select
+Player showed A's looks, and the host's versions were unchanged after B's logon. With the saves call aborted or
+answered 503 the dial went on with the note.
+
+*Known limits.* Two personas whose first 8 characters match (`Abcdefgh1`,
 `Abcdefgh2`) share one file name; the page does not try to tell them apart.
 
 ## Legal pages and the age notice

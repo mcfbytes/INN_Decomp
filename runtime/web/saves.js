@@ -368,7 +368,8 @@ const InnSaves = (() => {
   // A new COM1 connection starts without an account until its manifest arrives.
   function reset() { account = null; clearInterval(sweeper); sweeper = null; cancelTimers(); }
 
-  function init(environment) { env = environment; }
+  // The page may bind the drive early (before the dial, for `prefetch`) and the rest later; later values win.
+  function init(environment) { env = Object.assign({}, env, environment); }
 
   // The page's own account for this connection: persona is the line's persona name, or null for a line that
   // has no sign-in (everything in the install syncs, as before).
@@ -383,6 +384,57 @@ const InnSaves = (() => {
     try { localStorage.setItem(SEED_PREFIX + forAccount, JSON.stringify(all)); } catch { /* the seed is lost with the visit */ }
   }
 
-  return { init, reset, config, setLine, seed, onControl, onFileClosed, flushAll, flushFinal, sweep, sha256Hex, canonical, lastSaved: () => lastSaved };
+  // Before a signed-in line dials: write the account's files from the server's HTTP listing (innkeeperd
+  // `GET /auth/accounts/<id>/saves`, docs/web.md "The persona on the drive") into the drive and record each as
+  // synced, so the client's one read of its persona at Select Player already sees the real looks and the first
+  // manifest finds nothing to upload. `listing` is the parsed answer; `fetchOne(path)` returns one entry with
+  // its data, for the files the listing left without bytes. Call it after `setLine`. A local file is replaced
+  // only by the rules of a download: it is missing, it is a made-up seed, it has not changed since the last
+  // sync, or this browser has never synced the account (then the local file is kept as .OLD); any other
+  // differing file is left for the manifest to decide. Resolves { restored, failed }.
+  async function prefetch(forAccount, listing, fetchOne) {
+    const key = STATE_PREFIX + forAccount;
+    let synced = {};
+    let made = {};
+    try { synced = JSON.parse(localStorage.getItem(key)) || {}; } catch { synced = {}; }
+    try { made = JSON.parse(localStorage.getItem(SEED_PREFIX + forAccount)) || {}; } catch { made = {}; }
+    const fresh = Object.keys(synced).length === 0;
+    const result = { restored: 0, failed: 0 };
+    const files = listing && Array.isArray(listing.files) ? listing.files : [];
+    for (const entry of files) {
+      const path = entry && typeof entry.path === 'string' ? canonical(entry.path) : null;
+      if (!path || path !== entry.path || !allowed(path)) continue;
+      try {
+        const local = readLocal(path);
+        if (local && local.hash === entry.hash) { synced[path] = { version: entry.version, hash: entry.hash }; continue; }
+        const stale = !!local && (made[path] === local.hash
+          || (synced[path] && synced[path].hash === local.hash && synced[path].version !== entry.version));
+        // A browser that has never synced this account holds nothing of the account's: a file here (say the
+        // install's own starting character file) is not a newer copy of it, so the host's wins, and the
+        // browser's is kept beside it with the extension .OLD (not a save name, so it never syncs).
+        const unrelated = !!local && !stale && fresh && !synced[path];
+        if (local && !stale && !unrelated) continue; // changed here since the last sync: the manifest decides
+        const full = typeof entry.data === 'string' ? entry : await fetchOne(path);
+        const data = fromBase64(full.data);
+        if (sha256Hex(data) !== entry.hash) throw new Error('the download does not match its hash');
+        if (unrelated) writeLocal(path.replace(/\.[^.\\]*$/, '.OLD'), local.data, local.mtime);
+        writeLocal(path, data, entry.mtime);
+        synced[path] = { version: entry.version, hash: entry.hash };
+        delete made[path];
+        result.restored++;
+        env.log(`saves: fetched ${path} before dialing (version ${entry.version})`);
+      } catch (err) {
+        result.failed++;
+        env.log(`saves: ${path}: ${err.message}`);
+      }
+    }
+    try {
+      localStorage.setItem(key, JSON.stringify(synced));
+      localStorage.setItem(SEED_PREFIX + forAccount, JSON.stringify(made));
+    } catch { /* kept for this visit only: the manifest then reconciles by hash */ }
+    return result;
+  }
+
+  return { init, reset, config, setLine, seed, prefetch, onControl, onFileClosed, flushAll, flushFinal, sweep, sha256Hex, canonical, lastSaved: () => lastSaved };
 })();
 if (typeof module !== 'undefined' && module.exports) module.exports = InnSaves;

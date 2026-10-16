@@ -16,6 +16,9 @@ It implements the page <-> server contract in docs/web.md ("Sign-in (server cont
     POST /auth/accounts                       {persona} -> 201 {id, persona}; 403 attest_required with
                                               --attest-required; 429 rate_limited with --accounts-per-day
     POST /auth/accounts/<id>/credential       -> {account, password} (rotates)
+    GET  /auth/accounts/<id>/saves[?path=P]   Bearer token -> {account, files: [{path, version, hash, size, mtime,
+                                              current, data}]}, or one entry with ?path=; the files are the ones
+                                              given with --save (the mock never sees the WebSocket)
     POST /auth/logout                         -> 204
 
 Two fake providers, "Example Phone Co." (example) and "Test Telegraph" (telegraph). Each provider has one
@@ -33,6 +36,7 @@ server_error.
     # then open http://127.0.0.1:2842/inn.html?auth=http://127.0.0.1:2843
 """
 import argparse
+import base64
 import hashlib
 import hmac
 import html
@@ -42,6 +46,7 @@ import secrets
 import string
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
@@ -68,6 +73,7 @@ class State:
         self.attested = {}      # identity key -> {age, terms}
         self.accounts = {}      # provider id -> {account id: persona}
         self.passwords = {}     # account id -> last issued password
+        self.saves = {}         # account id -> {DOS path: {version, mtime, data}}, from --save
         self.next_id = 100001
         for provider, number, persona in accounts:
             self.accounts.setdefault(provider, {})[number] = persona
@@ -192,6 +198,24 @@ def make_handler(state):
                 return self.reply(200, page, "text/html")
             if url.path == "/auth/callback":
                 return self.callback(q)
+            m = re.fullmatch(r"/auth/accounts/(\d+)/saves", url.path)
+            if m:
+                token, provider = self.provider_of()
+                if not provider:
+                    return self.err(401, "unauthorized", "The session is missing or has expired.")
+                number = int(m.group(1))
+                if number not in state.accounts.get(provider, {}):
+                    return self.err(404, "no_such_account", "That account does not belong to this sign-in.")
+                held = state.saves.get(number, {})
+                entry = lambda path, f: {"path": path, "version": f["version"], "hash": hashlib.sha256(f["data"]).hexdigest(),
+                                         "size": len(f["data"]), "mtime": f["mtime"], "current": True}
+                if "path" in q:
+                    path = q["path"].replace("/", "\\").upper()
+                    if path not in held:
+                        return self.err(404, "no_such_file", "No such save file.")
+                    return self.reply(200, dict(entry(path, held[path]), data=base64.b64encode(held[path]["data"]).decode()))
+                return self.reply(200, {"account": number, "files": [
+                    dict(entry(path, f), data=base64.b64encode(f["data"]).decode()) for path, f in sorted(held.items())]})
             if url.path == "/auth/session":
                 token, provider = self.provider_of()
                 if not provider:
@@ -307,9 +331,18 @@ def main():
     ap.add_argument("--attest-required", action="store_true",
                     help="POST /auth/accounts answers 403 attest_required until the session has POSTed /auth/attest, "
                          "although GET /auth/session reports the attestation as current")
+    ap.add_argument("--save", action="append", default=[], metavar="ID:DOSPATH=FILE",
+                    help="a save file the account holds, served by GET /auth/accounts/<id>/saves, for example "
+                         "100001:INN\\ELAINE.DTA=/path/to/file (repeatable; version 1)")
     args = ap.parse_args()
     state = State(parse_accounts([a for a in args.accounts.split(",") if a]), args.enrol, args.page_origin.rstrip("/"),
                   args.accounts_per_day, args.attest_required)
+    for item in args.save:
+        head, _, source = item.partition("=")
+        number, _, dos = head.partition(":")
+        with open(source, "rb") as handle:
+            state.saves.setdefault(int(number), {})[dos.replace("/", "\\").upper()] = {
+                "version": 1, "mtime": int(time.time() * 1000), "data": handle.read()}
     server = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(state))
     sys.stderr.write(f"mock_auth: MOCK server (development only) on http://127.0.0.1:{args.port}, page origin {state.page_origin}\n")
     try:

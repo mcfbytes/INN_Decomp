@@ -99,5 +99,47 @@ const wait = () => new Promise((r) => setTimeout(r, 50));
   await wait(); await wait();
   const all = sent.filter((m) => m.op === 'put').map((m) => m.path).sort();
   assert.deepEqual(all, ['INN\\ELAINE.DTA', 'INN\\GUYBRUSH.DTA', 'INN\\PLAYER.DIR']);
+  // Before the dial: the HTTP listing lands in the drive, recorded as synced, and the first manifest does nothing.
+  sent.length = 0;
+  InnSaves.reset();
+  for (const k of [...files.keys()]) files.delete(k);
+  put('INN/GUYBRUSH.DTA', 'someone else');
+  InnSaves.setLine('Elaine');
+  const real = { 'INN\\ELAINE.DTA': 'real looks', 'INN\\YSERBIUS\\MYCHARS.DAT': 'hero', 'INN\\PASS_SET.DTA': 'x', 'INN\\GUYBRUSH.DTA': 'no' };
+  const listing = {
+    account: 100007,
+    files: Object.entries(real).map(([p, d]) => ({ path: p, hash: hashOf(d), version: 4, size: d.length, mtime: 2000, ...(d === 'hero' ? {} : { data: b64(d) }) })),
+  };
+  const asked = [];
+  const done = await InnSaves.prefetch(100007, listing, async (p) => { asked.push(p); return { data: b64(real[p]) }; });
+  assert.deepEqual(done, { restored: 2, failed: 0 });
+  assert.deepEqual(asked, ['INN\\YSERBIUS\\MYCHARS.DAT'], 'a file listed without bytes is fetched by path');
+  assert.equal(get('INN/ELAINE.DTA'), 'real looks');
+  assert.equal(get('INN/YSERBIUS/MYCHARS.DAT'), 'hero');
+  assert.equal(get('INN/PASS_SET.DTA'), undefined, 'the password file is never taken');
+  assert.equal(get('INN/GUYBRUSH.DTA'), 'someone else', 'another persona is left alone');
+  assert.deepEqual(JSON.parse(store.get('inn.saves.100007'))['INN\\ELAINE.DTA'], { version: 4, hash: hashOf('real looks') });
+  const entries = Object.entries(real).filter(([p]) => !/PASS_SET|GUYBRUSH/.test(p));
+  InnSaves.onControl(JSON.stringify({ op: 'manifest', account: 100007, files: entries.map(([p, d]) => ({ path: p, hash: hashOf(d), version: 4, size: d.length, mtime: 2000 })) }));
+  await wait(); await wait();
+  assert.deepEqual(sent, [], 'the first manifest neither uploads nor downloads');
+
+  // A bad hash is refused and counted; a local file changed since the last sync is left to the manifest.
+  InnSaves.reset();
+  put('INN/ELAINE.DTA', 'edited here');
+  const bad = { files: [{ path: 'INN\\ELAINE.DTA', hash: hashOf('real looks'), version: 5, size: 10, mtime: 1, data: b64('real looks') },
+    { path: 'INN\\TWINION\\TWINCHAR.DAT', hash: hashOf('abc'), version: 1, size: 3, mtime: 1, data: b64('abd') }] };
+  const second = await InnSaves.prefetch(100007, bad, async () => { throw new Error('unused'); });
+  assert.deepEqual(second, { restored: 0, failed: 1 });
+  assert.equal(get('INN/ELAINE.DTA'), 'edited here');
+  assert.equal(get('INN/TWINION/TWINCHAR.DAT'), undefined);
+  // An account this browser has never synced: the install's own character file gives way to the host's and is
+  // kept as .OLD; the next account of the same browser, already synced once, would not be touched this way.
+  InnSaves.reset();
+  put('INN/YSERBIUS/MYCHARS.DAT', 'starter');
+  const fresh = { files: [{ path: 'INN\\YSERBIUS\\MYCHARS.DAT', hash: hashOf('mine'), version: 2, size: 4, mtime: 9, data: b64('mine') }] };
+  assert.deepEqual(await InnSaves.prefetch(100009, fresh, async () => { throw new Error('unused'); }), { restored: 1, failed: 0 });
+  assert.equal(get('INN/YSERBIUS/MYCHARS.DAT'), 'mine');
+  assert.equal(get('INN/YSERBIUS/MYCHARS.OLD'), 'starter');
   console.log('test_saves: ok');
 })().catch((e) => { console.error(e); process.exit(1); });
