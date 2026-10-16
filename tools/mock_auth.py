@@ -10,13 +10,18 @@ It implements the page <-> server contract in docs/web.md ("Sign-in (server cont
     GET  /auth/providers                     [{id, name, url}]
     GET  /auth/login?provider=&return=&mode= consent page (Allow / Deny)
     GET  /auth/callback?...                   finishes: popup postMessage, or a redirect with a fragment
-    GET  /auth/session                        Bearer token -> {identity, accounts, canCreate}
+    GET  /auth/session                        Bearer token -> {identity: {handle, provider}, accounts, canCreate,
+                                              attested: {age, terms} | null}
+    POST /auth/attest                         {attest: "18+v1"} -> 204 (records the age/terms answer)
     POST /auth/accounts                       {persona} -> 201 {id, persona}
     POST /auth/accounts/<id>/credential       -> {account, password} (rotates)
     POST /auth/logout                         -> 204
 
 Two fake providers, "Example Phone Co." (example) and "Test Telegraph" (telegraph). Each provider has one
-identity; --accounts gives accounts to it (default provider: example). The real innkeeperd handles the
+identity; --accounts gives accounts to it (default provider: example). Sign-in is PII-free like the real contract: the mock asks for no email, name or profile. Each fake provider
+has one subject; the identity key is HMAC-SHA256(secret, issuer + NUL + subject) and the page only ever sees
+a handle derived from it ("Caller 7F3A"). The login URL's `attest=<age>+v<terms>` is stored on the identity.
+The real innkeeperd handles the
 WebSocket and, today, ignores the session token; binding a connection to the identity is a server task.
 
     python3 tools/mock_auth.py --port 2843 --page-origin http://127.0.0.1:2842 \\
@@ -24,6 +29,8 @@ WebSocket and, today, ignores the session token; binding a connection to the ide
     # then open http://127.0.0.1:2842/inn.html?auth=http://127.0.0.1:2843
 """
 import argparse
+import hashlib
+import hmac
 import html
 import json
 import re
@@ -38,6 +45,7 @@ PROVIDERS = {
     "example": "Example Phone Co.",
     "telegraph": "Test Telegraph",
 }
+ATTEST_RE = re.compile(r"^(\d{1,3})\+v(\d{1,6})$")
 PERSONA_RE = re.compile(r"^[A-Za-z0-9]{1,10}$")
 PASSWORD_ALPHABET = string.ascii_uppercase + string.digits
 
@@ -47,13 +55,23 @@ class State:
         self.lock = threading.Lock()
         self.enrol = enrol
         self.page_origin = page_origin
+        self.secret = secrets.token_bytes(32)   # the HMAC key; random per run, never printed
         self.sessions = {}      # token -> provider id
+        self.attested = {}      # identity key -> {age, terms}
         self.accounts = {}      # provider id -> {account id: persona}
         self.passwords = {}     # account id -> last issued password
         self.next_id = 100001
         for provider, number, persona in accounts:
             self.accounts.setdefault(provider, {})[number] = persona
             self.next_id = max(self.next_id, number + 1)
+
+    def identity_key(self, provider):
+        # HMAC-SHA256(server_secret, issuer + NUL + subject): the raw subject is never stored.
+        issuer, subject = f"mock://{provider}", f"mock-subject-{provider}"
+        return hmac.new(self.secret, f"{issuer}\0{subject}".encode(), hashlib.sha256).hexdigest()
+
+    def handle(self, provider):
+        return "Caller " + self.identity_key(provider)[:4].upper()
 
     def persona_taken(self, persona):
         low = persona.lower()
@@ -79,10 +97,10 @@ CONSENT = """<!doctype html><meta charset="utf-8"><meta name="viewport" content=
 .warn{{background:#fde8c8;border:2px solid #b36a10;padding:.5em .8em}}button{{font:inherit;padding:.4em 1.2em;margin-right:.6em}}</style>
 <h1>{name}</h1>
 <p class="warn">Mock provider for development. Nothing here is real, and Allow signs in anyone.</p>
-<p>The game page asks to know who you are.</p>
+<p>The game page asks only for an anonymous sign-in (the openid scope): no email, name or profile is shared.</p>
 <form method="get" action="/auth/callback">
 <input type="hidden" name="provider" value="{provider}"><input type="hidden" name="return" value="{ret}">
-<input type="hidden" name="mode" value="{mode}">
+<input type="hidden" name="mode" value="{mode}"><input type="hidden" name="attest" value="{attest}">
 <button name="decision" value="allow" autofocus>Allow</button><button name="decision" value="deny">Deny</button>
 </form>"""
 
@@ -157,7 +175,8 @@ def make_handler(state):
                 if not self.return_ok(ret):
                     return self.err(400, "bad_return", "The return address is not an allowed page origin.")
                 page = CONSENT.format(name=html.escape(PROVIDERS[provider]), provider=provider,
-                                      ret=html.escape(ret, quote=True), mode=html.escape(q.get("mode", "popup"), quote=True))
+                                      ret=html.escape(ret, quote=True), mode=html.escape(q.get("mode", "popup"), quote=True),
+                                      attest=html.escape(q.get("attest", ""), quote=True))
                 return self.reply(200, page, "text/html")
             if url.path == "/auth/callback":
                 return self.callback(q)
@@ -167,9 +186,10 @@ def make_handler(state):
                     return self.err(401, "unauthorized", "The session is missing or has expired.")
                 owned = state.accounts.get(provider, {})
                 return self.reply(200, {
-                    "identity": {"name": "Mock User", "provider": provider},
+                    "identity": {"handle": state.handle(provider), "provider": provider},
                     "accounts": [{"id": i, "persona": p} for i, p in sorted(owned.items())],
                     "canCreate": state.enrol == "open",
+                    "attested": state.attested.get(state.identity_key(provider)),
                 })
             self.err(404, "not_found", "No such endpoint.")
 
@@ -182,6 +202,9 @@ def make_handler(state):
                 token = secrets.token_urlsafe(24)
                 with state.lock:
                     state.sessions[token] = provider
+                    m = ATTEST_RE.match(q.get("attest", ""))
+                    if m:
+                        state.attested[state.identity_key(provider)] = {"age": int(m.group(1)), "terms": int(m.group(2))}
                 message = {"type": "inn-auth", "session": token}
                 frag = f"inn-session={token}"
                 sys.stderr.write(f"mock_auth: signed in via {provider}, session {token[:6]}...\n")
@@ -209,6 +232,14 @@ def make_handler(state):
                 return self.reply(204)
             if not provider:
                 return self.err(401, "unauthorized", "The session is missing or has expired.")
+            if path == "/auth/attest":
+                data = self.read_json()
+                m = ATTEST_RE.match(data.get("attest", "")) if isinstance(data, dict) and isinstance(data.get("attest"), str) else None
+                if not m:
+                    return self.err(400, "bad_attest", "Use <age>+v<terms>, for example 18+v1.")
+                with state.lock:
+                    state.attested[state.identity_key(provider)] = {"age": int(m.group(1)), "terms": int(m.group(2))}
+                return self.reply(204)
             if path == "/auth/accounts":
                 data = self.read_json()
                 persona = data.get("persona") if isinstance(data, dict) else None

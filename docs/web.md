@@ -253,7 +253,8 @@ page shows `message` for a 4xx it does not know):
 |---|---|---|
 | `GET /auth/providers` | 200 `[{"id": "example", "name": "Example Phone Co.", "url": "/auth/login?provider=example"}]` | anything else, or `[]`: sign-in stays off. `url` is relative to the auth origin or absolute on it; any other origin is ignored. `name` is shown as text only. |
 | `GET <url>&return=<page URL>&mode=popup` | the login (consent) page; ends on `/auth/callback` | 400 for an unknown provider or a `return` whose origin is not an allowed page origin |
-| `GET /auth/session`, `Authorization: Bearer <token>` | 200 `{"identity": {"name": "...", "provider": "<id>"}, "accounts": [{"id": 100001, "persona": "Guybrush"}], "canCreate": true}` | 401: token missing, unknown or expired |
+| `GET /auth/session`, `Authorization: Bearer <token>` | 200 `{"identity": {"handle": "Caller 7F3A", "provider": "<id>"}, "accounts": [{"id": 100001, "persona": "Guybrush"}], "canCreate": true, "attested": {"age": 18, "terms": 1}}` (`attested` is `null` when none is on record) | 401: token missing, unknown or expired |
+| `POST /auth/attest`, `{"attest": "18+v2"}` | 204; the answer is stored on the identity | 400 `bad_attest`; 401 |
 | `POST /auth/accounts`, `{"persona": "Elaine"}` | 201 `{"id": 100002, "persona": "Elaine"}` | 401; 403 `enrolment_closed`; 400 `bad_persona`; 409 `persona_taken`; 429 rate limited |
 | `POST /auth/accounts/<id>/credential` | 200 `{"account": 100002, "password": "K3J9QWZ7"}`; every call rotates the password | 401; 404 when the identity does not own `<id>` |
 | `POST /auth/logout` | 204 and the token is revoked | the page forgets the token whatever the answer |
@@ -262,6 +263,29 @@ page shows `message` for a 4xx it does not know):
 0-9 (the stored form is 6 to 10 characters; innkeeper `docs/protocol/messages.md` section 4.1); the page refuses
 anything else. `identity.provider` is one of the listed provider ids and appears in the modem line as
 `AT+CARD=<provider>`. `canCreate` is true when enrolment lets this identity open another account.
+
+**A PII-free sign-in.** The age notice and the legal pages are in "Legal pages and the age notice" below; the
+contract that goes with them is:
+
+- *Scope.* The login requests the `openid` scope only. The server MUST NOT request `email`, `profile` or any other
+  scope. For a plain-OAuth provider (one with no OpenID Connect) it uses only the stable numeric or opaque user id
+  and ignores whatever else the provider returns (a username, say), without storing it.
+- *Stored identity.* The server stores `identity_key = HMAC-SHA256(server_secret, issuer + "\0" + subject)`, never
+  the raw subject. A raw `sub` is a persistent identifier that follows a person across services; keyed with a secret
+  the server holds, the stored value cannot be reversed from the database alone and cannot be linked to another
+  deployment's data. Under GDPR this is still *pseudonymous* data, not anonymous (whoever holds the secret and the
+  provider identifier can recompute it), but no email, name or profile is ever stored. The raw identifier itself
+  is kept only sealed, as the innkeeperd audit record (see `docs/legal.md`); in routine operation the server reads
+  only the HMAC.
+- *Handle.* `identity.handle` is a pseudonymous label derived from the key (for example `Caller 7F3A`, four hex
+  digits). No real names appear anywhere: the page shows the handle in the narrator line and in Help, About.
+- *Attestation.* The login URL carries `attest=<minimumAge>+v<termsVersion>` (for example `18+v1`), the player's
+  answer to the age and terms notice. The server stores `adult_attested_at` (a date) and `terms_version` on the
+  identity and returns them as `attested` in the session JSON. When `attested` is missing or its `terms` is older
+  than the page's `termsVersion`, the page makes sure the notice for the current terms has been answered (asking
+  again if not, and showing the closing screen if the answer is no) and sends `POST /auth/attest`.
+- *This is self-declaration, not verification.* Mainstream OIDC providers give no reliable 18+ claim without the
+  user's birthdate or other personal data, which we choose not to collect.
 
 **Login handshake.** The page opens `<url>&return=<page URL without fragment>&mode=popup` with `window.open` on the
 click. The server runs the provider's login, then on `/auth/callback` serves a tiny page whose script does
@@ -316,6 +340,40 @@ The client sends the persona name it holds in `PLAYER.DIR`, not the one chosen o
 session to accounts has to accept (or map) that. "I have my own number" uses whatever the install now holds, which
 after a sign-in dial is the last credential written.
 
+## Legal pages and the age notice
+
+`runtime/web/site.json` holds the operator's details. The repo ships it empty; each deployment fills in its own
+(`docs/legal.md` is the checklist). Fields: `siteName`, `operatorName`, `contactEmail`, `privacyEmail` (optional,
+falls back to `contactEmail`), `dmcaAgent` `{name, address, email, phone}`, `governingLaw`, `serverLocation`,
+`effectiveDate`, `termsVersion` (an integer, starting at 1), `minimumAge` (18). Optional extras: `auditRetentionDays`
+(shown in the privacy notice, default 90) and `authServer` (overrides `AUTH_SERVER`). `siteName` overrides
+`SITE_NAME` in `page.js`; the title stays "Online world" when neither is set. The CMake copy list puts `site.json`
+and `legal/` next to `inn.html`.
+
+`legal/terms.html`, `privacy.html` and `copyright.html` are standalone documents. `legal/legal.js` fills their
+placeholders from `../site.json`; a missing value shows a highlighted `[operator: set <field> in site.json]` and a
+banner says the deployment has not filled in its operator details. Each page says it is not legal advice and should be
+reviewed by a lawyer before a public launch.
+
+Where the links are: the Help menu (Terms of Use, Privacy, Copyright & takedown, each in a new tab with
+`rel="noopener"`); Help, About (operator, contact, terms version and the links); a small always-visible
+"Terms · Privacy · Copyright" plate in the bottom-right of the landing (the narrator and telephone boxes sit above
+it; on a phone it spans the bottom), also under `?classic=1`; the game view's settings drawer under "Fine print";
+and the age dialog. There is no cookie banner: nothing here uses cookies or tracking.
+
+**The age and terms notice** (`site.js`). On first visit, and again whenever `termsVersion` rises, a centred dialog
+("Before you go in...") sits over the dimmed scene, which keeps animating unless reduced motion is set. It says the
+service is for adults (`minimumAge`, default 18), links the three documents, and has two equal buttons, "I am 18 or
+older" and "I am not". Nothing is pre-selected and nothing is pre-ticked. While it is open nothing else works: the
+rest of the page is `inert`, file drops, shortcuts (F10, Ctrl+Alt+F) and autostart are blocked, focus is trapped in
+the dialog, Esc does not dismiss it, and it is `role="dialog"` with `aria-modal`. Accepting stores
+`{age, terms, at}` (a date only) in `localStorage` under `inn.consent`; with no storage it asks every visit. "I am
+not" shows a closing screen, remembered in `sessionStorage` for that tab's session (a reload keeps it; a new tab
+asks again). With sign-in on, the login URL carries `attest=<minimumAge>+v<termsVersion>`.
+
+**This is self-declaration, not verification.** The page does not check anyone's age. The notice and the
+server-side record exist so the operator can show that adults were asked and agreed to a given version of the terms.
+
 ## Developing against the mock
 
 ```
@@ -328,8 +386,9 @@ node tools/test_auth.js          # encoder, LSCI.CFG edit and persona rule
 127.0.0.1, in memory, no real authentication (its consent page has Allow and Deny buttons), and it prints the
 passwords it issues. It serves two fake providers ("Example Phone Co." and "Test Telegraph"), CORS for
 `--page-origin`, `--accounts [provider:]ID:Persona,...` (default `100001:Guybrush`, owned by the `example`
-identity) and `--enrol open|closed`. `?mode=redirect` on the login URL exercises the fallback. It does not touch
-the WebSocket.
+identity) and `--enrol open|closed`. `?mode=redirect` on the login URL exercises the fallback. It follows the PII-free contract above:
+no names anywhere, `identity.handle` is derived from an HMAC of a per-run secret, `attest` is stored per identity and
+returned as `attested`, and `POST /auth/attest` records a new answer. It does not touch the WebSocket.
 
 ## Keyboard and screen
 

@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<meta name="robots" content="noindex">
+<title>Copyright &amp; takedown · Online world</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' shape-rendering='crispEdges'%3E%3Crect width='16' height='16' fill='%2368aeea'/%3E%3Crect x='10' y='2' width='3' height='3' fill='%23ffe45c'/%3E%3Cpath d='M0 16V11l4-2 4 2 4-3 4 2v6z' fill='%237a9a34'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=VT323&amp;display=swap">
+<style>
+  :root {
+    --bg: #17151d; --surface: #1d1838; --surface-2: #2a2250; --border: #0c0a20; --edge: #6c58b0;
+    --text: #f0e8ff; --muted: #b8acd8; --accent: #ffb23c; --accent-ink: #231a10; --link: #ffc863;
+    --warn-bg: #3a2a0c; --warn-edge: #ffb23c; --miss-bg: #5a1f28; --miss-ink: #ffd9dc;
+    --pixel: "VT323", ui-monospace, "Cascadia Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f4f1ea; --surface: #fff6dc; --surface-2: #f6e8c0; --border: #3a2a1a; --edge: #fffbea;
+      --text: #2a1e12; --muted: #5c4c36; --accent: #e8741c; --accent-ink: #fff8ec; --link: #8a3c00;
+      --warn-bg: #fdecc4; --warn-edge: #b36a10; --miss-bg: #ffd6d6; --miss-ink: #7a1010;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { color-scheme: dark light; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 17px/1.65 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 18px; padding: 8px 16px;
+         background: var(--surface); border-bottom: 3px solid var(--border); box-shadow: inset 0 -2px 0 var(--edge);
+         font: 400 23px/1.1 var(--pixel); letter-spacing: .04em; }
+  .top .brand { color: var(--text); }
+  .top nav { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+  .top a { color: var(--text); text-decoration: none; padding: 2px 4px; }
+  .top a:hover, .top a[aria-current] { background: var(--accent); color: var(--accent-ink); }
+  main { max-width: 44rem; margin: 0 auto; padding: 24px 18px 56px; }
+  h1 { margin: 8px 0 4px; font: 400 44px/1.05 var(--pixel); letter-spacing: .02em; }
+  h2 { margin: 2em 0 .4em; font: 600 1.2rem/1.3 ui-sans-serif, system-ui, sans-serif; }
+  h3 { margin: 1.4em 0 .3em; font-size: 1rem; }
+  p, li { margin: .6em 0; }
+  ul, ol { padding-left: 1.4em; }
+  a { color: var(--link); text-underline-offset: 2px; }
+  a:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .meta { color: var(--muted); font-size: .95rem; margin: 0 0 18px; }
+  .notice, .banner, .shout { padding: 10px 14px; border: 2px solid var(--warn-edge); background: var(--warn-bg); margin: 14px 0; }
+  .banner { border-color: #d03a4a; background: var(--miss-bg); color: var(--miss-ink); font-weight: 600; }
+  .banner[hidden] { display: none; }
+  .banner ul { font-weight: 400; margin: .3em 0 0; }
+  .shout { text-transform: uppercase; font-size: .95rem; letter-spacing: .01em; font-weight: 600; }
+  .missing { background: var(--miss-bg); color: var(--miss-ink); outline: 1px dashed #d03a4a; padding: 0 3px; font-weight: 600; }
+  table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: .95rem; }
+  th, td { text-align: left; vertical-align: top; padding: 6px 10px; border: 1px solid var(--edge); }
+  th { background: var(--surface); }
+  address { font-style: normal; border-left: 4px solid var(--edge); padding: 4px 14px; margin: 12px 0; background: var(--surface); }
+  footer { max-width: 44rem; margin: 0 auto; padding: 0 18px 40px; color: var(--muted); font-size: .9rem; }
+  @media (max-width: 520px) { body { font-size: 16px; } h1 { font-size: 36px; } }
+</style>
+</head>
+<body>
+<header class="top"><span class="brand" id="brand">Online world</span><nav aria-label="Legal pages"><a href="terms.html">Terms of Use</a><a href="privacy.html">Privacy Notice</a><a href="copyright.html" aria-current="page">Copyright &amp; takedown</a></nav></header>
+<main>
+<div class="banner" id="banner" role="alert" hidden></div>
+<h1>Copyright &amp; takedown</h1>
+<p class="meta">Effective <span data-f="effectiveDate"></span> · Version <span data-f="termsVersion"></span></p>
+<div class="notice"><strong>Not legal advice.</strong> This is a plain-English document written by a volunteer, not a lawyer. It should be reviewed by a qualified lawyer before this service is opened to the public.</div>
+
+<p><span data-f="operatorName"></span> respects other people&rsquo;s intellectual property and asks everyone who uses the service to do the same. This page explains how to report content you believe infringes your copyright, and what we do about it. It follows the US Digital Millennium Copyright Act (17 U.S.C. &sect; 512).</p>
+
+<h2>1. What this service does and does not host</h2>
+<p>The service stores what players create (mail, bulletin posts, saves). It does <strong>not</strong> host or distribute the original client software; players supply their own copies and they stay in the player&rsquo;s browser.</p>
+
+<h2>2. Sending a notice of infringement</h2>
+<p>If you believe something on the service infringes your copyright, send a written notice to our designated agent (below) that includes, as 17 U.S.C. &sect; 512(c)(3) requires:</p>
+<ol>
+<li>a physical or electronic signature of a person authorised to act for the owner of the right;</li>
+<li>identification of the copyrighted work you claim is infringed (or a representative list, if one notice covers several works);</li>
+<li>identification of the material you claim is infringing, and enough information for us to find it (for example the account number or persona, and where it appears);</li>
+<li>your contact information: address, telephone number and email;</li>
+<li>a statement that you have a good-faith belief that the use is not authorised by the copyright owner, its agent or the law;</li>
+<li>a statement that the information in the notice is accurate and, <strong>under penalty of perjury</strong>, that you are authorised to act for the owner of the right.</li>
+</ol>
+
+<h2>3. Our designated agent</h2>
+<address>
+<span data-f="dmcaAgent.name"></span><br>
+<span data-f="dmcaAgent.address"></span><br>
+Email: <a data-f="dmcaAgent.email" data-mail></a><br>
+Telephone: <span data-f="dmcaAgent.phone"></span>
+</address>
+<p>This agent is registered with the U.S. Copyright Office&rsquo;s DMCA Designated Agent Directory.</p>
+
+<h2>4. What we do</h2>
+<p>When we receive a notice that substantially meets these requirements, we will remove or disable access to the material, and we will tell the user who posted it, with a copy of the notice (the notice may be shared with them, including your contact details).</p>
+
+<h2>5. Counter-notification</h2>
+<p>If your content was removed and you believe that was a mistake, you may send our agent a counter-notification under 17 U.S.C. &sect; 512(g) that includes:</p>
+<ol>
+<li>your physical or electronic signature;</li>
+<li>identification of the material that was removed, and where it appeared before it was removed;</li>
+<li>a statement, <strong>under penalty of perjury</strong>, that you have a good-faith belief the material was removed because of a mistake or misidentification;</li>
+<li>your name, address and telephone number, and a statement that you consent to the jurisdiction of the federal district court for your address (or, if you are outside the United States, of any district where we can be found), and that you will accept service of process from the person who sent the original notice.</li>
+</ol>
+<p>We will pass the counter-notification to the person who complained. Unless they tell us within 10 business days that they have filed a court action against you, we will restore the material not less than 10 and not more than 14 business days after receiving the counter-notification.</p>
+
+<h2>6. Repeat infringers</h2>
+<p>Our policy is to end, in appropriate circumstances, the accounts of users who are repeat infringers.</p>
+
+<h2>7. Misrepresentations</h2>
+<p>Under 17 U.S.C. &sect; 512(f), anyone who knowingly and materially misrepresents that material is infringing, or that it was removed by mistake, may be liable for damages, including costs and attorneys&rsquo; fees. Please do not send a notice unless you mean it.</p>
+
+<h2>8. Trademarks and other concerns</h2>
+<p>For a trademark complaint, or any other concern about content, email <a data-f="contactEmail" data-mail></a>. This page is only about copyright notices.</p>
+
+</main>
+<footer><p>These pages are part of the free software project that runs this service (GPL-3.0-or-later). They are a template for the operator to review and adapt; they are not legal advice.</p></footer>
+<script src="legal.js"></script>
+</body>
+</html>

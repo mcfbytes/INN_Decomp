@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<meta name="robots" content="noindex">
+<title>Privacy Notice · Online world</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' shape-rendering='crispEdges'%3E%3Crect width='16' height='16' fill='%2368aeea'/%3E%3Crect x='10' y='2' width='3' height='3' fill='%23ffe45c'/%3E%3Cpath d='M0 16V11l4-2 4 2 4-3 4 2v6z' fill='%237a9a34'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=VT323&amp;display=swap">
+<style>
+  :root {
+    --bg: #17151d; --surface: #1d1838; --surface-2: #2a2250; --border: #0c0a20; --edge: #6c58b0;
+    --text: #f0e8ff; --muted: #b8acd8; --accent: #ffb23c; --accent-ink: #231a10; --link: #ffc863;
+    --warn-bg: #3a2a0c; --warn-edge: #ffb23c; --miss-bg: #5a1f28; --miss-ink: #ffd9dc;
+    --pixel: "VT323", ui-monospace, "Cascadia Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f4f1ea; --surface: #fff6dc; --surface-2: #f6e8c0; --border: #3a2a1a; --edge: #fffbea;
+      --text: #2a1e12; --muted: #5c4c36; --accent: #e8741c; --accent-ink: #fff8ec; --link: #8a3c00;
+      --warn-bg: #fdecc4; --warn-edge: #b36a10; --miss-bg: #ffd6d6; --miss-ink: #7a1010;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { color-scheme: dark light; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 17px/1.65 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 18px; padding: 8px 16px;
+         background: var(--surface); border-bottom: 3px solid var(--border); box-shadow: inset 0 -2px 0 var(--edge);
+         font: 400 23px/1.1 var(--pixel); letter-spacing: .04em; }
+  .top .brand { color: var(--text); }
+  .top nav { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+  .top a { color: var(--text); text-decoration: none; padding: 2px 4px; }
+  .top a:hover, .top a[aria-current] { background: var(--accent); color: var(--accent-ink); }
+  main { max-width: 44rem; margin: 0 auto; padding: 24px 18px 56px; }
+  h1 { margin: 8px 0 4px; font: 400 44px/1.05 var(--pixel); letter-spacing: .02em; }
+  h2 { margin: 2em 0 .4em; font: 600 1.2rem/1.3 ui-sans-serif, system-ui, sans-serif; }
+  h3 { margin: 1.4em 0 .3em; font-size: 1rem; }
+  p, li { margin: .6em 0; }
+  ul, ol { padding-left: 1.4em; }
+  a { color: var(--link); text-underline-offset: 2px; }
+  a:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .meta { color: var(--muted); font-size: .95rem; margin: 0 0 18px; }
+  .notice, .banner, .shout { padding: 10px 14px; border: 2px solid var(--warn-edge); background: var(--warn-bg); margin: 14px 0; }
+  .banner { border-color: #d03a4a; background: var(--miss-bg); color: var(--miss-ink); font-weight: 600; }
+  .banner[hidden] { display: none; }
+  .banner ul { font-weight: 400; margin: .3em 0 0; }
+  .shout { text-transform: uppercase; font-size: .95rem; letter-spacing: .01em; font-weight: 600; }
+  .missing { background: var(--miss-bg); color: var(--miss-ink); outline: 1px dashed #d03a4a; padding: 0 3px; font-weight: 600; }
+  table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: .95rem; }
+  th, td { text-align: left; vertical-align: top; padding: 6px 10px; border: 1px solid var(--edge); }
+  th { background: var(--surface); }
+  address { font-style: normal; border-left: 4px solid var(--edge); padding: 4px 14px; margin: 12px 0; background: var(--surface); }
+  footer { max-width: 44rem; margin: 0 auto; padding: 0 18px 40px; color: var(--muted); font-size: .9rem; }
+  @media (max-width: 520px) { body { font-size: 16px; } h1 { font-size: 36px; } }
+</style>
+</head>
+<body>
+<header class="top"><span class="brand" id="brand">Online world</span><nav aria-label="Legal pages"><a href="terms.html">Terms of Use</a><a href="privacy.html" aria-current="page">Privacy Notice</a><a href="copyright.html">Copyright &amp; takedown</a></nav></header>
+<main>
+<div class="banner" id="banner" role="alert" hidden></div>
+<h1>Privacy Notice</h1>
+<p class="meta">Effective <span data-f="effectiveDate"></span> · Version <span data-f="termsVersion"></span></p>
+<div class="notice"><strong>Not legal advice.</strong> This is a plain-English document written by a volunteer, not a lawyer. It should be reviewed by a qualified lawyer before this service is opened to the public.</div>
+
+<p>This notice says what <span data-f="operatorName"></span> (&ldquo;we&rdquo;) stores about you when you use this service, why, for how long, and what you can ask us to do. We designed the service to hold as little personal information as possible. The service is for people aged <span data-f="minimumAge"></span> or older.</p>
+
+<h2>1. What we store</h2>
+<h3>Game account data</h3>
+<ul>
+<li>your account number and persona name(s);</li>
+<li>the game&rsquo;s password, in the encoded form the original client uses (it is short and weak by design, so do not reuse a real password);</li>
+<li>what you create in the game: mail, bulletin posts, character saves and the in-game bankroll.</li>
+</ul>
+<h3>Sign-in</h3>
+<p>When you sign in with a provider we ask for the <code>openid</code> scope only. We store:</p>
+<ul>
+<li>a <strong>keyed one-way hash</strong> of the provider and your account identifier at that provider (we cannot turn it back into your identifier in everyday operation);</li>
+<li>the date you confirmed your age and the version of the terms you accepted.</li>
+</ul>
+<p>We do <strong>not</strong> request or store your email address, your name or your profile. If a provider sends profile data anyway, it is thrown away without being stored. One honest caveat: some plain-OAuth providers return a username in the same response; we do not keep it.</p>
+<p>A hash with a secret key is still <em>pseudonymous</em> data, not anonymous: whoever holds the key and your provider identifier could recompute it. It is not stored in a form that names you.</p>
+<p>For security and legal reasons, the raw sign-in identifier is also kept, but only in a sealed (encrypted) form that the server itself cannot read; see section 3.</p>
+<h3>A session token</h3>
+<p>A short-lived random token tells the server that your browser is signed in. It expires.</p>
+
+<h2>2. What we do not do</h2>
+<p>No cookies. No analytics. No advertising. No tracking. We do not sell your personal information, and we do not share it except as described under &ldquo;Disclosure&rdquo; below.</p>
+
+<h2>3. Network information and the sealed record</h2>
+<p>Your IP address is necessarily used to deliver the connection to you. The server <strong>does not write IP addresses or message contents to readable logs</strong> in its public mode.</p>
+<p>For security, abuse prevention and legal obligations, the server keeps one <strong>sealed connection record</strong> per connection: the start and end time, your account number, your hashed sign-in identity and your IP address. The record is encrypted to the operator&rsquo;s public key, and the matching private key is kept offline and is never on the server, so the server cannot read the records. They are kept for <strong><span data-f="auditRetentionDays" data-default="90"></span> days</strong> by default and then deleted automatically. The operator can decrypt a record only offline, and only in response to valid legal process, or to investigate serious abuse. The raw sign-in identifier is likewise kept only in sealed form.</p>
+<p>The hosting provider (the company whose computers the service runs on) may keep its own network logs under its own policy, which we do not control.</p>
+
+<h2>4. On your device</h2>
+<p>The installation files you give the page stay in your browser&rsquo;s storage; they are not uploaded. If you turn on &ldquo;Remember on this device&rdquo;, the browser also keeps those files, the server address and your session on that device. You can clear them from Options in the page, or with your browser&rsquo;s own site-data controls. If you use save sync, only the listed game save files are uploaded. The page keeps a few small settings (display mode, score, your answer to the age notice) in the same browser storage. This is storage on your device, not cookies.</p>
+
+<h2>5. Why we use it, and our legal basis</h2>
+<ul>
+<li><strong>To run the service you asked for</strong> (performing the service): accounts, sign-in, mail, posts, saves.</li>
+<li><strong>Legitimate interests</strong> in keeping the service secure and preventing abuse: the sealed connection record and the age and terms record.</li>
+<li><strong>Legal obligations</strong>, where the law requires us to keep or hand over information (see Disclosure).</li>
+</ul>
+
+<h2>6. How long we keep it</h2>
+<p>When you delete something, it disappears for other players at once, but we keep it for a short grace period before it is erased for good. That lets us act on abuse reports and undo mistakes.</p>
+<table>
+<thead><tr><th>What</th><th>How long</th></tr></thead>
+<tbody>
+<tr><td>Account data (your active account, mail, posts, saves)</td><td>Until you ask us to delete it, or the service ends</td></tr>
+<tr><td>Mail and letters you delete</td><td>Erased after 90 days</td></tr>
+<tr><td>Bulletin posts you delete</td><td>Erased after 90 days</td></tr>
+<tr><td>An account you ask us to delete</td><td>Disabled immediately; erased after 30 days. Within those 30 days it can be restored if the request was a mistake or was not yours</td></tr>
+<tr><td>Complaints and abuse reports</td><td>Kept 365 days</td></tr>
+<tr><td>Sealed connection records and the sealed sign-in identifier</td><td><span data-f="auditRetentionDays" data-default="90"></span> days by default, then purged automatically</td></tr>
+<tr><td>Expired sign-in sessions</td><td>Erased after 30 days</td></tr>
+<tr><td>Readable server logs in public mode</td><td>They contain no personal data</td></tr>
+</tbody>
+</table>
+<p><strong>Legal hold.</strong> Anything under a legal hold (a preservation request, or an active investigation) is kept until the hold ends. After that the normal clock applies.</p>
+<p><strong>Backups.</strong> Backups rotate within 30 days, so erased data leaves our backups within about 30 days after it is erased.</p>
+<p><strong>Why these numbers.</strong> A grace period lets us act on abuse reports. US preservation requests run 90 days. Erasure requests are handled within about a month. Reports are kept for one year. The operator may change these periods; if so, the notice here is updated.</p>
+
+<h2>7. Disclosure</h2>
+<p>We disclose information only when the law requires it: a valid subpoena, court order or warrant; or to report apparent child sexual exploitation to the National Center for Missing &amp; Exploited Children (NCMEC), as US law requires. When that happens, only the named account&rsquo;s records are opened. We do not sell or share data otherwise.</p>
+
+<h2>8. Your choices and rights</h2>
+<p>You can ask us to give you a copy of your data (access and export), to correct it, or to delete it. Email <a data-f="privacyEmail" data-fallback="contactEmail" data-mail></a>. We reply within 30 days. We may need to check that you control the account, for example by having you sign in again. Deleting your account disables it at once and erases it after the grace period in section 6; the sealed records are not individually deletable and are purged on their normal schedule (or held longer only under a valid legal hold). An access request also covers items still inside a deletion window.</p>
+<p><strong>If you live in California or another US state with a privacy law,</strong> you may have rights to know, delete, and correct, and not to be discriminated against for using them; we do not sell or share personal information for advertising. <strong>If you live in the EU or UK,</strong> you may also have the right to object to processing based on legitimate interests, to restrict it, to data portability, and to complain to your data protection authority. We will honour the rights the law gives you where they apply; this paragraph is a summary, not a promise of more.</p>
+
+<h2>9. Children</h2>
+<p>The service is for people who are <span data-f="minimumAge"></span> or older. We do not knowingly collect information from anyone younger. If we learn that an account belongs to someone under 13, or under <span data-f="minimumAge"></span>, we delete it.</p>
+
+<h2>10. Security</h2>
+<p>We take reasonable measures to protect what we hold: the sealed records, hashed identity, short-lived tokens and as little data as possible. No system is perfectly secure, and we cannot guarantee it.</p>
+
+<h2>11. Where the data is kept</h2>
+<p>Data is stored in: <span data-f="serverLocation"></span>. If you connect from elsewhere, your information travels there.</p>
+
+<h2>12. Changes</h2>
+<p>If we change this notice in a way that matters, the version number goes up and the page asks you to confirm again. The effective date and version are at the top.</p>
+
+<h2>13. Contact</h2>
+<p><span data-f="operatorName"></span><br>Privacy questions: <a data-f="privacyEmail" data-fallback="contactEmail" data-mail></a></p>
+
+</main>
+<footer><p>These pages are part of the free software project that runs this service (GPL-3.0-or-later). They are a template for the operator to review and adapt; they are not legal advice.</p></footer>
+<script src="legal.js"></script>
+</body>
+</html>
