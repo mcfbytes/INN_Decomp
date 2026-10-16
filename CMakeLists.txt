@@ -112,7 +112,7 @@ if(EMSCRIPTEN)
     add_executable(test_native runtime/tests/test_native.c)
     target_link_libraries(test_native dosrt)
     target_link_options(test_native PRIVATE -sJSPI -sENVIRONMENT=node -sEXIT_RUNTIME=1
-      -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=64MB -sSTACK_SIZE=1048576)
+      -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=64MB -sSTACK_SIZE=1048576 -lwebsocket.js)
     if(CMAKE_CROSSCOMPILING_EMULATOR)
       set(INN_NODE ${CMAKE_CROSSCOMPILING_EMULATOR})
     else()
