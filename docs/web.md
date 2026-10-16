@@ -373,7 +373,7 @@ page shows `message` for a 4xx it does not know):
 
 | Request | Success | Other |
 |---|---|---|
-| `GET /auth/providers` | 200 `[{"id": "example", "name": "Example Phone Co.", "url": "/auth/login?provider=example"}]` | anything else, or `[]`: sign-in stays off. `url` is relative to the auth origin or absolute on it; any other origin is ignored. `name` is shown as text only. |
+| `GET /auth/providers` | 200 `{"signInRequired": true, "providers": [{"id": "example", "name": "Example Phone Co.", "url": "/auth/login?provider=example"}]}` | anything else, or no providers: sign-in stays off. `url` is relative to the auth origin or absolute on it; any other origin is ignored. `name` is shown as text only. `signInRequired` (innkeeperd `--public`) means every line needs a session: the operator then offers only the cards, with no "own number", and the page never dials without a session. A bare list (an older server) means sign-in is optional. |
 | `GET <url>&return=<page URL>&mode=popup` | the login (consent) page; ends on `/auth/callback` | 400 for an unknown provider or a `return` whose origin is not an allowed page origin |
 | `GET /auth/session`, `Authorization: Bearer <token>` | 200 `{"identity": {"handle": "Caller 7F3A", "provider": "<id>"}, "accounts": [{"id": 100001, "persona": "Guybrush"}, {"id": 100002, "persona": null}], "canCreate": true, "attested": {"age": 18, "terms": 1}}` (`attested` is `null` when none is on record) | 401: token missing, unknown or expired |
 | `POST /auth/attest`, `{"attest": "18+v2"}` | 204; the answer is stored on the identity | 400 `bad_attest`; 401 |

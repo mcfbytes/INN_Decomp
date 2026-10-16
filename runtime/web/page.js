@@ -150,11 +150,16 @@ async function loadProviders() {
   // not answer HTTP, so probing it on every load only fills both consoles with errors.
   const configured = new URLSearchParams(location.search).get('auth') ?? (Site.cfg.authServer || AUTH_SERVER);
   const base = configured === '' ? '' : httpBase(configured) || httpBase($('com1').value.trim() || defaultServer());
-  let found = [];
+  let found = [], required = false;
   try {
     if (base) {
       const res = await fetch(`${base}/auth/providers`, { headers: { accept: 'application/json' } });
-      if (res.ok) found = await res.json();
+      // {signInRequired, providers}; a bare list is an older server's answer, where sign-in was optional.
+      if (res.ok) {
+        const answer = await res.json();
+        found = Array.isArray(answer) ? answer : (answer && answer.providers) || [];
+        required = !!(answer && answer.signInRequired === true);
+      }
     }
   } catch { /* no providers: the section stays hidden */ }
   found = Array.isArray(found) ? found.filter((p) => p && typeof p.name === 'string' && typeof p.url === 'string') : [];
@@ -176,7 +181,7 @@ async function loadProviders() {
     usable.push({ id: typeof p.id === 'string' ? p.id : p.name, name: p.name, href });
   }
   $('providers').hidden = !list.children.length;
-  adv('providers', usable);
+  adv('providers', { list: usable, required: required && usable.length > 0 });
 }
 
 // ---- the signed-in account: its number and password go into the browser's copy of the install ----

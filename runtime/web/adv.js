@@ -201,6 +201,8 @@ const Adv = (() => {
 
   // opts.session is a sign-in token for the WebSocket, opts.card the provider id for the modem line.
   function dial(opts = {}) {
+    // A server that requires sign-in refuses a line without a session, so ask for a card instead.
+    if (signRequired && !opts.session) return askWho({ own: true });
     if (!canDial()) return;
     const o = objects().phone || {};
     ui.who.textContent = o.answer ? `"${o.answer}"` : '';
@@ -249,13 +251,13 @@ const Adv = (() => {
 
   function cardChoices(own) {
     const list = providers.map((p) => ({ label: p.name, fn: () => signIn(p) }));
-    if (own) list.push({ label: 'I have my own number', own: true, fn: ownNumber });
+    if (own && !signRequired) list.push({ label: 'I have my own number', own: true, fn: ownNumber });
     return list;
   }
 
   function askWho(o = {}) {
     sign.own = !!o.own;
-    say(o.text || 'Operator. And who\'s calling, please?', {
+    say(o.text || 'Operator. How can I connect you?', {
       cards: cardChoices(sign.own), bad: o.bad, focus: true, near: sparkX('phone'),
       actions: sign.own ? [] : [{ label: 'Never mind', fn: narrHide }],
     });
@@ -388,7 +390,7 @@ const Adv = (() => {
     sign.pick = false;
     const actions = s.accounts.map((a) => ({ label: a.persona ? `${a.persona} (${a.id})` : `New caller (${a.id})`, fn: () => connectAs(a) }));
     if (s.canCreate) actions.push({ label: 'Someone new, please', fn: () => openNewLine('', false) });
-    actions.push({ label: 'My own number', fn: ownNumber });
+    if (!signRequired) actions.push({ label: 'My own number', fn: ownNumber });
     say(`${intro}Hello, ${name}. And who's playing today?`, { actions, focus: true, near: sparkX('phone') });
   }
 
@@ -549,6 +551,8 @@ const Adv = (() => {
   // ---------- the menu bar ----------
 
   let providers = [];
+  // The server takes only signed-in lines (public mode): no "own number", no unsigned dial.
+  let signRequired = false;
 
   function menus() {
     const game = [
@@ -914,8 +918,9 @@ const Adv = (() => {
 
     transition,
 
-    providers(list) {
+    providers({ list, required }) {
       providers = list;
+      signRequired = !!required;
       adv.provLoaded = true;
       if (ui) refreshInv();
       go();
