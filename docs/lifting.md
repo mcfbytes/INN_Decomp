@@ -123,6 +123,8 @@ a modem driver) are marked `LIFT_FAR_REPLAY` / `LIFT_NEAR_REPLAY` and verified w
 (below). Functions whose original ends the process, or whose effects no snapshot can undo, are marked
 `LIFT_FAR_NOSHADOW` / `LIFT_NEAR_NOSHADOW`: they are hooked but only ever checked functionally, and the
 summary lists them as not shadowed.
+`LIFTED_PREFIX(seg, off, fn, kind, scratch, n)` is `LIFTED` with a signature of only the first `n` bytes, for an
+entry whose code is followed by data the loader or the host fills in (the file does not hold those bytes).
 During the lifted run, VGA port accesses also reach the device (its state is snapshotted), so mode
 sets and palette writes are compared. Interrupts are held and emulated time stands still during
 shadow runs (device replay aside), so the VGA status register toggles vertical retrace by read count instead; code that
