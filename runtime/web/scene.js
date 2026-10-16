@@ -788,7 +788,7 @@ const InnScenes = (() => {
     return new Promise((resolve, reject) => {
       if (registry[id]) return resolve(registry[id]);
       const s = document.createElement('script');
-      s.src = `scenes/${id}.js`;
+      s.src = innAsset(`scenes/${id}.js`);
       s.onload = () => (registry[id] ? resolve(registry[id]) : reject(new Error(`scene ${id} did not register`)));
       s.onerror = () => reject(new Error(`could not load scene ${id}`));
       document.head.append(s);
