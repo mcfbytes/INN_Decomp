@@ -37,10 +37,19 @@ unless you have registered a designated agent and posted the agent's details.
 ## 3. Operate it safely
 
 - Use a dedicated contact mailbox (for `contactEmail`, `privacyEmail` and the agent email), watched regularly.
-- Run `innkeeperd` in its public, privacy-safe mode (`--public`). Set `--audit-recipient` to your age public key
-  and `--audit-retention-days` (default 90). See the server repository for the details.
-- Back up the database. Backups should rotate within 30 days, since the privacy notice promises erased data leaves
-  backups within about that time.
+- Run `innkeeperd` in its public, privacy-safe mode (`--public`), with `--key-vault` pointing at the server vault
+  (the audit public key and its key id come from there) and `--audit-retention-days` (default 90). See the server
+  repository for the details.
+- Back up the database to Azure Blob Storage, and let a lifecycle-management rule delete each backup after **30
+  days**. The privacy notice promises that erased data leaves backups within about that time. Long retention
+  (complaints for a year, anything under a legal hold) happens in the live database, not in old backups, so no
+  backup needs to outlive 30 days and the archive tier is not needed. Archive also charges for deletion before
+  180 days.
+  - If a preservation request ever needs a specific backup kept, put a legal hold (blob immutability) on that one
+    blob rather than lengthening the rule.
+  - The default server-side encryption covers the data at rest. Backups contain mail and posts in the clear, so
+    give the storage account private access only.
+  - Secrets never go in backups; they live in the key vaults.
 - Have a written process for: takedown notices (the copyright page promises removal and notice to the user, then a
   restore window after a counter-notice), deletion and export requests (reply within 30 days; verify the
   requester controls the account, for example by having them sign in), and abuse reports.
