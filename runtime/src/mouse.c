@@ -163,6 +163,23 @@ int mouse_queued(Machine *m)
     return m->mouse ? mouse_state(m)->q_count : 0;
 }
 
+bool mouse_handler(Machine *m, uint16_t *seg, uint16_t *off)
+{
+    const Mouse *s = mouse_state(m);
+    if (!m->mouse || !s->handler_mask)
+        return false;
+    *seg = s->handler_seg;
+    *off = s->handler_off;
+    return true;
+}
+
+void mouse_drop_handler(Machine *m)
+{
+    Mouse *s = mouse_state(m);
+    s->handler_mask = 0;
+    s->q_count = 0;
+}
+
 bool mouse_cursor_visible(Machine *m) { return mouse_state(m)->show_count >= 0; }
 
 void mouse_cursor_pos(Machine *m, int frame_w, int frame_h, int *x, int *y)

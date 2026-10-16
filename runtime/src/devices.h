@@ -31,11 +31,20 @@ void pic_init(Machine *m);
 /* pic_raise_irq / pic_lower_irq / pic_acknowledge are declared in machine.h. Lines are
  * edge-triggered: raising an already-high line does nothing. */
 
+/* Mixed-mode hand-off (native_irq_to_pic / native_irq_from_pic): one chip's request, in-service and
+ * mask bits. Setting them clears the line levels and recomputes the CPU's request. */
+void pic_get_state(Machine *m, int chip, uint8_t *irr, uint8_t *isr, uint8_t *imr);
+void pic_set_state(Machine *m, int chip, uint8_t irr, uint8_t isr, uint8_t imr);
+
 /* ---- 8253/8254 PIT (ports 40h-43h, speaker gate at 61h) ---- */
 
 enum { PIT_CLOCK_HZ = 1193182 };
 
 void pit_init(Machine *m);
+/* Channel 0's divisor (0 = 65536), and counting on with one so that the next IRQ 0 is due in next_tick_us,
+ * for the mixed-mode hand-off. */
+void pit_set_timer_divisor(Machine *m, uint16_t divisor, uint64_t next_tick_us);
+uint16_t pit_timer_divisor(Machine *m);
 /* Current IRQ0 rate in Hz (18.2 by default). */
 double pit_timer_hz(Machine *m);
 /* True while the speaker is driven by channel 2; *hz gets its square-wave frequency. */
@@ -89,6 +98,9 @@ void kbd_init(Machine *m);
 /* One host key event as a set-1 scancode; extended keys pass 0xE0 | code (e.g. 0xE048 is
  * grey Up) and are sent to the guest with their E0 prefix. */
 void kbd_host_key(Machine *m, uint16_t set1_scancode, bool down);
+/* Mixed-mode hand-off: one raw scancode byte into the 8042, and an empty 8042. */
+void kbd_host_raw(Machine *m, uint8_t byte);
+void kbd_clear(Machine *m);
 
 /* ---- INT 33h mouse driver ---- */
 
@@ -100,6 +112,9 @@ void mouse_host_motion(Machine *m, int x, int y, int frame_w, int frame_h);
 void mouse_host_button(Machine *m, int button, bool down);
 /* One queued event, the way the IRQ 12 trampoline enters the user handler. False when none is waiting. */
 bool mouse_native_deliver(Machine *m);
+/* The user handler set through INT 33h (AX=0Ch/14h): false when none. Dropping it also drops queued events. */
+bool mouse_handler(Machine *m, uint16_t *seg, uint16_t *off);
+void mouse_drop_handler(Machine *m);
 /* Events waiting for that handler; 0 before mouse_init. */
 int mouse_queued(Machine *m);
 /* The driver's show/hide state, for a frontend-drawn cursor overlay. */
