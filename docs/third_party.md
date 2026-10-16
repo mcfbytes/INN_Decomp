@@ -25,3 +25,10 @@ SHA-256 of the vendored files:
 | `opl3.c` | `59eb873fdb6d52bc7977a0fcbb97c1bae03dd71cc88e3acddbcc01b7121bfe03` |
 | `opl3.h` | `a84266b8d71a4929f15f573afbe407fd24310b77757d855835dacabf68763679` |
 | `LICENSE` | `20c17d8b8c48a600800dfd14f95d5cb9ff47066a9641ddeab48dc54aec96e331` |
+
+## VT323 (web page font)
+
+The browser page (`runtime/web/shell.html`) loads VT323 by Peter Hull from Google Fonts
+(`fonts.googleapis.com`) for headings, the modem panel and the control strip; the stylesheet falls back to the
+system monospace font when it cannot load. License: SIL Open Font License 1.1. Not vendored and not
+redistributed with the build.

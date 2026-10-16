@@ -324,7 +324,13 @@ static int open_window(Frontend *f)
         fprintf(stderr, "SDL_Init: %s\n", SDL_GetError());
         return -1;
     }
-    f->window = SDL_CreateWindow("ImagiNation Network", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+#ifdef __EMSCRIPTEN__
+    const char *title = "Online world"; /* the page title; the page owns any site name */
+    SDL_ShowCursor(SDL_DISABLE);        /* only the game's own cursor shows over the canvas */
+#else
+    const char *title = "ImagiNation Network";
+#endif
+    f->window = SDL_CreateWindow(title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
                                  WINDOW_W, WINDOW_H, WINDOW_FLAGS);
     if (!f->window)
         return -1;

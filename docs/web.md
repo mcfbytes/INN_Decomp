@@ -122,11 +122,32 @@ browser profile with an install that lacked the character files received all fou
 ## The page
 
 `shell.html` and `page.js` are a single-page app around the canvas; the DOS screens themselves are
-unchanged. Setup is one card: drop the INN folder or a zip anywhere on the page (dropped folders are
-walked with `webkitGetAsEntry`), or use the folder and zip pickers, then Connect. While running, the
-app bar shows the COM1 state (taken from the runtime's `uart: websocket ...` log lines), mute (suspends
-SDL's `AudioContext`), full screen, and a settings drawer with the display mode, storage, and the log.
-When the client exits, an overlay offers to start again. Light and dark follow the system setting.
+unchanged. The page has three views (`body[data-view]`): `setup`, `dialing` and `play`.
+
+**Setup.** A full-viewport scene of original pixel art (inline SVG on a 320x200 grid, `crispEdges`, a
+limited palette with dither seams): a town, autumn trees, a winding road, a telephone line and a volcano.
+It follows the system colour scheme (day palette in light, dusk with lit windows in dark) through the
+`--c-*` tokens at the top of the style block. Clouds, volcano smoke and the modem light animate unless
+`prefers-reduced-motion` is set. On it sits one card: drop the INN folder or a zip anywhere on the page
+(dropped folders are walked with `webkitGetAsEntry`) or use the pickers, then Connect. The server address
+and "Remember on this device" are under Advanced. `SITE_NAME` at the top of `page.js` is the one place
+for a name: empty (the default) shows no wordmark and the title "Online world"; a value is used for both.
+
+**Providers.** The page fetches `<server http base>/auth/providers` (the server address with `ws` turned
+into `http`, same host and port); a JSON array of `{id, name, url}` shows a "Sign in with ..." button per
+entry. Any error, a 404 or an empty list keeps the section hidden, so there are no buttons without
+providers.
+
+**Dialing.** Connect starts the client and replaces the card with a modem panel: `ATZ`, `OK`,
+`ATDT <server>`, then `CONNECT` when the runtime logs `uart: websocket open`, and the game view opens
+1.4 s later. `uart: websocket closed|error` before that shows `NO CARRIER` and a Try again button.
+
+**Play.** There is no app bar. The game fills the viewport at 4:3 on a dark letterbox. Controls are a
+translucent strip that slides in when the pointer is within 8 px of the top edge (it stays while hovered
+or focused and hides 1.5 s after the pointer leaves): COM1 state, save-sync state, mute (suspends SDL's
+`AudioContext`), display mode (cycles Sharp, Smooth, CRT), full screen and the settings drawer (display
+mode, server, storage, log, Forget). Toasts stay over the game. When the client exits, an overlay offers
+to start again.
 
 Native music is `adl.drv`. If `LSCI.CFG` names another music driver, the page shows a notice and
 rewrites that line to `adl.drv` in the browser's copy of the file. Sound Blaster digital audio is
@@ -136,10 +157,19 @@ not played.
 
 SDL listens for keys on `#canvas` only (`SDL_HINT_EMSCRIPTEN_KEYBOARD_ELEMENT`), so the page's own fields
 keep working. The canvas takes focus at start and on mouse down, and a hint shows while it does not have
-focus. The canvas is 960x720 and CSS scales it at 4:3 to fit the window (container query units); right-click
-is the guest's right button, so the context menu is suppressed. Display modes: Sharp (nearest-neighbour),
-Smooth (browser filtering) and CRT (filtering plus a 200-line scanline overlay); the choice is kept in
-`localStorage`.
+focus. Ctrl+Alt+F toggles full screen; the page takes it in a capturing `keydown` listener on `window`
+before SDL sees it (the game does not use it). Esc and every other key go to the game. Full screen keeps
+the same layout.
+
+The canvas buffer is 960x720. `page.js` sizes its frame as the largest 4:3 box that fits the window
+(`layoutFrame`), so mouse coordinates map at any size. Display modes: Sharp (nearest-neighbour; snaps to a
+whole multiple of 960 when that costs under 4% of the size), Smooth (browser filtering) and CRT (filtering
+plus a 200-line scanline overlay); the choice is kept in `localStorage`. Right-click is the guest's right
+button, so the context menu is suppressed.
+
+The system cursor is hidden over the canvas (CSS `cursor: none`, and `SDL_ShowCursor(SDL_DISABLE)` in the
+Emscripten branch of `frontend_sdl.c`, since SDL writes the canvas cursor style); only the game's own
+cursor shows. It is back over the letterbox, the strip and the drawer.
 
 ## Performance
 
@@ -174,7 +204,7 @@ Raising the guest clock: 50 and 70 MIPS stay at 1.000; 90 MIPS falls to 0.84 to 
 ## Verifying headlessly
 
 Playwright drives Chromium against the build: pick the zip with `setInputFiles('#pick-zip', ...)` or
-open `?autostart=1` on a preload build, click Start, wait, then click Play at frame pixel (285, 59) of
+open `?autostart=1` on a preload build, click Connect, wait for `body[data-view=play]`, then click Play at frame pixel (285, 59) of
 the 320x200 frame scaled to the canvas box. The server log shows the Hayes dial, the PAD call, the Login
 and the land directory; the canvas reaches the town map at about 40 s.
 
