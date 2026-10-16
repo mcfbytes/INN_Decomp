@@ -499,6 +499,37 @@ TSNEXEC starts every program through EXEC. In native mode its native EXEC (`nati
 Lifted game code (CGENN, DARKSTRT, TWGENN, FATES, RB) runs in mixed mode exactly as in the hybrid build,
 through hooks.
 
+**The hand-off, as implemented** (`native_handoff_to_emulator` / `native_handoff_from_emulator` in
+`native_exec.c`, `native_irq_to_pic` / `native_irq_from_pic` in `native_irq.c`; only when INN runs
+natively, so a child started by the emulated machine changes nothing). To the emulator, in this order:
+
+1. `m->native` and `m->native_video` off; `host_video_to_vga`: mode, DAC and the 320x200 pixels or text cells.
+2. PIT channel 0 gets the native divisor and keeps the native timer's phase (its next IRQ 0 falls when the
+   native one was due). Native ticks counted but not yet raised are dropped.
+3. Port 61h: bits 0 and 1 (speaker gates) are written through the port.
+4. PIC masks, requests and in-service bits of both chips go to the device; the native copy of requests and
+   in-service bits is cleared, so nothing is delivered twice.
+5. Keyboard scancode bytes the native queue had not delivered (and a latched byte the ISR had not read) go
+   to the 8042; the native queue is emptied.
+6. Mouse events still queued raise IRQ 12 for the INT 33h trampoline. Position, buttons and handler stay in
+   the one mouse device.
+7. `host_link_pump` is registered as a machine ticker. Audio needs nothing (one mixer). The IVT is
+   snapshotted.
+
+Back: the ticker is removed; the VGA device's mode is taken by `host_video_from_vga` (a mode the host video
+does not carry, such as 12h, is replaced by text mode and logged); the native timer takes the PIT's divisor
+(a program that reprograms the timer and exits leaves it so, as on hardware); port 61h's gate bits come
+from the PIT device; the native masks come from the PIC while the PIC's requests and in-service bits are
+dropped (a bit left in service would block its line for good); the 8042 is emptied; each IVT entry the
+game changed that now points into free DOS memory is set back to its value at hand-off and logged as
+`native: vector %02X left at %04X:%04X by the game`; an INT 33h handler in free memory is dropped and
+logged. Not carried: emulated keyboard bytes the game left unread, and the PIT's other channels.
+
+While the game runs, `native_exec` steps the machine and calls the nested yield the frontend installed:
+a headless run applies the input script and ends at `--run-ms`; a windowed run keeps emulated time with
+the wall clock, polls events, pumps audio and presents the VGA device's frame. `test_mixed` covers a
+child that reprograms the timer, hooks vector 1Ch and exits without restoring it.
+
 ## 12. Verification
 
 | Layer | Build | What | Pass |
