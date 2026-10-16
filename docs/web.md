@@ -216,13 +216,48 @@ repository; this is the browser side.
   The manifest arrives about when the logon completes, before the player can pick a land, and CGENN and
   TWGENN read the character files after that.
 - **Uploads.** `dos_file.c` and `dos_handle.c` call `dos_host_file_closed(dos_path)` when the program
-  closes a file it wrote or renames onto a name; in the browser build that calls `Module.onFileClosed`,
-  which uploads an allowlisted path 1.5 s later (debounced). Every changed file is also pushed when the tab
-  is hidden, on `pagehide`, and when the client exits. Native builds do nothing there.
-- **UI.** The settings drawer shows the sync state under Storage. A save that lost to a newer copy on the
-  host raises a toast. "Forget saved installation" clears only this browser; the host's copies stay.
+  closes a file it wrote or renames onto a name; in the browser build that calls `Module.onFileClosed`.
+  Native builds do nothing there. The page keeps the DB quiet in four ways:
+  - *Debounce with a cap.* A path is uploaded once it has been quiet for 5 s, and at the latest 30 s after
+    the first change of a burst, so a program that rewrites a file 20 times in a minute produces one or two
+    uploads. (Tested: 20 rewrites in 8 s gave one upload.)
+  - *Hash first.* Before any upload the page hashes the local file and compares it with the hash last
+    synced; identical bytes put nothing on the wire, and if they did the host would write no version
+    (`unchanged`). The host keeps 3 versions per file.
+  - *Sweep.* Every 5 minutes while the tab is visible and the line is logged on, the allowlisted files are
+    re-hashed and the ones that differ are uploaded. This catches a program that keeps a save file open
+    (no close hook fires) or writes without closing. A hidden tab skips it, because hiding already pushed.
+  - *Pushes.* Every changed file is also pushed when the tab is hidden and on `pagehide` (best effort: the
+    frames are queued before the page goes away; Chromium delivered them for both a tab close and a
+    navigation in headless tests, and the menu's Hang up is a reload), when the client exits, and at log
+    off (next item).
+
+  The timings are `debounce`, `maxWait` and `sweep` in `saves.js`; `?savedebounce=`, `?savemaxwait=` and
+  `?savesweep=` (milliseconds, 0 turns the sweep off) override them for tests.
+- **Log off.** The client hangs up like a modem user: it sends `+++` (three one-byte frames), then `ATH0`.
+  `innkeeperd` ends the line, and with it the save channel, when it reads `ATH0`; from then on every
+  message gets `not_logged_on`. The browser build's exit hook (`onGuestExit`) runs only after that, about
+  0.2 s after the host stopped listening, so an upload sent then is refused. `uart_link_ws.c` therefore
+  watches the outgoing serial bytes and calls `Module.onLineEscape` at the third consecutive `+`, and the
+  page pushes every changed save file at that moment (`InnSaves.flushFinal`: all sends happen
+  synchronously, with no wait). WebSocket frames reach the host in order, so those puts are handled before
+  `ATH0` is read; in the test the host acknowledged them about 20 ms later and the client closed the socket
+  1.4 s after that. `flushFinal` does not skip a path whose upload is already in flight (that one may carry
+  older bytes). A false positive (a `+++` inside ordinary data) only costs a hash pass; nothing is sent when
+  nothing changed. The exit hook and `pagehide` call the same function for the cases that end without a
+  hang-up.
+- **UI.** The settings drawer shows the sync state under Storage, "Last saved to the server: <time>" and a
+  "Save to server now" button, which pushes everything changed and waits (up to 3 s) for the host to
+  answer. Toasts are for problems only: a save that lost to a newer copy on the host, and a "Save to server
+  now" that got no answer. "Forget saved installation" clears only this browser; the host's copies stay.
 - **Failure.** If the host is unreachable or the account has not logged on, nothing is lost: the files stay
   in the drive and the next manifest reconciles them.
+
+Verified 2026-10-16 in headless Chromium against a scratch `innkeeperd --data-dir`: a file changed with
+no close was uploaded by the sweep; 6 identical rewrites sent nothing; 20 rewrites in 8 s gave one upload;
+"Save to server now" stored a change and updated the time; two changed files were stored at a real log off
+through the game's Exit and Yes (the `+++` hook), where before this change they were refused with
+`not_logged_on`.
 
 Verified 2026-10-14 in headless Chromium against a scratch `innkeeperd --data-dir`: the first install
 uploaded its six save files after the logon, an edit closed through the hook became version 2, and a fresh

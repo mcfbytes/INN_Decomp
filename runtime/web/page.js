@@ -595,6 +595,9 @@ function keepSaving() {
 
 // Game saves follow the account to the server (saves.js); this wires them to the runtime and the page.
 function keepServerSaves() {
+  // Test knobs (milliseconds): ?savedebounce=, ?savemaxwait=, ?savesweep= (0 turns the sweep off).
+  const knob = (name) => (params.has(name) ? Number(params.get(name)) : NaN);
+  InnSaves.config({ debounce: knob('savedebounce'), maxWait: knob('savemaxwait'), sweep: knob('savesweep') });
   InnSaves.init({
     fs: FS,
     drive: DRIVE,
@@ -602,6 +605,10 @@ function keepServerSaves() {
     persist: () => syncDrive(false),
     send: (text) => !!Module.sendControl && Module.sendControl(text),
     notify: (text) => toast(text, 'ok'),
+    saved: (when) => {
+      $('saves-last').textContent = `Last saved to the server: ${new Date(when).toLocaleTimeString()}.`;
+      $('saves-now').hidden = false;
+    },
     status: (text) => {
       $('saves-note').textContent = text;
       const syncing = /^Syncing/.test(text);
@@ -611,8 +618,16 @@ function keepServerSaves() {
       $('savesync').title = text;
     },
   });
+  // Hidden tabs push at once (and skip the periodic sweep); a closing tab sends what it can, best effort.
   document.addEventListener('visibilitychange', () => document.hidden && InnSaves.flushAll());
-  window.addEventListener('pagehide', () => InnSaves.flushAll());
+  window.addEventListener('pagehide', () => InnSaves.flushFinal());
+  $('saves-now').addEventListener('click', async () => {
+    const button = $('saves-now');
+    button.disabled = true;
+    const ok = await InnSaves.flushAll();
+    button.disabled = false;
+    if (!ok) toast('The server is not answering just now, so your saves are staying in this browser. Try again once the line is back.', 'bad');
+  });
 }
 
 function start(session) {
@@ -691,13 +706,15 @@ var Module = {
   printErr: log,
   onControlText: (text) => InnSaves.onControl(text),
   onFileClosed: (path) => InnSaves.onFileClosed(path),
+  // The client is hanging up (Hayes "+++", then ATH0): the host ends the save channel at ATH0.
+  onLineEscape: () => InnSaves.flushFinal(),
   setStatus: (text) => text && setStatus(text),
   onRuntimeInitialized: () => onRuntimeReady().catch((err) => log(String(err.stack || err))),
   onGuestExit: (code) => {
     setStatus('Session ended');
     $('ended-text').textContent = code ? `The client exited with code ${code}.` : 'You have signed off.';
     $('ended').hidden = false;
-    InnSaves.flushAll();
+    InnSaves.flushFinal();
     if (document.fullscreenElement) document.exitFullscreen();
     syncDrive(false);
   },

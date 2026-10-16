@@ -6,7 +6,11 @@
 'use strict';
 
 const InnSaves = (() => {
-  const UPLOAD_DEBOUNCE_MS = 1500;
+  // A program that rewrites a file in bursts is uploaded once it has been quiet for DEBOUNCE_MS, and at the
+  // latest MAX_WAIT_MS after the first change of the burst. A sweep every SWEEP_MS catches files that were
+  // changed without being closed. All three can be set (config) for tests.
+  const timing = { debounce: 5000, maxWait: 30000, sweep: 300000 };
+  const FINAL_WAIT_MS = 3000;
   const REQUEST_TIMEOUT_MS = 15000;
   const STATE_PREFIX = 'inn.saves.';
   const FIXED = ['INN\\YSERBIUS\\MYCHARS.DAT', 'INN\\YSERBIUS\\AUTOMAPS.DAT',
@@ -17,12 +21,15 @@ const InnSaves = (() => {
   const BANKROLL = /^INN\\LL\$\$[0-9]{1,4}\.DAT$/;
   const PASSWORD_STEM = 'PASS_SET';
 
-  let env = null;            // { fs, drive, log, notify, persist, send, status }
+  let env = null;            // { fs, drive, log, notify, persist, send, status, saved }
   let account = null;        // set by the first manifest of this connection
   let state = {};            // path -> { version, hash }: what this browser last synced
   let nextId = 1;
   const pending = new Map(); // request id -> { resolve, timer }
   const timers = new Map();  // path -> debounce timer
+  const firstDirty = new Map(); // path -> when the current burst of changes began
+  let sweeper = null;
+  let lastSaved = 0;         // when the host last held everything this browser has
   const busy = new Set();    // paths being uploaded or downloaded
   const again = new Set();   // paths that changed again meanwhile
   let restored = 0;          // downloads during the current manifest pass
@@ -189,6 +196,7 @@ const InnSaves = (() => {
     const reply = await request({ op: 'put', path, base: known ? known.version : 0, mtime: local.mtime, data: toBase64(local.data) });
     if (reply.op === 'stored') {
       remember(path, reply.version, reply.hash);
+      markSaved();
       env.log(`saves: uploaded ${path} (version ${reply.version}${reply.replaced ? ', replaced a newer-looking copy' : ''})`);
     } else if (reply.op === 'superseded') {
       env.log(`saves: ${path} is older than the server's copy (version ${reply.version}); keeping the server's, yours is kept there as version ${reply.kept_version}`);
@@ -201,17 +209,29 @@ const InnSaves = (() => {
   }
 
   // One sync action per path at a time; a change that arrives meanwhile runs afterwards.
-  async function exclusive(path, action) {
+  async function exclusive(path, action, failed) {
     if (busy.has(path)) { again.add(path); return; }
     busy.add(path);
-    try { await action(); } catch (err) { env.log(`saves: ${path}: ${err.message}`); }
+    try { await action(); } catch (err) { env.log(`saves: ${path}: ${err.message}`); if (failed) failed.add(path); }
     busy.delete(path);
     if (again.delete(path)) schedule(path, 0);
   }
 
-  function schedule(path, delay = UPLOAD_DEBOUNCE_MS) {
+  function schedule(path, delay) {
+    const now = Date.now();
+    if (!firstDirty.has(path)) firstDirty.set(path, now);
+    if (delay === undefined) delay = Math.max(0, Math.min(timing.debounce, firstDirty.get(path) + timing.maxWait - now));
     clearTimeout(timers.get(path));
-    timers.set(path, setTimeout(() => { timers.delete(path); if (account !== null) exclusive(path, () => upload(path)); }, delay));
+    timers.set(path, setTimeout(() => {
+      timers.delete(path);
+      firstDirty.delete(path);
+      if (account !== null) exclusive(path, () => upload(path));
+    }, delay));
+  }
+
+  function markSaved() {
+    lastSaved = Date.now();
+    if (env.saved) env.saved(lastSaved);
   }
 
   // The rules of saves.md section 5, for one path.
@@ -238,6 +258,8 @@ const InnSaves = (() => {
       await exclusive(path, () => reconcileOne(path, byPath.get(path)));
     }
     env.status(`Saves synced with the server for account ${account}${restored ? `; ${restored} restored` : ''}.`);
+    markSaved();
+    startSweeper();
   }
 
   // ---- entry points for the runtime and the page ----
@@ -263,18 +285,65 @@ const InnSaves = (() => {
     if (rel && account !== null) schedule(rel);
   }
 
-  // Page hidden, unloading, or the client exited: push whatever differs from the last sync now.
-  function flushAll() {
-    if (account === null) return;
+  function cancelTimers() {
     for (const timer of timers.values()) clearTimeout(timer);
     timers.clear();
+    firstDirty.clear();
+  }
+
+  // Waits (up to ms) until no upload is running or queued.
+  async function settled(ms) {
+    const end = Date.now() + ms;
+    while ((busy.size || again.size || pending.size || timers.size) && Date.now() < end) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    return !(busy.size || again.size || pending.size || timers.size);
+  }
+
+  // Push whatever differs from the last sync now (tab hidden, "Save to server now"). Resolves true when the
+  // host has everything, false if something failed or timed out; nothing goes on the wire for files that
+  // match what was last synced.
+  async function flushAll() {
+    if (account === null) return false;
+    cancelTimers();
+    const failed = new Set();
+    for (const path of localPaths()) exclusive(path, () => upload(path), failed);
+    const quiet = await settled(FINAL_WAIT_MS);
+    if (quiet && !failed.size) { markSaved(); return true; }
+    return false;
+  }
+
+  // The last chance: the tab is going away or the client exited, and the socket closes right after this
+  // call. Every send happens synchronously, in order ahead of the close frame, and the host handles frames
+  // in order, so the files arrive even though the replies cannot be waited for. Paths with an upload
+  // already running are sent again regardless: that one may carry older bytes.
+  function flushFinal() {
+    if (account === null) return;
+    cancelTimers();
+    for (const path of localPaths()) upload(path).catch((err) => env.log(`saves: ${path}: ${err.message}`));
+  }
+
+  // While logged on and visible: every sweep interval, re-hash the allowlisted files and upload those that
+  // differ from the last sync. Catches programs that keep a save file open (no close hook fires).
+  function sweep() {
+    if (account === null || (typeof document !== 'undefined' && document.hidden)) return;
     for (const path of localPaths()) exclusive(path, () => upload(path));
   }
 
+  function startSweeper() {
+    clearInterval(sweeper);
+    sweeper = timing.sweep > 0 ? setInterval(sweep, timing.sweep) : null;
+  }
+
+  function config(values) {
+    Object.assign(timing, Object.fromEntries(Object.entries(values).filter(([, v]) => Number.isFinite(v) && v >= 0)));
+    if (account !== null) startSweeper();
+  }
+
   // A new COM1 connection starts without an account until its manifest arrives.
-  function reset() { account = null; }
+  function reset() { account = null; clearInterval(sweeper); sweeper = null; cancelTimers(); }
 
   function init(environment) { env = environment; }
 
-  return { init, reset, onControl, onFileClosed, flushAll, sha256Hex, canonical };
+  return { init, reset, config, onControl, onFileClosed, flushAll, flushFinal, sweep, sha256Hex, canonical, lastSaved: () => lastSaved };
 })();

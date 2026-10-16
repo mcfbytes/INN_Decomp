@@ -20,6 +20,7 @@ typedef struct WsLink {
     WsState state;
     uint8_t *inbox;
     size_t head, len, cap;
+    int plus_run; /* consecutive '+' bytes sent: the Hayes escape "+++" that starts a hang-up */
 } WsLink;
 
 static bool inbox_reserve(WsLink *w, size_t extra)
@@ -121,6 +122,25 @@ static bool on_close(int type, const EmscriptenWebSocketCloseEvent *e, void *ctx
     return true;
 }
 
+/* The DOS client hangs up the way a modem user does: "+++" and then ATH0. innkeeperd ends the line, and
+ * with it the save channel, when it reads ATH0, so the page is told at the third '+' to push its changed
+ * files first (docs/web.md "Game saves on the server"). Frames reach the host in order, so what the page
+ * sends now is handled before ATH0. */
+EM_JS(void, line_escape, (void), {
+    if (Module.onLineEscape)
+        Module.onLineEscape();
+});
+
+static void watch_escape(WsLink *w, const uint8_t *buf, int len)
+{
+    for (int i = 0; i < len; i++) {
+        if (buf[i] != '+')
+            w->plus_run = 0;
+        else if (++w->plus_run == 3)
+            line_escape();
+    }
+}
+
 static int ws_send(void *ctx, const uint8_t *buf, int len)
 {
     WsLink *w = ctx;
@@ -128,6 +148,7 @@ static int ws_send(void *ctx, const uint8_t *buf, int len)
         return w->state == WS_CONNECTING ? 0 : -1;
     if (emscripten_websocket_send_binary(w->socket, (void *)buf, (uint32_t)len) != EMSCRIPTEN_RESULT_SUCCESS)
         return -1;
+    watch_escape(w, buf, len);
     return len;
 }
 
