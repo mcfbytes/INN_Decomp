@@ -10,10 +10,15 @@ const WS_PORT_DEFAULT = 2316;
 const REMEMBER_KEY = 'inn.remember', SERVER_KEY = 'inn.com1', SCALE_KEY = 'inn.scale';
 const SCALES = ['sharp', 'smooth', 'crt'];
 const TOAST_MS = 6000;
+// The one place for a site name. Empty means no wordmark and the neutral title below.
+const SITE_NAME = '';
+const NEUTRAL_TITLE = 'Online world';
+const STRIP_EDGE_PX = 8, STRIP_HIDE_MS = 1500, CONNECT_HOLD_MS = 1400;
+const FRAME_W = 960, SNAP_KEEP = 0.96;
 
 const params = new URLSearchParams(location.search);
 const $ = (id) => document.getElementById(id);
-const page = { drive: 'none', persistent: false, syncing: false, started: false, server: '', fileCount: 0 };
+const page = { view: 'setup', drive: 'none', persistent: false, syncing: false, started: false, server: '', fileCount: 0 };
 
 function storageGet(key) {
   try { return localStorage.getItem(key); } catch { return null; }
@@ -25,6 +30,117 @@ function storageSet(key, value) {
 
 function setStatus(text) {
   $('status').textContent = text;
+}
+
+function setView(view) {
+  page.view = view;
+  document.body.dataset.view = view;
+  layoutFrame();
+}
+
+// The frame is the largest 4:3 box that fits the window. Sharp snaps to a whole multiple of the 960x720
+// buffer when that costs under 4% of the size, so pixels stay even; otherwise it is a nearest-neighbour fit.
+function layoutFrame() {
+  const fit = Math.min(innerWidth, innerHeight * 4 / 3);
+  let width = fit;
+  const k = Math.floor(fit / FRAME_W);
+  if ($('stage').dataset.scale === 'sharp' && k >= 1 && k * FRAME_W >= fit * SNAP_KEEP) width = k * FRAME_W;
+  else width = Math.floor(fit);
+  $('frame').style.setProperty('--fw', `${width}px`);
+  $('frame').style.setProperty('--fh', `${width * 3 / 4}px`);
+}
+
+function showName() {
+  if (!SITE_NAME) { document.title = NEUTRAL_TITLE; return; }
+  document.title = SITE_NAME;
+  $('wordmark').textContent = SITE_NAME;
+  $('wordmark').hidden = false;
+}
+
+// ---- dial-up status: the COM1 state lines of the runtime, shown like a modem ----
+
+const dial = { lines: [], timer: 0 };
+
+function dialShow() {
+  const pre = $('modem');
+  pre.textContent = dial.lines.map((l) => l.text).join('\n');
+  pre.append(document.createTextNode('\n'));
+  const cur = document.createElement('span');
+  cur.className = 'cur';
+  pre.append(cur);
+}
+
+function dialLine(text, bad) {
+  dial.lines.push({ text, bad: !!bad });
+  dialShow();
+}
+
+function dialBegin(server) {
+  dial.lines = [];
+  $('dial-actions').hidden = true;
+  $('light-tx').className = 'on';
+  $('light-cd').className = '';
+  $('dial-title').textContent = 'Dialing';
+  dialLine('ATZ');
+  dialLine('OK');
+  dialLine(`ATDT ${server.replace(/^wss?:\/\//, '')}`);
+}
+
+function dialOnline() {
+  if (page.view !== 'dialing') return;
+  $('light-cd').className = 'on';
+  $('dial-title').textContent = 'Connected';
+  dialLine('CONNECT');
+  clearTimeout(dial.timer);
+  dial.timer = setTimeout(() => {
+    setView('play');
+    $('canvas').focus();
+  }, CONNECT_HOLD_MS);
+}
+
+function dialFailed() {
+  if (page.view !== 'dialing') return;
+  clearTimeout(dial.timer);
+  $('light-tx').className = 'err';
+  $('dial-title').textContent = 'No answer';
+  dialLine('NO CARRIER');
+  $('dial-actions').hidden = false;
+  $('retry').focus();
+}
+
+// ---- sign-in providers (shown only if the server lists some) ----
+
+function httpBase(server) {
+  try {
+    const url = new URL(server);
+    url.protocol = url.protocol === 'wss:' ? 'https:' : 'http:';
+    return url.origin;
+  } catch { return ''; }
+}
+
+async function loadProviders() {
+  const list = $('provider-list');
+  const base = httpBase($('com1').value.trim() || defaultServer());
+  let found = [];
+  try {
+    if (base) {
+      const res = await fetch(`${base}/auth/providers`, { headers: { accept: 'application/json' } });
+      if (res.ok) found = await res.json();
+    }
+  } catch { /* no providers: the section stays hidden */ }
+  found = Array.isArray(found) ? found.filter((p) => p && typeof p.name === 'string' && typeof p.url === 'string') : [];
+  list.replaceChildren();
+  for (const p of found) {
+    let href;
+    try { href = new URL(p.url, base).href; } catch { continue; }
+    if (!/^https?:/.test(href)) continue;
+    const a = document.createElement('a');
+    a.className = 'btn';
+    a.href = href;
+    a.textContent = `Sign in with ${p.name}`;
+    list.append(a);
+  }
+  $('providers').hidden = !list.children.length;
 }
 
 function toast(text, kind = '') {
@@ -45,10 +161,13 @@ function setLink(state) {
 }
 
 function watchLog(text) {
-  if (/^uart: websocket open/.test(text)) setLink('online');
-  else if (/^uart: websocket (closed|error)/.test(text) && $('link').dataset.state !== 'offline') {
+  if (/^uart: websocket open/.test(text)) {
+    setLink('online');
+    dialOnline();
+  } else if (/^uart: websocket (closed|error)/.test(text) && $('link').dataset.state !== 'offline') {
     setLink('offline');
-    toast('Lost the connection to the server. Reload the page to reconnect.', 'bad');
+    if (page.view === 'dialing') dialFailed();
+    else toast('Lost the connection to the server. Reload the page to reconnect.', 'bad');
   }
 }
 
@@ -93,7 +212,7 @@ function clearDir(dir) {
 function installRoot(paths) {
   const pattern = new RegExp(`(^|/)${PROGRAM.exe.replace('.', '\\.')}$`, 'i');
   const hit = paths.filter((p) => pattern.test(p)).sort((a, b) => a.length - b.length)[0];
-  if (!hit) throw new Error(`${PROGRAM.exe} not found: pick the INN directory or a zip of it`);
+  if (!hit) throw new Error(`${PROGRAM.exe} not found: pick the folder that contains it, or a zip of it`);
   return hit.slice(0, hit.length - PROGRAM.exe.length);
 }
 
@@ -250,7 +369,7 @@ function onDrop(e) {
   const zip = [...e.dataTransfer.files].find((f) => /\.zip$/i.test(f.name));
   if (entries.some((entry) => entry.isDirectory)) pick(filesFromDrop, entries);
   else if (zip) pick(filesFromZip, zip);
-  else toast('Drop the INN folder itself, or a .zip of it.', 'bad');
+  else toast('Drop the install folder itself, or a .zip of it.', 'bad');
 }
 
 function wireDrop() {
@@ -289,7 +408,7 @@ function showDriveState() {
   $('storage-note').textContent = !page.persistent ? 'This build keeps nothing between visits.'
     : page.drive === 'saved' || (page.drive === 'picked' && $('remember').checked)
       ? 'Your installation and player files are saved in this browser.' : 'Nothing is saved in this browser.';
-  setStatus(page.started ? statusRunning() : ready ? 'Ready to connect' : 'Add your INN installation');
+  setStatus(page.started ? statusRunning() : ready ? 'Ready to connect' : 'Add your installation');
 }
 
 // ---- running ----
@@ -323,8 +442,42 @@ function setMuted(muted) {
 function setScale(scale) {
   if (!SCALES.includes(scale)) scale = SCALES[0];
   $('stage').dataset.scale = scale;
+  const label = { sharp: 'Sharp', smooth: 'Smooth', crt: 'CRT' }[scale];
+  $('mode-label').textContent = label;
+  $('mode').ariaLabel = `Display mode: ${label}`;
+  layoutFrame();
   for (const b of $('scale').querySelectorAll('button')) b.setAttribute('aria-checked', String(b.dataset.scale === scale));
   storageSet(SCALE_KEY, scale);
+}
+
+function cycleScale() {
+  setScale(SCALES[(SCALES.indexOf($('stage').dataset.scale) + 1) % SCALES.length]);
+}
+
+// The strip slides in when the pointer touches the top edge and leaves 1.5 s after the pointer does.
+function wireStrip() {
+  const strip = $('strip');
+  let timer = 0;
+  const show = () => { clearTimeout(timer); strip.classList.add('show'); };
+  const later = () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => { if (!strip.matches(':hover')) strip.classList.remove('show'); }, STRIP_HIDE_MS);
+  };
+  document.addEventListener('mousemove', (e) => {
+    if (page.view !== 'play') return;
+    if (e.clientY <= STRIP_EDGE_PX || strip.matches(':hover')) show();
+    else if (strip.classList.contains('show')) later();
+  });
+  document.addEventListener('mouseleave', () => strip.classList.contains('show') && later());
+  strip.addEventListener('mouseenter', show);
+  strip.addEventListener('mouseleave', later);
+  // Ctrl+Alt+F is taken before SDL (which listens on the canvas) sees it; every other key goes to the game.
+  window.addEventListener('keydown', (e) => {
+    if (!(e.ctrlKey && e.altKey && !e.shiftKey && !e.metaKey && e.code === 'KeyF')) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (page.view === 'play' && document.fullscreenEnabled) toggleFullscreen();
+  }, true);
 }
 
 function toggleFullscreen() {
@@ -369,7 +522,14 @@ function keepServerSaves() {
     persist: () => syncDrive(false),
     send: (text) => !!Module.sendControl && Module.sendControl(text),
     notify: (text) => toast(text, 'ok'),
-    status: (text) => { $('saves-note').textContent = text; },
+    status: (text) => {
+      $('saves-note').textContent = text;
+      const syncing = /^Syncing/.test(text);
+      $('savesync').hidden = false;
+      $('savesync').dataset.state = syncing ? 'syncing' : 'online';
+      $('savesync-text').textContent = syncing ? 'Saving' : 'Saves synced';
+      $('savesync').title = text;
+    },
   });
   document.addEventListener('visibilitychange', () => document.hidden && InnSaves.flushAll());
   window.addEventListener('pagehide', () => InnSaves.flushAll());
@@ -382,8 +542,12 @@ function start() {
   page.server = server;
   storageSet(SERVER_KEY, server);
   storageSet(REMEMBER_KEY, $('remember').checked ? '1' : '0');
-  $('setup').hidden = true;
   $('stage').hidden = false;
+  $('dial-title').textContent = 'Dialing';
+  $('setup').hidden = true;
+  $('dial').hidden = false;
+  dialBegin(server);
+  setView('dialing');
   $('fullscreen').hidden = !document.fullscreenEnabled;
   watchFocus();
   $('canvas').focus();
@@ -410,10 +574,20 @@ function wirePage() {
   $('forget').addEventListener('click', forget);
   $('change').addEventListener('click', () => { page.changing = true; showDriveState(); });
   $('restart').addEventListener('click', () => location.reload());
+  $('retry').addEventListener('click', () => location.reload());
+  $('mode').addEventListener('click', cycleScale);
+  $('com1').addEventListener('change', loadProviders);
+  window.addEventListener('resize', layoutFrame);
   $('sound').addEventListener('click', () => setMuted(!page.muted));
   $('fullscreen').addEventListener('click', toggleFullscreen);
-  document.addEventListener('fullscreenchange', () =>
-    document.body.classList.toggle('fullscreen', !!document.fullscreenElement));
+  document.addEventListener('fullscreenchange', () => {
+    document.body.classList.toggle('fullscreen', !!document.fullscreenElement);
+    layoutFrame();
+    if (page.started) $('canvas').focus();
+  });
+  wireStrip();
+  showName();
+  loadProviders();
   $('open-settings').addEventListener('click', () => openSettings(true));
   $('close-settings').addEventListener('click', () => openSettings(false));
   $('scrim').addEventListener('click', () => openSettings(false));
