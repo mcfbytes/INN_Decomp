@@ -92,8 +92,9 @@
   #menupop .mi:focus, #menupop .mi:hover { background: var(--accent); color: var(--accent-ink); }
   #menupop .mi[aria-disabled="true"] { opacity: .45; cursor: default; background: transparent; color: inherit; }
   #menupop .sep { height: 2px; margin: 4px 2px; background: var(--faint); opacity: .5; }
-  #inv { position: fixed; right: 12px; top: 40px; z-index: 6; width: 44px; height: 44px; padding: 5px; background: var(--surface);
-         border: 3px solid var(--border); box-shadow: inset 0 0 0 2px var(--edge), 3px 3px 0 rgba(0, 0, 0, .35); }
+  #inv { position: fixed; right: 12px; top: 40px; z-index: 6; display: flex; gap: 6px; }
+  #inv .item { width: 44px; height: 44px; padding: 5px; background: var(--surface);
+               border: 3px solid var(--border); box-shadow: inset 0 0 0 2px var(--edge), 3px 3px 0 rgba(0, 0, 0, .35); }
   #inv svg { display: block; width: 100%; height: 100%; }
   #narr, #term { position: fixed; z-index: 8; background: var(--surface); border: 3px solid var(--border);
                  box-shadow: inset 0 0 0 2px var(--edge), 4px 4px 0 rgba(0, 0, 0, .35); }
@@ -125,15 +126,40 @@
   #term .who { margin: 2px 0 6px; font-size: 22px; color: var(--accent); }
   #term .who:empty { display: none; }
   #term .modem { min-height: 112px; }
-  #dlg { position: fixed; inset: 0; z-index: 16; display: grid; place-items: center; background: var(--scrim); padding: 16px; }
-  #dlg .box { width: min(440px, 100%); padding: 14px 16px 14px; background: var(--surface); border: 3px solid var(--border);
+  .dlg { position: fixed; inset: 0; z-index: 16; display: grid; place-items: center; background: var(--scrim); padding: 16px; }
+  .dlg .box { width: min(440px, 100%); padding: 14px 16px 14px; background: var(--surface); border: 3px solid var(--border);
               box-shadow: inset 0 0 0 2px var(--edge), 6px 6px 0 rgba(0, 0, 0, .35); }
-  #dlg h2 { margin: 0 0 4px; font: 400 30px/1.1 var(--pixel); }
-  #dlg .hint { margin: 0 0 10px; font: 400 21px/1.15 var(--pixel); color: var(--muted); }
-  #dlg .err { margin: 6px 0 0; font: 400 21px/1.15 var(--pixel); color: var(--bad); }
-  #dlg .err:empty { display: none; }
+  .dlg h2 { margin: 0 0 4px; font: 400 30px/1.1 var(--pixel); }
+  .dlg .hint { margin: 0 0 10px; font: 400 21px/1.15 var(--pixel); color: var(--muted); }
+  .dlg .err { margin: 6px 0 0; font: 400 21px/1.15 var(--pixel); color: var(--bad); }
+  .dlg .err:empty { display: none; }
+  /* calling cards in the narrator box: small pixel cards, one per provider (names in lettering only) */
+  #narr .cards { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
+  #narr .cards[hidden] { display: none; }
+  .ccard { --band: #c4401c; position: relative; width: 156px; min-height: 96px; padding: 0 0 20px; text-align: left; cursor: pointer; color: #2a1e12;
+           background: #f6f0dc; border: 2px solid var(--border); box-shadow: inset 0 0 0 2px #fffbea, 3px 3px 0 rgba(0, 0, 0, .35); overflow: hidden;
+           font: 400 21px/1 var(--pixel); letter-spacing: .03em; }
+  .ccard[data-hue="1"] { --band: #2a6c9c; }
+  .ccard[data-hue="2"] { --band: #3a8a4c; }
+  .ccard[data-hue="3"] { --band: #8a4a9c; }
+  .ccard .ct { display: block; height: 19px; padding: 3px 7px 0; background: var(--band); color: #fff8ec; font-size: 16px; letter-spacing: .1em; }
+  .ccard .cn { display: block; padding: 6px 7px 0; font-size: 22px; line-height: 1; overflow-wrap: anywhere; }
+  .ccard .cs { position: absolute; left: 0; right: 0; bottom: 6px; height: 8px; background: #2c2c44; }
+  .ccard.own { --band: #6b5a42; background: #efe6c8; border-style: dashed; }
+  .ccard:hover { transform: translateY(-2px); }
+  .ccard:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  @media (max-width: 700px) { .ccard { width: 100%; min-height: 78px; } }
+  #narr .hold { display: flex; gap: 8px; margin-top: 6px; height: 22px; align-items: flex-end; }
+  #narr .hold[hidden] { display: none; }
+  #narr .hold svg { width: 14px; height: 18px; fill: var(--accent); animation: bob 1.2s steps(4) infinite; }
+  #narr .hold svg:nth-child(2) { animation-delay: .3s; }
+  #narr .hold svg:nth-child(3) { animation-delay: .6s; }
+  @keyframes bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+  body.still #narr .hold svg { animation: none; }
+  @media (prefers-reduced-motion: reduce) { #narr .hold svg { animation: none; } .ccard:hover { transform: none; } }
   #iris { position: fixed; inset: 0; z-index: 30; pointer-events: all; background: transparent; }
   body.adventure:not([data-view="setup"]):not([data-view="dialing"]) .adv { display: none; }
+  body.adventure:not([data-view="setup"]):not([data-view="dialing"]) #inv { display: none; }
   body.classic .adv { display: none; }
   @media (max-width: 700px) {
     #narr { width: auto; left: 16px; right: 16px; transform: none; }
@@ -433,6 +459,7 @@
 
 <script src="zip.js"></script>
 <script src="saves.js"></script>
+<script src="auth.js"></script>
 <script src="adv.js"></script>
 <script src="scene.js"></script>
 <script src="page.js"></script>
