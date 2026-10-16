@@ -201,8 +201,26 @@
   @keyframes blink { 0% { opacity: 1; } 50% { opacity: .15; } }
   @keyframes twinkle { 50% { opacity: .2; } }
 
+  .scene { overflow: hidden; }
+  #scene-canvas { position: absolute; display: block; image-rendering: pixelated; max-width: none; }
   #landing { position: fixed; inset: 0; z-index: 3; display: flex; align-items: center; justify-content: flex-start;
-             padding: 24px max(16px, 7vw); overflow: auto; }
+             padding: 24px max(16px, 7vw); overflow: auto; pointer-events: none; }
+  #landing .card { pointer-events: auto; }
+
+  /* narrator box for the painted scenes: a bordered text box in bitmap lettering */
+  #quip { position: fixed; z-index: 6; padding: 10px 14px 12px; pointer-events: none; font: 400 25px/1.15 var(--pixel);
+          letter-spacing: .02em; color: var(--text); background: var(--surface); border: 3px solid var(--border);
+          box-shadow: inset 0 0 0 2px var(--edge), 4px 4px 0 rgba(0, 0, 0, .35); min-height: 3em; }
+  #scenepick { position: fixed; left: 10px; bottom: 10px; z-index: 7; display: flex; gap: 4px; align-items: center; flex-wrap: wrap;
+               padding: 5px 7px; background: var(--surface); border: 2px solid var(--border); box-shadow: inset 0 0 0 1px var(--edge); }
+  #scenepick span { font: 400 17px/1 var(--pixel); letter-spacing: .08em; color: var(--muted); margin-right: 4px; }
+  #scenepick button { height: 24px; padding: 0 8px; border: 2px solid var(--border); background: var(--surface-2); color: var(--text);
+                      font: 400 18px/1 var(--pixel); letter-spacing: .04em; cursor: pointer; }
+  #scenepick button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+  #scenepick button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  body:not([data-view="setup"]):not([data-view="dialing"]) #scenepick,
+  body:not([data-view="setup"]):not([data-view="dialing"]) #quip { display: none; }
+
   body:not([data-view="setup"]):not([data-view="dialing"]) .scene,
   body:not([data-view="setup"]):not([data-view="dialing"]) #landing { display: none; }
 
@@ -900,6 +918,7 @@
 
 <script src="zip.js"></script>
 <script src="saves.js"></script>
+<script src="scene.js"></script>
 <script src="page.js"></script>
 {{{ SCRIPT }}}
 </body>

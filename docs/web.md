@@ -52,8 +52,26 @@ The page asks for the install (unless `inn.data` provides one), then runs
 |---|---|
 | `com1=ws://host:port` | Server URL; default `ws://<page host>:2316` (`wss://` on an https page). The page also offers an editable field and remembers the last value. |
 | `autostart=1` | Start as soon as an install is available (preloaded or saved), without the Start button. |
+| `scene=<id>` | Landing backdrop: `town` (default, the flat pixel-art valley in `shell.html`), `valley`, `diner`, `tower` or `harbor`. An unknown id falls back to `town`. |
+| `scenes` | Any value: shows a small picker at the bottom left to flip between the backdrops live (it also updates `scene=` in the address bar). |
 | `perf=1` | Pass `--perf`: a timing line in the log every 5 s (see Performance). |
 | `ips=N` | Guest instruction rate (`--ips`), default 20000000. |
+
+## Landing scenes
+
+`runtime/web/scene.js` is the engine and `runtime/web/scenes/<id>.js` one painting each. A scene module is
+`{ id, title, focus, paint(ctx, kit), anims, hotspots }` registered with `InnScenes.register`. `paint` draws a 320x200
+picture with Canvas 2D (soft gradients, wobbly brush shapes, dabs and grain); the engine adds a paper-and-wash texture,
+cuts a 256-colour palette from the result (median cut) and maps it with an 8x8 ordered dither, so the load takes about
+30 ms. The canvas is drawn with `image-rendering: pixelated` and covers the window, with the scene's `focus` kept beside
+the setup card (on a narrow portrait screen it hangs from the bottom edge under the card).
+
+Every scene has a day palette and a dusk palette; the dusk one is used when the browser is in dark mode. Small things move by
+re-compositing only their own rectangle (`anims`: clouds, glints, blinking lights, and gags that replay every 20 s or so),
+so the picture is never repainted per frame. All of it stops under `prefers-reduced-motion`. Hotspots are rectangles in
+scene pixels; clicking one, or resting the mouse on it for a second, shows a short narrator line in a bordered text box.
+Adding a scene: write `scenes/<id>.js`, add the id to `IDS` in `scene.js` and the file to the copy list in `CMakeLists.txt`.
+The artwork is original code; nothing is traced or copied from any game.
 
 ## The C: drive
 

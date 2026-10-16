@@ -60,6 +60,13 @@ function showName() {
 // ---- dial-up status: the COM1 state lines of the runtime, shown like a modem ----
 
 const dial = { lines: [], timer: 0 };
+const NO_CARRIER_QUIPS = [
+  'Your call has met an untimely end. Try again?',
+  'The line went quiet. It may be sulking.',
+  'Nobody picked up. Perhaps they are out walking the cable.',
+  'The other end sends its regrets, and a busy signal.',
+  'Somewhere a switchboard is shrugging. Try again?',
+];
 
 function dialShow() {
   const pre = $('modem');
@@ -104,6 +111,7 @@ function dialFailed() {
   $('light-tx').className = 'err';
   $('dial-title').textContent = 'No answer';
   dialLine('NO CARRIER');
+  dialLine(NO_CARRIER_QUIPS[Math.floor(Math.random() * NO_CARRIER_QUIPS.length)]);
   $('dial-actions').hidden = false;
   $('retry').focus();
 }
