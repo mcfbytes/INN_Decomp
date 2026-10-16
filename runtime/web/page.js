@@ -20,6 +20,10 @@ const STRIP_EDGE_PX = 8, STRIP_HIDE_MS = 1500, CONNECT_HOLD_MS = 1400;
 const FRAME_W = 960, SNAP_KEEP = 0.96;
 
 const params = new URLSearchParams(location.search);
+// The landing's adventure layer (adv.js). Every call is a no-op under ?classic=1, which keeps the old card.
+const advOn = () => typeof Adv !== 'undefined' && Adv.active;
+const adv = (name, arg) => { if (advOn() && Adv[name]) return Adv[name](arg); };
+if (params.has('classic')) document.body.classList.add('classic');
 const $ = (id) => document.getElementById(id);
 const page = { view: 'setup', drive: 'none', persistent: false, syncing: false, started: false, server: '', fileCount: 0 };
 
@@ -72,6 +76,7 @@ const NO_CARRIER_QUIPS = [
 ];
 
 function dialShow() {
+  adv('modem', dial.lines.map((l) => l.text).join('\n'));
   const pre = $('modem');
   pre.textContent = dial.lines.map((l) => l.text).join('\n');
   pre.append(document.createTextNode('\n'));
@@ -94,6 +99,7 @@ function dialBegin(server) {
   dialLine('ATZ');
   dialLine('OK');
   dialLine(`ATDT ${server.replace(/^wss?:\/\//, '')}`);
+  adv('dialBegin');
 }
 
 function dialOnline() {
@@ -101,11 +107,13 @@ function dialOnline() {
   $('light-cd').className = 'on';
   $('dial-title').textContent = 'Connected';
   dialLine('CONNECT');
+  adv('online');
   clearTimeout(dial.timer);
-  dial.timer = setTimeout(() => {
+  const enter = () => {
     setView('play');
     $('canvas').focus();
-  }, CONNECT_HOLD_MS);
+  };
+  dial.timer = setTimeout(() => (advOn() ? Adv.transition(enter) : enter()), CONNECT_HOLD_MS);
 }
 
 function dialFailed() {
@@ -116,7 +124,7 @@ function dialFailed() {
   dialLine('NO CARRIER');
   dialLine(NO_CARRIER_QUIPS[Math.floor(Math.random() * NO_CARRIER_QUIPS.length)]);
   $('dial-actions').hidden = false;
-  $('retry').focus();
+  if (advOn()) adv('failed'); else $('retry').focus();
 }
 
 // ---- sign-in providers (shown only if the server lists some) ----
@@ -155,9 +163,12 @@ async function loadProviders() {
     list.append(a);
   }
   $('providers').hidden = !list.children.length;
+  adv('providers', [...list.children].map((a) => ({ name: a.textContent.replace(/^Sign in with /, ''), href: a.href })));
 }
 
 function toast(text, kind = '') {
+  // On the landing the narrator box tells the player what went wrong.
+  if (kind === 'bad' && advOn() && (page.view === 'setup' || page.view === 'dialing') && /^Could not use that|^Lost the/.test(text)) return adv('error', text);
   const el = document.createElement('div');
   el.className = `toast ${kind}`;
   el.append(document.createElement('i'), text);
@@ -345,6 +356,7 @@ async function pick(readFiles, source) {
     log(`installed ${count} files into C:\\${PROGRAM.dir}`);
     if ($('remember').checked) await syncDrive(false);
     showDriveState();
+    adv('picked', count);
   } catch (err) {
     showDriveState();
     toast(`Could not use that installation: ${err.message}`, 'bad');
@@ -378,21 +390,23 @@ async function filesFromDrop(entries) {
 function onDrop(e) {
   e.preventDefault();
   $('drop').classList.remove('over');
+  document.body.classList.remove('dropping');
   if (page.started) return;
   const entries = [...e.dataTransfer.items].map((item) => item.webkitGetAsEntry && item.webkitGetAsEntry()).filter(Boolean);
   const zip = [...e.dataTransfer.files].find((f) => /\.zip$/i.test(f.name));
   if (entries.some((entry) => entry.isDirectory)) pick(filesFromDrop, entries);
   else if (zip) pick(filesFromZip, zip);
-  else toast('Drop the install folder itself, or a .zip of it.', 'bad');
+  else { toast('Drop the install folder itself, or a .zip of it.', 'bad'); return; }
+  adv('dropped');
 }
 
 function wireDrop() {
   const zone = $('drop');
   window.addEventListener('dragover', (e) => {
     e.preventDefault();
-    if (!page.started) zone.classList.add('over');
+    if (!page.started) { zone.classList.add('over'); document.body.classList.add('dropping'); }
   });
-  window.addEventListener('dragleave', (e) => { if (!e.relatedTarget) zone.classList.remove('over'); });
+  window.addEventListener('dragleave', (e) => { if (!e.relatedTarget) { zone.classList.remove('over'); document.body.classList.remove('dropping'); } });
   window.addEventListener('drop', onDrop);
 }
 
@@ -423,6 +437,7 @@ function showDriveState() {
     : page.drive === 'saved' || (page.drive === 'picked' && $('remember').checked)
       ? 'Your installation and player files are saved in this browser.' : 'Nothing is saved in this browser.';
   setStatus(page.started ? statusRunning() : ready ? 'Ready to connect' : 'Add your installation');
+  adv('drive');
 }
 
 // ---- running ----
@@ -587,6 +602,7 @@ function start() {
 async function onRuntimeReady() {
   await mountDrive();
   showDriveState();
+  adv('ready');
   if (params.get('autostart') && page.drive !== 'none') start();
 }
 
@@ -623,6 +639,7 @@ function wirePage() {
   setScale(storageGet(SCALE_KEY));
   setLink('idle');
   wireDrop();
+  adv('init');
 }
 
 var Module = {

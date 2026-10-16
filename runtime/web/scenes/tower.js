@@ -202,6 +202,31 @@ InnScenes.register((() => {
     line('CHARMS EXTRA', y + 24, P.dusk ? P.lit('#b8e8ff') : '#3c1c58');
   }
 
+  // A lectern with a spellbook on it. The book is a disk box: a floppy is embossed on the cover.
+  function lectern(g, P) {
+    const x = 86, base = 184;
+    P.shadow(g, x, base + 1, 22, 3.4, 0.4);
+    P.rect(g, x - 3, 158, 6, base - 158, ['#9c6c3c', '#4a2c18'], { wob: 0.3, seed: 91, edge: '#1c1008', ea: 0.7 });
+    P.shape(g, [[x - 10, base + 1], [x - 6, base - 5], [x + 6, base - 5], [x + 10, base + 1]], ['#8c5c30', '#3c2414'], { wob: 0.4, seed: 92, edge: '#1c1008', ea: 0.7 });
+    P.shape(g, [[x - 21, 154], [x + 21, 154], [x + 16, 163], [x - 16, 163]], ['#b8844c', '#5c3a1c'], { wob: 0.4, seed: 93, edge: '#1c1008', ea: 0.8 });
+    // the book: purple cover, gold border, page edges below, a clasp
+    const bx = x - 17, by = 132, bw = 34, bh = 22;
+    P.shape(g, [[bx - 1, by + bh], [bx + bw, by + bh], [bx + bw + 2, by + bh + 3], [bx + 1, by + bh + 3]], ['#fff6d8', '#c8b88c'], { wob: 0.2, seed: 94, edge: '#3a2c14', ea: 0.6 });
+    P.rect(g, bx, by, bw, bh, ['#9a62e0', '#4a2a9c'], { wob: 0.4, seed: 95, edge: '#1c0c44', ea: 0.9 });
+    P.rect(g, bx, by, 4, bh, ['#4a2a9c', '#2c1868'], { wob: 0.2, seed: 96 });
+    g.strokeStyle = P.col('#f0c850'); g.lineWidth = 1;
+    g.strokeRect(bx + 6.5, by + 2.5, bw - 9, bh - 5);
+    P.floppy(g, bx + 13, by + 4.5, 13, '#f0c850', '#fff6d8');
+    P.rect(g, bx + bw - 3, by + 8, 5, 5, ['#ffe27a', '#b8801c'], { wob: 0.1, seed: 97, edge: '#3a2410', ea: 0.8 });
+    for (const [sx, sy] of [[bx + 7, by + 3], [bx + 24, by + 3], [bx + 7, by + bh - 4], [bx + 24, by + bh - 4]]) { g.fillStyle = P.lit('#ffe66a'); g.fillRect(sx, sy, 1, 1); }
+    if (P.dusk) P.glow(g, bx + bw / 2, by + bh / 2, 22, '#c8a0ff', 0.25);
+  }
+
+  // A candlestick telephone on the balcony, by the switchboard window.
+  function balconyPhone(g, P) {
+    P.candlePhone(g, cx(108) + 19, 108.5, 1.9);
+  }
+
   function paint(g, P) {
     sky(g, P);
     farWoods(g, P);
@@ -209,6 +234,8 @@ InnScenes.register((() => {
     tower(g, P);
     sign(g, P);
     canopyTop(g, P);
+    lectern(g, P);
+    balconyPhone(g, P);
   }
 
   // ---------- animation ----------
@@ -365,5 +392,26 @@ InnScenes.register((() => {
       'It has a knot like a face. It would rather you did not mention it.'] },
   ];
 
-  return { id: 'tower', title: 'The tower', focus: { x: 220, y: 100 }, paint, anims, hotspots };
+  hotspots.push(
+    { id: 'spellbook', role: 'disks', x: 66, y: 128, w: 40, h: 58, say: ['A spellbook on a lectern. It is mostly disk, with a little magic in the margins.'] },
+    { id: 'candlephone', role: 'phone', x: 234, y: 84, w: 18, h: 26, say: ['A candlestick telephone. Wizards use them to avoid shouting spells across the forest.'] });
+
+  const objects = {
+    disks: {
+      open: 'The spellbook creaks open. The pages are floppies, and each one has been carefully blessed.',
+      got: 'The switchboard operator in the tower window is looking your way. Try the telephone on the balcony.',
+      again: 'The book sighs. It was just getting comfortable.',
+      hint: 'The big purple book on the lectern is twinkling. Books do that when they want to be read.',
+    },
+    phone: {
+      refuse: 'You pick up the receiver. A voice from the tower says: "Disks first, please. Spells are not free, and neither is the book."',
+      answer: 'Switchboard. Which realm?',
+      hint: 'The telephone on the balcony is sparkling. Either it is magic or it needs dusting.',
+      busy: 'The owl on the switchboard holds up a wing. The line is occupied.',
+    },
+  };
+
+  return { id: 'tower', title: 'The tower', focus: { x: 220, y: 100 }, paint, anims, hotspots, objects,
+    termAt: [104, 70],
+    spark: { disks: [62, 126, 48, 62], phone: [230, 80, 26, 32] } };
 })());

@@ -135,6 +135,49 @@ InnScenes.register((() => {
     P.grain(g, x - 14, y - h, 28, h, '#f6f2d0', 60, 64, 0.8);
   }
 
+  // The special of the day: a chalkboard on legs with a plate of disks in front of it.
+  function specialBoard(g, P) {
+    const x = 90, y = 140, w = 38, h = 30;
+    P.shadow(g, x + w / 2, y + h + 4, 24, 3, 0.35);
+    P.line(g, [[x + 3, y + h + 4], [x + 6, y + 2]], '#6c4a2c', 2.2);
+    P.line(g, [[x + w - 3, y + h + 4], [x + w - 6, y + 2]], '#6c4a2c', 2.2);
+    P.rect(g, x, y, w, h, ['#d8a860', '#8c5c28'], { wob: 0.4, seed: 81, edge: '#2c1a0c', ea: 0.8 });
+    P.rect(g, x + 3, y + 3, w - 6, h - 6, ['#3c5c4c', '#1c3428'], { wob: 0.3, seed: 82, edge: '#0c1a10', ea: 0.8 });
+    P.dabs(g, x + 3, y + 3, w - 6, h - 6, ['#7c9c8c', '#2c4438'], 12, 1.8, 83, 0.25);
+    P.text(g, 'TODAY', x + (w - 29) / 2 + 0.5, y + 6, '#f6f0dc', 1, 1);
+    P.text(g, 'DISKS', x + (w - 29) / 2 + 0.5, y + 16, '#ffe27a', 1, 1);
+    g.fillStyle = P.col('#f6f0dc'); g.fillRect(x + 8, y + 25, w - 16, 1);
+    // a plate of floppies leaning on each other, with a fork
+    P.blob(g, x + w / 2 + 2, y + h + 6, 13, 3, ['#ffffff', '#b8c0d0'], { wob: 0.3, seed: 84, n: 12, edge: '#3c4458', ea: 0.6 });
+    const cols = ['#d8382c', '#2c5cc8', '#f0b020'];
+    cols.forEach((c, i) => {
+      g.save();
+      g.translate(x + w / 2 - 4 + i * 7, y + h + 6);
+      g.rotate((i - 1) * 0.28);
+      P.floppy(g, -5, -11, 10, c);
+      g.restore();
+    });
+    P.line(g, [[x + w / 2 + 12, y + h + 1], [x + w / 2 + 14, y + h + 8]], '#e8e8f0', 1);
+    P.line(g, [[x + w / 2 + 11, y + h + 1], [x + w / 2 + 11, y + h + 3]], '#e8e8f0', 1);
+    P.line(g, [[x + w / 2 + 13, y + h + 1], [x + w / 2 + 13, y + h + 3]], '#e8e8f0', 1);
+  }
+
+  // A payphone on a post, between the diner and the big sign.
+  function payphone(g, P) {
+    const x = 258, y = 130;
+    P.shadow(g, x + 9, y + 40, 12, 2.4, 0.35);
+    P.rect(g, x + 7.5, y + 24, 3, 17, ['#a8b0c8', '#5a6490'], { wob: 0.2, seed: 85, edge: '#1c2040', ea: 0.6 });
+    const hood = [[x, y + 3], [x + 3, y], [x + 15, y], [x + 18, y + 3], [x + 18, y + 26], [x, y + 26]];
+    P.shape(g, hood, ['#7cc8d8', '#2c7890'], { wob: 0.4, seed: 86, edge: '#0c2c3c', ea: 0.85 });
+    P.rect(g, x + 1.5, y + 1.5, 15, 9, ['#2c3c7c', '#141c4c'], { wob: 0.2, seed: 87, edge: '#0c1030', ea: 0.7 });
+    P.text(g, 'TEL', x + 0.5, y + 2.5, '#ffe27a', 1, 0);
+    P.rect(g, x + 3, y + 13, 12, 3, '#14202c', { wob: 0.1, seed: 88 });
+    g.fillStyle = P.col('#c8ccd8'); g.fillRect(x + 8, y + 13, 2, 3);
+    for (let r = 0; r < 2; r++) for (let c = 0; c < 3; c++) { g.fillStyle = P.col('#e8ecf4'); g.fillRect(x + 4 + c * 4, y + 18 + r * 3.4, 2.4, 2.4); }
+    P.shape(g, [[x - 5, y + 8], [x - 2, y + 8], [x - 2, y + 22], [x - 5, y + 22]], ['#3c3c4c', '#0c0c14'], { wob: 0.2, seed: 89, edge: '#000', ea: 0.8 });
+    P.line(g, [[x - 2, y + 20], [x + 1, y + 27], [x + 4, y + 24]], '#14141c', 1);
+  }
+
   function paint(g, P) {
     sky(g, P);
     desert(g, P);
@@ -163,7 +206,8 @@ InnScenes.register((() => {
     for (const [x, y, r, sd] of [[128, 176, 4, 1], [172, 174, 3, 2], [244, 175, 5, 3], [268, 172, 3, 4], [100, 172, 4, 5]]) {
       P.blob(g, x, y, r, r * 0.6, ['#e0c498', '#8c6c4c'], { wob: 0.6, seed: 90 + sd, edge: '#4a3020', ea: 0.4 });
     }
-    for (const [x, y] of [[120, 170], [262, 177], [30, 175]]) P.canopy(g, x, y, 7, 4, ['#5c6a38', '#98a85a', '#c8d080'].map((c) => P.col(c)), 300 + x);
+    for (const [x, y] of [[120, 170], [262, 177], [30, 175]]) P.canopy(g, x, y, 7, 4, ['#5c6a38', '#98a85a', '#c8d080'].map((c) => P.col(c)), 300 + x);    specialBoard(g, P);
+    payphone(g, P);
   }
 
   // ---------- animation ----------
@@ -337,5 +381,26 @@ InnScenes.register((() => {
       'A tumbleweed was here. It has since left a forwarding address.'] },
   ];
 
-  return { id: 'diner', title: 'The diner', focus: { x: 210, y: 118 }, paint, anims, hotspots };
+  hotspots.push(
+    { id: 'special', role: 'disks', x: 86, y: 138, w: 48, h: 46, say: ['Today\'s special is disks. The pie has been moved aside to make room.'] },
+    { id: 'payphone', role: 'phone', x: 250, y: 128, w: 30, h: 42, say: ['A payphone. It has seen things, mostly quarters.'] });
+
+  const objects = {
+    disks: {
+      open: 'The waitress slides a plate of disks across the counter, with a fork, as is custom.',
+      got: 'Dessert is the payphone by the sign. It takes calls.',
+      again: 'Seconds are on the house, but the house is just a diner.',
+      hint: 'A chalkboard by the cactus says TODAY DISKS. It is trying very hard to be noticed.',
+    },
+    phone: {
+      refuse: 'You pick up the receiver. A voice says: "Disks first, please. We do not take orders on an empty plate."',
+      answer: 'Operator. What are you having?',
+      hint: 'The payphone is blinking at you, quietly and a little desperately.',
+      busy: 'The line is busy. The cactus got there first.',
+    },
+  };
+
+  return { id: 'diner', title: 'The diner', focus: { x: 210, y: 118 }, paint, anims, hotspots, objects,
+    termAt: [100, 14],
+    spark: { disks: [86, 136, 50, 48], phone: [250, 126, 30, 46] } };
 })());
