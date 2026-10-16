@@ -458,10 +458,14 @@ function cycleScale() {
 function wireStrip() {
   const strip = $('strip');
   let timer = 0;
-  const show = () => { clearTimeout(timer); strip.classList.add('show'); };
+  const show = () => { clearTimeout(timer); timer = 0; strip.classList.add('show'); };
+  // Started once: mouse moves over the game must not keep pushing the hide back.
   const later = () => {
-    clearTimeout(timer);
-    timer = setTimeout(() => { if (!strip.matches(':hover')) strip.classList.remove('show'); }, STRIP_HIDE_MS);
+    if (timer) return;
+    timer = setTimeout(() => {
+      timer = 0;
+      if (!strip.matches(':hover')) strip.classList.remove('show');
+    }, STRIP_HIDE_MS);
   };
   document.addEventListener('mousemove', (e) => {
     if (page.view !== 'play') return;
@@ -471,6 +475,13 @@ function wireStrip() {
   document.addEventListener('mouseleave', () => strip.classList.contains('show') && later());
   strip.addEventListener('mouseenter', show);
   strip.addEventListener('mouseleave', later);
+  // A mouse click leaves no focus behind: the strip would stay pinned open, and Space or Enter in the
+  // game would press the button again. Keyboard use keeps its focus (and the strip) as before.
+  strip.addEventListener('click', (e) => {
+    if (e.detail === 0) return;
+    const button = e.target.closest('button');
+    if (button && button.id !== 'open-settings') { button.blur(); $('canvas').focus({ preventScroll: true }); }
+  });
   // Ctrl+Alt+F is taken before SDL (which listens on the canvas) sees it; every other key goes to the game.
   window.addEventListener('keydown', (e) => {
     if (!(e.ctrlKey && e.altKey && !e.shiftKey && !e.metaKey && e.code === 'KeyF')) return;
