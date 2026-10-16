@@ -96,13 +96,19 @@ if(EMSCRIPTEN)
   target_link_options(inn PRIVATE -sUSE_SDL=2 -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=64MB
     -sINVOKE_RUN=0 -sEXIT_RUNTIME=0 -sFORCE_FILESYSTEM=1 -sENVIRONMENT=web
     -sEXPORTED_RUNTIME_METHODS=callMain,FS -lidbfs.js -lwebsocket.js
-    --shell-file ${CMAKE_SOURCE_DIR}/runtime/web/shell.html)
+    --shell-file ${CMAKE_BINARY_DIR}/shell.html)
   if(INN_WEB_PRELOAD_DIR)
     get_filename_component(INN_WEB_PRELOAD_ABS "${INN_WEB_PRELOAD_DIR}" ABSOLUTE BASE_DIR ${CMAKE_SOURCE_DIR})
     message(STATUS "inn: packaging ${INN_WEB_PRELOAD_ABS} as /c in inn.data (do not publish)")
     target_link_options(inn PRIVATE --preload-file ${INN_WEB_PRELOAD_ABS}@/c)
   endif()
-  set_property(TARGET inn APPEND PROPERTY LINK_DEPENDS ${CMAKE_SOURCE_DIR}/runtime/web/shell.html)
+  # The page loads inn.js when it is wanted; a preload build knows its drive only once the runtime runs, so it loads at once.
+  set(INN_WEB_RUNTIME lazy)
+  if(INN_WEB_PRELOAD_DIR)
+    set(INN_WEB_RUNTIME eager)
+  endif()
+  configure_file(runtime/web/shell.html ${CMAKE_BINARY_DIR}/shell.html @ONLY)
+  set_property(TARGET inn APPEND PROPERTY LINK_DEPENDS ${CMAKE_BINARY_DIR}/shell.html)
   if(INN_NATIVE)
     target_link_options(inn PRIVATE --pre-js ${CMAKE_SOURCE_DIR}/runtime/web/native-pre.js)
     set_property(TARGET inn APPEND PROPERTY LINK_DEPENDS ${CMAKE_SOURCE_DIR}/runtime/web/native-pre.js)

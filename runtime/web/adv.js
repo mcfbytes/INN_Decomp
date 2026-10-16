@@ -149,14 +149,14 @@ const Adv = (() => {
   }
 
   function chooseFolder() {
-    if (!adv.ready) return say('The runtime is still unpacking. Give it a moment, then try again.');
+    wantRuntime();
     if (page.started) return say('The disks are in use right now. Hang up first if you want to swap them.');
     $('adv-dir').value = '';
     $('adv-dir').click();
   }
 
   function chooseZip() {
-    if (!adv.ready) return say('The runtime is still unpacking. Give it a moment, then try again.');
+    wantRuntime();
     if (page.started) return say('The disks are in use right now. Hang up first if you want to swap them.');
     $('adv-zip').value = '';
     $('adv-zip').click();
@@ -167,6 +167,7 @@ const Adv = (() => {
   function disksClicked() {
     const o = objects().disks || {};
     if (!adv.ready) return say('The box is still being unpacked. One moment.', { near: sparkX('disks') });
+    wantRuntime();
     if (page.started) return say('The disks are busy at the moment. They are on the telephone.', { near: sparkX('disks') });
     if (haveDisks()) {
       say(`You already have the disks. ${o.again || 'Swapping them is allowed, if you feel fickle.'}`, { actions: diskButtons(), near: sparkX('disks') });
@@ -178,6 +179,7 @@ const Adv = (() => {
 
   function phoneClicked() {
     const o = objects().phone || {};
+    wantRuntime();
     if (page.started) return say(o.busy || 'The line is already in use. By you.', { near: sparkX('phone') });
     if (!adv.ready) return say('The telephone is still warming up. Give it a moment.');
     if (!haveDisks()) return say(o.refuse || REFUSAL, { near: sparkX('phone') });
@@ -420,6 +422,7 @@ const Adv = (() => {
     try {
       const c = await attested(() => InnAuth.credential(a.id));
       if (!c || c.account !== a.id || typeof c.password !== 'string') throw new InnAuth.AuthError('server', 'The credential answer was not understood.', 200);
+      await wantRuntime();
       await writeCredentials(a.id, c.password);
     } catch (e) {
       if (e instanceof InnAuth.AuthError && e.code === 'no_such_account') {
@@ -560,7 +563,7 @@ const Adv = (() => {
       if (signedIn()) {
         game.push({ label: 'Who\'s playing…', fn: menuLine, off: () => page.started });
         game.push({ label: 'Sign out', fn: signOut, off: () => page.started });
-      } else game.push({ label: 'Sign in…', fn: () => (sign.busy ? say('The operator already has you on hold.') : askWho({ own: false })), off: () => page.started });
+      } else game.push({ label: 'Sign in…', fn: () => (wantRuntime(), sign.busy ? say('The operator already has you on hold.') : askWho({ own: false })), off: () => page.started });
     }
     return [
       { name: 'Game', items: game },

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-runtime="@INN_WEB_RUNTIME@">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -524,6 +524,8 @@
 <script src="adv.js"></script>
 <script src="scene.js"></script>
 <script src="page.js"></script>
-{{{ SCRIPT }}}
+<!-- The runtime is not run with the page: page.js inserts inn.js when it is wanted (docs/web.md). Emscripten
+     insists on this tag, so it sits in a template, which the browser does not run. -->
+<template id="inn-runtime">{{{ SCRIPT }}}</template>
 </body>
 </html>

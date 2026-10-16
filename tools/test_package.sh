@@ -57,6 +57,19 @@ assert c['mimeTypes']['.wasm'] == 'application/wasm'
 r = {x['route']: x for x in c['routes']}
 assert 'immutable' in r['/assets/*']['headers']['Cache-Control'] and r['/inn.html']['headers']['Cache-Control'] == 'no-cache' and r['/site.json']['headers']['Cache-Control'] == 'no-cache'
 P
+  # the runtime is not in the page: no script tag for it, inn.js is in the asset map (page.js inserts it), the page is the lazy kind
+  python3 -I - "$tmp/pkg" <<'P' && ok "inn.html loads the runtime lazily" || bad "inn.html loads the runtime lazily"
+import json, os, re, sys
+d = sys.argv[1]; h = open(os.path.join(d, 'inn.html')).read()
+assert not re.search(r'<script[^>]*src=[^>]*inn\.', h) and '<template' not in h
+assert 'data-runtime="lazy"' in h or 'data-runtime=lazy' in h
+m = json.loads(re.search(r'id="inn-assets">([^<]*)<', h).group(1))
+assert re.fullmatch(r'assets/inn\.[0-9a-f]{10}\.js', m['inn.js']) and os.path.exists(os.path.join(d, m['inn.js']))
+assert re.search(r'inn\.[0-9a-f]{10}\.wasm', open(os.path.join(d, m['inn.js'])).read())
+P
+  # a page built for a preloaded drive (it loads the runtime at once and its build holds data) is refused
+  cp -r "$b" "$tmp/eager" && sed -i 's|data-runtime=\("\?\)lazy|data-runtime=\1eager|' "$tmp/eager/inn.html"
+  msg=$("$here/package_web.sh" "$tmp/eager" "$tmp/out4" 2>&1); [ $? -eq 2 ] && grep -q "lazy-runtime" <<<"$msg" && ok "refuses a page that loads the runtime at once" || bad "eager page: $msg"
   # a stray file among the lazy scenes is refused
   cp -r "$b" "$tmp/stray" && : > "$tmp/stray/scenes/notes.txt"
   msg=$("$here/package_web.sh" "$tmp/stray" "$tmp/out2" 2>&1); [ $? -eq 2 ] && grep -q "unexpected file" <<<"$msg" && ok "refuses an unexpected file among the scenes" || bad "stray scene file: $msg"

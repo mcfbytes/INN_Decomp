@@ -12,7 +12,8 @@ emcmake cmake -S . -B build-web -G Ninja
 cmake --build build-web
 ```
 
-Output in `build-web/`: `inn.html` (from `runtime/web/shell.html`), `inn.js`, `inn.wasm`, and the page
+Output in `build-web/`: `inn.html` (from `runtime/web/shell.html`, which CMake fills in first: `data-runtime`, see
+"Loading the runtime"), `inn.js`, `inn.wasm`, and the page
 scripts `page.js`, `saves.js`, `auth.js`, `adv.js`, `scene.js` (and `scenes/`) and `zip.js` copied from `runtime/web/`. The default build type is `Release` (`-O3`).
 
 The native client (INN as C, games still on the emulator) is the same page with two cache variables.
@@ -180,6 +181,9 @@ written back to IndexedDB after install, every 15 s, when the tab is hidden, and
 so the next visit starts from the saved install with its player files. "Forget saved installation" clears
 it. A preload build does not mount IDBFS.
 
+The drive is mounted once the runtime is up (`onRuntimeReady`), but the page does not wait for that to know
+whether an install is saved, and disks picked earlier are held until it is: see "Loading the runtime".
+
 ## Serial over WebSocket
 
 `runtime/src/uart_link_ws.c` is a `SerialLink` on `<emscripten/websocket.h>`: binary frames carry raw
@@ -338,7 +342,7 @@ the signed-in identity. `?classic=1` keeps only the old "Sign in with ..." links
 and the token that comes back is kept but the classic card does not use it.
 
 **Dialing.** Dial starts the client and opens a period-style terminal box near the telephone (`termAt`; docked at
-the bottom on a phone): `ATZ`, `OK`, `ATDT <server>`, then `CONNECT` when the runtime logs `uart: websocket open`. 1.4 s
+the bottom on a phone): `ATZ`, `OK`, `; WARMING UP THE TUBES...` (only when the runtime is still being fetched, see "Loading the runtime"), `ATDT <server>`, then `CONNECT` when the runtime logs `uart: websocket open`. 1.4 s
 later an iris closes on the telephone and opens on the game view (about 0.8 s; instant under reduced motion or with
 Animation off). `uart: websocket closed|error` before that shows `NO CARRIER` and a playful line in the same box with
 `[Try again]` and `[Hang up]`. The runtime cannot be started twice, so both reload the page; Try again dials again by
@@ -697,7 +701,9 @@ What the packager does:
   eight did). The inline `<style>` becomes `assets/app.<hash>.css`. Inline scripts stay inline, minified, and their
   hashes go into the CSP.
 - `inn.js` and `inn.wasm` get hashed names (`inn.js` names the wasm exactly once, and the packager rewrites it).
-  Emscripten's output is already minified, so it is not minified again.
+  Emscripten's output is already minified, so it is not minified again. `inn.html` carries no script tag for them:
+  the packager drops Emscripten's tag (and the `<template>` around it) and adds `"inn.js"` to `#inn-assets`, which is
+  how `page.js` finds the loader. It refuses a page that still has the tag or is not `data-runtime="lazy"`.
 - `scenes/*.js` and `music/*.js` get hashed names. The page finds them through
   `<script type="application/json" id="inn-assets">`, which `innAsset()` in `site.js` reads; a dev build has no such list and the
   names are used as written. The three legal pages keep their paths (people link to them); their script and
@@ -713,9 +719,81 @@ What the packager does:
 | legal pages | when opened | separate pages |
 | `auth.js` | **with the page, not deferred** | 3.1 KB gzip minified. A deployment with sign-in needs it for the first `/auth/providers` answer anyway, `adv.js` and `page.js` call `InnAuth` synchronously in about forty places, and the saved request would cost as much as it saves. Without sign-in the page makes no `/auth/providers` request at all (`?auth=` empty). |
 | `adv.js`, `music.js` (6 and 11 KB gzip) | with the page | the landing screen is the adventure and its menu bar; they are the first paint, and `adv.js` calls `InnMusic` while building |
-| `inn.wasm` (338 KB gzip) | with the page, in parallel with the landing art | a visitor who never adds disks does fetch it; deferring it until Connect would put its download (and the 64 MB memory setup) on the Connect click. The right gate is "after the disks are picked", which needs a loader change in `page.js`; listed as an open item. |
+| `inn.js`, `inn.wasm` (47 + 338 KB gzip) | when wanted: on the first sign of intent, for a saved install, or after 8 s idle | see "Loading the runtime" below |
 
-Measured on 2026-10-16, landing with the town scene, bytes on the wire (level 9 gzip, default brotli):
+### Loading the runtime
+
+`inn.js` is not in the page. `shell.html` keeps the tag Emscripten insists on inside a `<template>` (inert), and
+`page.js` inserts the script itself, through `innAsset('inn.js')` (the packager lists the hashed name in
+`#inn-assets`; a dev build uses the plain name), the first time `wantRuntime()` is called. Emscripten finds the wasm
+next to the script, and the page's `var Module` is already in place, so nothing else changes. The load starts on
+the first of:
+
+| trigger | priority | notes |
+|---|---|---|
+| pointer over the disks hotspot (`scene.js`); a click on it; Game > Load disks... or Load disk image...; a click on the telephone or Game > Dial; Game > Sign in...; the first `dragover` of files; picking disks; `forget()` | normal | "intent": the player is about to need it |
+| a saved install | low | seen without the runtime (below); started at the first idle moment, so a returning player rarely waits |
+| 8 s after the landing is interactive, with the tab visible | low | `requestIdleCallback` (timeout 2 s), `setTimeout` where it is missing; a hidden tab waits for `visibilitychange` |
+| `?autostart`, or a preload build (`data-runtime="eager"`) | normal | a preload build knows its drive only when the runtime runs, so CMake sets the attribute from `INN_WEB_PRELOAD_DIR` and the page loads at once; the packager refuses a page that is not `lazy` |
+
+**A saved install without the runtime.** IDBFS keeps `/c` in the IndexedDB database named `/c` (the mount point),
+object store `FILE_DATA`, one entry per file or directory, keyed by absolute path, at version 21 (`libidbfs.js`).
+`savedInstall()` opens that database with no version, aborts the upgrade if there is none (so it creates nothing),
+and counts keys in `/c/INN/` through `/c/INN0`. A hit sets `page.drive = 'saved'` and `page.persistent` at once, so the disk
+icon and the "Welcome back" line show from the start, as before. If the runtime then finds no program there
+(`mountDrive`), the state is corrected to `none`. The check is about 5 ms; a 3 s timeout covers a stuck database.
+
+**Disks before the runtime.** `pick()` reads and checks the files at once (`layoutFiles()` validates and lists what
+an install would write, touching no drive), then, when the runtime is not ready, keeps that list in memory
+(`rt.held`). The narrator says "You now have the disks" as soon as the files are read, as before. `onRuntimeReady`
+mounts the drive, writes the held files (replacing a saved install, as an immediate pick does), syncs when
+"Remember" is on, and only then resolves the promise everything else waits on. Nothing touches `FS` before that:
+`syncDrive`, `forget`, `start` and the sign-in credential write (`connectAs`, which awaits it) all wait.
+
+**Dialing before the runtime.** `start()` shows the dialing view and the modem box at once (`ATZ`, `OK`,
+`; WARMING UP THE TUBES...`, `ATDT <server>`), waits for the runtime, then does what it always did (save keeping,
+`callMain`). A failed download (offline, 404) prints `; THE TUBES WOULD NOT WARM (...)`, then the usual `NO CARRIER`
+with Try again. `?classic=1`, Try again, redial, `?autostart` and the save prefetch (which runs after the wait, in
+`connectAs`) take the same paths as before.
+
+**Measured** on 2026-10-16 with Chromium through CDP, the packaged page served with gzip level 9 and SWA's headers,
+town scene, fresh profile; "Fast 3G" is 1.6 Mbps, 150 ms RTT, 4x CPU, "cable" is 20 Mbps, 20 ms. The first-paint rows
+are medians of 5 (3G) and 6 (cable) runs; the rest are single runs (four at a time, so within a few tens of ms).
+
+| | cable before | cable after | 3G before | 3G after |
+|---|---:|---:|---:|---:|
+| first scene paint (`inn-scene-painted` mark) | 186 ms | 182 ms | 1094 ms | 964 ms |
+| age dialog clickable | 204 ms | 197 ms | 1168 ms | 1082 ms |
+| bytes on the wire by 5 s, a visitor who never picks disks | 448,416 | 64,573 | 448,416 | 64,573 |
+| bytes by 10 s (the idle load has started) | 448,416 | 449,170 | 448,416 | 112,032 |
+| disks picked right after the age answer: pick to "You now have the disks" | 261 ms | 217 ms | 961 ms | 781 ms |
+| ... same, but the player had to wait for the runtime first | 4 ms | none | 717 ms | none |
+| ... dial to `data-view=play` | 2.14 s | 2.14 s | 2.63 s | 4.06 s (modem box says WARMING UP) |
+| ... pick to play | 2.56 s | 2.49 s | 3.72 s | 4.97 s |
+| the player points at the disks, browses a file dialog for 4 s, then picks: pick to play | 2.49 s | 2.51 s | 3.78 s | 3.55 s |
+| returning visitor (saved install): disk icon shown | 155 ms | 106 ms | 576 ms | 439 ms |
+| returning visitor: dial at once to play (wasm cached) | 2.43 s | 2.43 s | 2.60 s | 2.70 s |
+
+What it shows. Deferring helps first paint only a little: about 12% (scene paint) and 7% (age dialog) on the slow
+profile, nothing measurable on cable, because the rest of the page is only 25 KB gzip and the wasm was competing with
+it for little. The saving is bytes: 384 KB gzip (86%) not sent to a visitor who looks and leaves within 8 s, or
+who stays on the landing without going near the disks and has no saved install (after 8 s the idle load fetches
+it anyway; the row at 10 s shows that on cable it has already arrived, and on 3G it is half way). The sooner the idle
+trigger, the fewer leavers it spares; the later, the more players who go straight to the menu or a drop wait.
+The cost is on the slow profile only, for a player who hands over disks and dials within a second of arriving
+without first pointing at the disks: dial to play is 1.4 s longer, because the wasm download starts at the pick, and
+the modem box says WARMING UP THE TUBES meanwhile. Pointing at the disks, or opening the file dialog, starts it
+earlier, which is why the 4 s case shows no loss. A returning visitor loses nothing: the icon appears earlier,
+because it no longer waits for the runtime to mount the drive.
+
+Byte counts include response headers (about 0.9 KB each, mostly the CSP), which is why they are a little above the
+sums in the next table. Compiling the wasm shows no long task (over 50 ms) at idle, because the browser compiles it
+off the main thread while it streams, so fetching it into the HTTP cache at idle (`<link rel=prefetch>`) and running
+it only on demand would save no work; it was measured and not built.
+
+The table below is the size of everything the page can fetch (measured before the runtime became lazy, so `inn.js` and
+`inn.wasm` are in the first load there; they are now fetched only when wanted, and the other rows are the first 8 s of a
+landing-only visit, about 58 KB gzip). Landing with the town scene, bytes on the wire (level 9 gzip, default brotli):
 
 | | raw before | gzip before | brotli before | raw after | gzip after | brotli after |
 |---|---:|---:|---:|---:|---:|---:|

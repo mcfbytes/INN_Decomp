@@ -100,6 +100,7 @@ function dialBegin(server) {
   $('dial-title').textContent = 'Dialing';
   dialLine('ATZ');
   dialLine('OK');
+  if (!rt.ok) dialLine('; WARMING UP THE TUBES...');
   if (page.musicNote) dialLine(page.musicNote);
   if (page.prefetchNote) dialLine(page.prefetchNote);
   if (page.cardId) dialLine(`AT+CARD=${page.cardId}`);
@@ -274,6 +275,69 @@ function defaultServer() {
   return `${scheme}://${location.hostname || '127.0.0.1'}:${WS_PORT_DEFAULT}`;
 }
 
+// ---- the runtime (inn.js and inn.wasm) is fetched when it is wanted (docs/web.md, "Loading the runtime") ----
+
+// Preload builds (dev) know their drive only once the runtime runs, so they, and ?autostart, load it at once.
+const EAGER = document.documentElement.dataset.runtime === 'eager' || params.has('autostart');
+const IDLE_START_MS = 8000;
+const rt = { state: 'idle', fs: false, ok: false, held: null, promise: null };   // idle > loading > ready
+
+// Starts the load once. why is 'intent' (the player is reaching for the disks or the phone), 'saved' or 'idle'
+// (nobody asked: low priority). Returns a promise that settles when the drive is mounted.
+function wantRuntime(why = 'intent') {
+  if (rt.state !== 'idle') return rt.promise;
+  rt.state = 'loading';
+  rt.promise = new Promise((resolve, reject) => { rt.done = resolve; rt.fail = reject; });
+  rt.promise.catch(() => {});
+  const s = document.createElement('script');
+  s.src = innAsset('inn.js');
+  s.async = true;
+  if (why !== 'intent') s.fetchPriority = 'low';
+  s.onerror = () => { rt.state = 'idle'; s.remove(); rt.fail(new Error('the runtime did not download')); };
+  document.head.append(s);
+  return rt.promise;
+}
+
+// A saved install, seen without the runtime: IDBFS keeps /c in the IndexedDB database "/c" (object store
+// FILE_DATA, keyed by path, one entry per file and directory).
+function savedInstall() {
+  const look = new Promise((resolve) => {
+    let req;
+    try { req = indexedDB.open(DRIVE); } catch { return resolve(false); }
+    req.onupgradeneeded = () => req.transaction.abort();   // there is no such database: do not create one
+    req.onerror = (e) => { e.preventDefault(); resolve(false); };
+    req.onsuccess = () => {
+      const db = req.result;
+      try {
+        const dir = `${DRIVE}/${PROGRAM.dir}`;
+        const n = db.transaction('FILE_DATA').objectStore('FILE_DATA').count(IDBKeyRange.bound(`${dir}/`, `${dir}0`));
+        n.onsuccess = () => { db.close(); resolve(n.result > 0); };
+        n.onerror = () => { db.close(); resolve(false); };
+      } catch { db.close(); resolve(false); }
+    };
+  });
+  return Promise.race([look, new Promise((resolve) => setTimeout(resolve, 3000, false))]);
+}
+
+// Nothing asked for the runtime: fetch it anyway, at idle, once the page is showing.
+function wantRuntimeLater(ms, why) {
+  const run = () => {
+    if (document.hidden) return document.addEventListener('visibilitychange', run, { once: true });
+    (window.requestIdleCallback || ((f) => setTimeout(f, 0)))(() => wantRuntime(why), { timeout: 2000 });
+  };
+  setTimeout(run, ms);
+}
+
+async function startUp() {
+  if (EAGER) return wantRuntime('intent');
+  page.persistent = typeof indexedDB !== 'undefined';
+  const saved = page.persistent && await savedInstall();
+  if (saved) page.drive = 'saved';
+  showDriveState();
+  adv('ready');
+  if (saved) wantRuntimeLater(0, 'saved'); else wantRuntimeLater(IDLE_START_MS, 'idle');
+}
+
 // ---- the C: drive ----
 
 function exists(path) {
@@ -347,28 +411,34 @@ function findConfigs(dir) {
   return found;
 }
 
-function installFiles(files) {
+// What an install would write, as {dest, data}. Touches no drive, so it also checks disks picked before the runtime is up.
+function layoutFiles(files) {
   const root = installRoot(files.map((f) => f.path));
-  clearDir(DRIVE);
-  const configs = [];
-  let count = 0;
+  const laid = [];
   for (const file of files) {
     if (!file.path.startsWith(root)) continue;
     const parts = file.path.slice(root.length).split('/').filter((p) => p && p !== '.');
     if (!parts.length || parts.includes('..')) continue;
-    const dest = `${DRIVE}/${PROGRAM.dir}/${parts.join('/')}`;
+    laid.push({ dest: `${DRIVE}/${PROGRAM.dir}/${parts.join('/')}`, data: file.data });
+  }
+  return laid;
+}
+
+function installFiles(laid) {
+  clearDir(DRIVE);
+  const configs = [];
+  for (const { dest, data } of laid) {
     FS.mkdirTree(dest.slice(0, dest.lastIndexOf('/')));
-    FS.writeFile(dest, file.data);
+    FS.writeFile(dest, data);
     if (/(^|\/)lsci\.cfg$/i.test(dest)) configs.push(dest);
-    count++;
   }
   createVirtualDirs(configs);
   ensureAdlib(configs);
-  return count;
+  return laid.length;
 }
 
 function syncDrive(populate) {
-  if (!page.persistent || page.syncing) return Promise.resolve();
+  if (!rt.fs || !page.persistent || page.syncing) return Promise.resolve();
   page.syncing = true;
   return new Promise((resolve) => FS.syncfs(populate, (err) => {
     page.syncing = false;
@@ -395,7 +465,7 @@ async function mountDrive() {
     const configs = findConfigs(DRIVE);
     createVirtualDirs(configs);
     ensureAdlib(configs);
-  }
+  } else if (page.drive === 'saved') page.drive = 'none';   // the early look at IndexedDB was wrong
 }
 
 // ---- picking an install ----
@@ -414,12 +484,15 @@ async function filesFromFolder(fileList) {
 async function pick(readFiles, source) {
   try {
     setStatus('Reading the installation...');
-    const count = installFiles(await readFiles(source));
+    wantRuntime();
+    const laid = layoutFiles(await readFiles(source));
+    // Before the runtime is up the parsed files wait in memory; onRuntimeReady writes them.
+    const count = rt.ok ? installFiles(laid) : (rt.held = laid).length;
     page.drive = 'picked';
     page.fileCount = count;
     page.changing = false;
     log(`installed ${count} files into C:\\${PROGRAM.dir}`);
-    if ($('remember').checked) await syncDrive(false);
+    if (rt.ok && $('remember').checked) await syncDrive(false);
     showDriveState();
     adv('picked', count);
   } catch (err) {
@@ -469,6 +542,7 @@ function wireDrop() {
   const zone = $('drop');
   window.addEventListener('dragover', (e) => {
     e.preventDefault();
+    wantRuntime();
     if (!page.started && !Site.blocking()) { zone.classList.add('over'); document.body.classList.add('dropping'); }
   });
   window.addEventListener('dragleave', (e) => { if (!e.relatedTarget) { zone.classList.remove('over'); document.body.classList.remove('dropping'); } });
@@ -476,6 +550,7 @@ function wireDrop() {
 }
 
 async function forget() {
+  await wantRuntime();
   clearDir(DRIVE);
   await syncDrive(false);
   page.drive = 'none';
@@ -663,7 +738,7 @@ function keepServerSaves() {
   });
 }
 
-function start(session) {
+async function start(session) {
   if (page.started || page.drive === 'none' || Site.blocking()) return;
   page.started = true;
   const server = $('com1').value.trim() || defaultServer();
@@ -680,20 +755,36 @@ function start(session) {
   $('fullscreen').hidden = !document.fullscreenEnabled;
   watchFocus();
   $('canvas').focus();
-  keepSaving();
-  keepServerSaves();
-  // The classic path: the drive shows the install's own personas again.
-  if (!session && InnSaves.useView('own')) syncDrive(false);
   setLink('connecting');
   setStatus(statusRunning());
+  try { await wantRuntime(); } catch (e) {
+    log(String(e.message || e));
+    dialLine(`; THE TUBES WOULD NOT WARM (${e.message || e})`, true);
+    return dialFailed();
+  }
+  // The classic path: the drive shows the install's own personas again.
+  if (!session && InnSaves.useView('own')) syncDrive(false);
+  keepSaving();
+  keepServerSaves();
   Module.callMain(runtimeArgs(server));
   $('sound').hidden = !audioContext();
 }
 
 async function onRuntimeReady() {
+  rt.fs = true;
   await mountDrive();
+  const held = rt.held;
+  rt.held = null;
+  rt.ok = true;
+  if (held) {
+    installFiles(held);
+    log(`installed ${held.length} files into C:\\${PROGRAM.dir}`);
+    if ($('remember').checked) await syncDrive(false);
+  }
+  rt.state = 'ready';
   showDriveState();
   adv('ready');
+  rt.done();
   if (params.get('autostart') && page.drive !== 'none') Site.whenClear().then(() => start());
 }
 
@@ -756,3 +847,4 @@ var Module = {
 };
 
 wirePage();
+startUp();

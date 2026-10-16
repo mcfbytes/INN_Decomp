@@ -54,6 +54,9 @@ for (const dir of ['scenes', 'music']) {
   }
 }
 
+// The page inserts inn.js itself when the runtime is wanted (page.js, wantRuntime), through innAsset().
+assetMap['inn.js'] = innjsPath;
+
 // ---- HTML pages: styles and scripts move out, hashed; inline scripts are listed for the CSP ----
 const inlineHashes = new Set();
 const attr = (a, n) => { const m = new RegExp(`\\b${n}=("([^"]*)"|'([^']*)'|([^\\s>]+))`).exec(a); return m ? (m[2] ?? m[3] ?? m[4]) : null; };
@@ -76,7 +79,7 @@ function page(file, prefix) {
       return `<script>${min}</script>`;
     }
     if (/^(https?:)?\/\//.test(src)) fail(`${file} loads a script from another origin: ${src}`);
-    if (src === 'inn.js') return `<script src="${prefix}${innjsPath}" async></script>`;
+    if (src === 'inn.js') return '';   // Emscripten's tag, inert inside the shell's <template>: dropped, page.js loads the file
     core.push([src, read(src === 'legal.js' ? join(file.replace(/[^/]*$/, ''), src) : src).toString('utf8')]);
     if (firstCore < 0) firstCore = core.length;
     return core.length === 1 ? '\0APP\0' : '';
@@ -91,6 +94,10 @@ function page(file, prefix) {
 }
 
 let main = page('inn.html', '');
+// What the shell wrapped around that tag goes with it, and the page must be the lazy kind.
+main = main.replace(/(<!--(?:(?!-->)[\s\S])*-->\s*)?<template id="?inn-runtime"?>\s*<\/template>/, '');
+if (/<template\b|<script[^>]*\bsrc=["']?inn\.js/.test(main)) fail('inn.html still carries the runtime tag');
+if (!/data-runtime=["']?lazy/.test(main)) fail('inn.html is not a lazy-runtime page (data-runtime)');
 // The asset map goes before the first script (site.js reads it); JSON is data, so the CSP ignores it.
 main = main.replace(/<script\b/, `<script type="application/json" id="inn-assets">${JSON.stringify(assetMap)}</script><script`);
 put('inn.html', main);
