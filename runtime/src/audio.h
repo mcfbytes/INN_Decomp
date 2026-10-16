@@ -57,6 +57,9 @@ int audio_read_paced(Machine *m, int16_t *out, int cap, int queued);
 /* OPL2 at 388h/389h and the Sound Blaster mirrors 220h-223h and 228h/229h, timers included. */
 void opl_init(Machine *m);
 void opl_shutdown(Machine *m);
+/* What the address/data and status ports do: audio_sync before a sound change, timers from machine_now_ns. */
+void opl_write_reg(Machine *m, uint8_t reg, uint8_t value);
+uint8_t opl_read_status(Machine *m);
 /* Sound Blaster 2.0 DSP at 220h (IRQ 7, DMA 1): 8-bit mono DMA playback and the direct DAC. */
 enum { SB_BASE = 0x220, SB_DMA_CHANNEL = 1, SB_DSP_VERSION = 0x0201 };
 void sb_init(Machine *m);
