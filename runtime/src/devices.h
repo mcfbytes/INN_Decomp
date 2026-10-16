@@ -65,6 +65,9 @@ void vga_init(Machine *m);
 /* BIOS-level mode set (03h, 0Dh, 12h, 13h); clear=false keeps video memory (AL bit 7). */
 bool vga_set_mode(Machine *m, uint8_t mode, bool clear);
 uint8_t vga_mode(Machine *m);
+/* One DAC colour. Stored 6-bit, the same mask a 3C9h write applies. */
+void vga_dac_set(Machine *m, uint8_t index, uint8_t r, uint8_t g, uint8_t b);
+void vga_dac_get(Machine *m, uint8_t index, uint8_t rgb[3]);
 /* Renders the current frame as 0xAARRGGBB pixels into a VGA_MAX_W*VGA_MAX_H buffer. */
 void vga_render(Machine *m, uint32_t *rgba_out, int *w, int *h);
 /* Writes a PPM (P6) of the current frame; returns 0 or -1 on I/O error. */

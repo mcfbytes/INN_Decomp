@@ -330,6 +330,22 @@ bool vga_set_mode(Machine *m, uint8_t mode, bool clear)
 
 uint8_t vga_mode(Machine *m) { return vga_state(m)->mode; }
 
+void vga_dac_set(Machine *m, uint8_t index, uint8_t r, uint8_t g, uint8_t b)
+{
+    Vga *v = vga_state(m);
+    v->dac[index][0] = r & DAC_COMPONENT_MASK;
+    v->dac[index][1] = g & DAC_COMPONENT_MASK;
+    v->dac[index][2] = b & DAC_COMPONENT_MASK;
+}
+
+void vga_dac_get(Machine *m, uint8_t index, uint8_t rgb[3])
+{
+    Vga *v = vga_state(m);
+    rgb[0] = v->dac[index][0];
+    rgb[1] = v->dac[index][1];
+    rgb[2] = v->dac[index][2];
+}
+
 uint16_t vga_crtc_start(const Vga *v)
 {
     return (uint16_t)(v->crtc[CRTC_START_HI] << 8 | v->crtc[CRTC_START_LO]);
