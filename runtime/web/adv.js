@@ -775,7 +775,8 @@ const Adv = (() => {
   // ---------- the iris-out into the game ----------
 
   function transition(done) {
-    InnMusic.leave(reduced() ? 300 : 1500);   // the game has its own sound; never both
+    // The game has its own sound, never both: the fade ends with the iris (close + open).
+    InnMusic.leave(reduced() ? 300 : IRIS_CLOSE_MS + IRIS_OPEN_MS);
     if (reduced()) return done();
     const sc = InnScenes.scene();
     const r = sc && sc.spark && sc.spark.phone ? InnScenes.screenRect(sc.spark.phone) : null;
