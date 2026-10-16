@@ -634,7 +634,7 @@ const InnScenes = (() => {
     animOff = !on;
     if (state.built) { frame(state.built, 0, true); syncRunning(); }
   }
-  const isDark = () => !(matchMedia('(prefers-color-scheme: light)').matches && document.documentElement.dataset.theme !== 'dark');
+  const isDark = () => { const t = document.documentElement.dataset.theme; return t ? t === 'dark' : !matchMedia('(prefers-color-scheme: light)').matches; };
   const landingShown = () => document.body.dataset.view === 'setup' || document.body.dataset.view === 'dialing';
 
   function loop(now) {
@@ -884,6 +884,7 @@ const InnScenes = (() => {
       .observe(document.body, { attributes: true, attributeFilter: ['data-view'] });
     const redo = () => { paintNow(); };
     matchMedia('(prefers-color-scheme: light)').addEventListener('change', redo);
+    new MutationObserver(redo).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
     matchMedia('(prefers-reduced-motion: reduce)').addEventListener('change', () => { if (state.built) { frame(state.built, 0, true); syncRunning(); } });
     setScene(chooseId(), false);
   }

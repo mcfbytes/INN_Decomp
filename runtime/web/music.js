@@ -457,7 +457,7 @@ const InnMusic = (() => {
   // Silent until the age and terms notice has been answered yes.
   const blocked = () => typeof Site !== 'undefined' && !(Site.ok && Site.ok());
   // Same test as the scenes use for their dusk palette.
-  const isDusk = () => !(matchMedia('(prefers-color-scheme: light)').matches && document.documentElement.dataset.theme !== 'dark');
+  const isDusk = () => { const t = document.documentElement.dataset.theme; return t ? t === 'dark' : !matchMedia('(prefers-color-scheme: light)').matches; };
   const canPlay = () => S.gestured && enabled() && !S.dead && landing() && !blocked() && !document.hidden;
 
   function ensureCtx() {

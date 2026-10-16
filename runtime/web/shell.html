@@ -9,6 +9,10 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=VT323&display=swap">
+<script>
+  // Options > Time of day, applied before the first paint: 'light' (day) or 'dark' (dusk) overrides the system.
+  try { const t = localStorage.getItem('inn.theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch { /* follow the system */ }
+</script>
 <style>
   :root {
     --bg: #0f0e13; --bg-2: #17151d; --surface: #1d1838; --surface-2: #2a2250; --border: #0c0a20; --edge: #6c58b0;
@@ -28,6 +32,14 @@
       --shadow: 0 18px 50px -20px rgba(60, 40, 10, .45), 0 2px 6px rgba(60, 40, 10, .12);
       --letterbox: #14110f; --scrim: rgba(30, 20, 8, .35);
     }
+  }
+  /* Options > Time of day: "day" forces these on a dark system, "dusk" keeps the defaults. */
+  :root[data-theme="light"] {
+    --bg: #f4f1ea; --bg-2: #f6edd2; --surface: #fff6dc; --surface-2: #f6e8c0; --border: #3a2a1a; --edge: #fffbea;
+    --text: #2a1e12; --muted: #6b5a42; --faint: #8f7e62; --accent: #e8741c; --accent-ink: #fff8ec; --accent-soft: rgba(232, 116, 28, .16);
+    --ok: #1f8a58; --warn: #b36a10; --bad: #c4301c;
+    --shadow: 0 18px 50px -20px rgba(60, 40, 10, .45), 0 2px 6px rgba(60, 40, 10, .12);
+    --letterbox: #14110f; --scrim: rgba(30, 20, 8, .35);
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; }

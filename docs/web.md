@@ -69,7 +69,9 @@ cuts a 256-colour palette from the result (median cut) and maps it with an 8x8 o
 narrow portrait screen the picture floats above a strip kept for the narrator box, fades into sky and ground at its
 edges and can be dragged sideways.
 
-Every scene has a day palette and a dusk palette; the dusk one is used when the browser is in dark mode. Small things move by
+Every scene has a day palette and a dusk palette; the dusk one is used when the browser is in dark mode, unless Options ▸
+Time of day says "day" or "dusk" (stored as `inn.theme`: `light`, `dark`, or absent to follow the system; a `<head>`
+script applies it before the first paint, and the music and legal pages follow it too). Small things move by
 re-compositing only their own rectangle (`anims`: clouds, glints, blinking lights, and gags that replay every 20 s or so),
 so the picture is never repainted per frame. All of it stops under `prefers-reduced-motion`. Hotspots are rectangles in
 scene pixels; clicking one, or resting the mouse on it for a second, shows a short narrator line in a bordered text box.

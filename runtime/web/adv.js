@@ -511,6 +511,16 @@ const Adv = (() => {
 
   function toggleMusic() { InnMusic.toggle(); }
 
+  // Options > Time of day: follow the system (auto), or always day or dusk. The <head> script applies a
+  // stored choice before the first paint; scene.js repaints when data-theme changes.
+  const THEME_KEY = 'inn.theme';
+  const theme = () => document.documentElement.dataset.theme || 'auto';
+  function setTheme(t) {
+    if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+    else delete document.documentElement.dataset.theme;
+    store.set(THEME_KEY, t, 'local');
+  }
+
   function toggleAnim() {
     adv.anim = !adv.anim;
     store.set(ANIM_KEY, adv.anim ? '1' : '0', 'local');
@@ -544,6 +554,10 @@ const Adv = (() => {
         { label: 'Remember on this device', check: () => $('remember').checked, fn: toggleRemember, off: () => !page.persistent },
         { label: 'Animation', check: () => adv.anim, fn: toggleAnim },
         { label: `Music: ${InnMusic.enabled() ? 'on' : 'off'}`, fn: toggleMusic },
+        { sep: true },
+        { label: 'Time of day: follow system', radio: () => theme() === 'auto', fn: () => setTheme('auto') },
+        { label: 'Time of day: day', radio: () => theme() === 'light', fn: () => setTheme('light') },
+        { label: 'Time of day: dusk', radio: () => theme() === 'dark', fn: () => setTheme('dark') },
       ] },
       { name: 'Scene', items: InnScenes.ids.map((id) => ({
         label: id.charAt(0).toUpperCase() + id.slice(1), radio: () => InnScenes.id() === id, fn: () => InnScenes.setScene(id, true) })) },
