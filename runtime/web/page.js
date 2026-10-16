@@ -98,6 +98,7 @@ function dialBegin(server) {
   $('dial-title').textContent = 'Dialing';
   dialLine('ATZ');
   dialLine('OK');
+  if (page.musicNote) dialLine(page.musicNote);
   dialLine(`ATDT ${server.replace(/^wss?:\/\//, '')}`);
   adv('dialBegin');
 }
@@ -250,8 +251,9 @@ function ensureAdlib(configPaths) {
     const text = new TextDecoder('latin1').decode(FS.readFile(cfg));
     const next = text.replace(/^(\s*music\s*=\s*)(\S+)/gim, (line, prefix, value) => {
       if (value.toLowerCase() === 'adl.drv') return line;
+      // Said in the modem output when dialing, not as a toast over the landing's narrator box.
       if (!noted) {
-        toast('Music in this build uses adl.drv. LSCI.CFG named another music driver; that line was rewritten in the browser copy.');
+        page.musicNote = `; MUSIC ${value.toUpperCase()} -> ADL.DRV`;
         noted = true;
       }
       return `${prefix}adl.drv`;
