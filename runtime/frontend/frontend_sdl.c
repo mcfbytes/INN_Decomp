@@ -13,6 +13,7 @@
 #include "audio_sdl.h"
 #include "lift.h"
 #include "devices.h"
+#include "host_input.h"
 #include "frame_clock.h"
 #include "input_script.h"
 #include "exec_stub.h"
@@ -143,13 +144,7 @@ static int to_guest_button(uint8_t sdl_button)
 static void mouse_to_guest(Frontend *f, int wx, int wy)
 {
     int x = wx * f->frame_w / WINDOW_W, y = wy * f->frame_h / WINDOW_H;
-#ifdef INN_NATIVE
-    if (f->m->native) {
-        host_input_mouse_motion(f->m, x, y, f->frame_w, f->frame_h);
-        return;
-    }
-#endif
-    mouse_host_motion(f->m, x, y, f->frame_w, f->frame_h);
+    host_input_mouse_motion(f->m, x, y, f->frame_w, f->frame_h);
 }
 
 static void handle_event(Frontend *f, const SDL_Event *e)
@@ -158,26 +153,14 @@ static void handle_event(Frontend *f, const SDL_Event *e)
     case SDL_QUIT: f->quit = true; break;
     case SDL_KEYDOWN: case SDL_KEYUP: {
         uint16_t sc = to_set1(e->key.keysym.scancode);
-#ifdef INN_NATIVE
-        if (sc && f->m->native) {
-            host_input_key(f->m, sc, e->type == SDL_KEYDOWN);
-            break;
-        }
-#endif
         if (sc)
-            kbd_host_key(f->m, sc, e->type == SDL_KEYDOWN);
+            host_input_key(f->m, sc, e->type == SDL_KEYDOWN);
         break;
     }
     case SDL_MOUSEMOTION: mouse_to_guest(f, e->motion.x, e->motion.y); break;
     case SDL_MOUSEBUTTONDOWN: case SDL_MOUSEBUTTONUP:
         mouse_to_guest(f, e->button.x, e->button.y);
-#ifdef INN_NATIVE
-        if (f->m->native) {
-            host_input_mouse_button(f->m, to_guest_button(e->button.button), e->type == SDL_MOUSEBUTTONDOWN);
-            break;
-        }
-#endif
-        mouse_host_button(f->m, to_guest_button(e->button.button), e->type == SDL_MOUSEBUTTONDOWN);
+        host_input_mouse_button(f->m, to_guest_button(e->button.button), e->type == SDL_MOUSEBUTTONDOWN);
         break;
     default: break;
     }

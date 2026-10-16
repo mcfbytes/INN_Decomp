@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "devices.h"
+#include "host_input.h"
 #include "host_video.h"
 #include "input_script.h"
 
@@ -146,14 +147,14 @@ static void apply_event(Machine *m, const Event *e)
     static uint32_t frame[VGA_MAX_W * VGA_MAX_H];
     int w, h;
     switch (e->kind) {
-    case EV_KEY_DOWN: kbd_host_key(m, (uint16_t)e->a, true); break;
-    case EV_KEY_UP: kbd_host_key(m, (uint16_t)e->a, false); break;
+    case EV_KEY_DOWN: host_input_key(m, (uint16_t)e->a, true); break;
+    case EV_KEY_UP: host_input_key(m, (uint16_t)e->a, false); break;
     case EV_MOVE:
         vga_render(m, frame, &w, &h);
-        mouse_host_motion(m, e->a, e->b, w, h);
+        host_input_mouse_motion(m, e->a, e->b, w, h);
         break;
-    case EV_BUTTON_DOWN: mouse_host_button(m, e->a, true); break;
-    case EV_BUTTON_UP: mouse_host_button(m, e->a, false); break;
+    case EV_BUTTON_DOWN: host_input_mouse_button(m, e->a, true); break;
+    case EV_BUTTON_UP: host_input_mouse_button(m, e->a, false); break;
     case EV_SHOT:
         /* M9 stand-in until package 6: native mode takes its shots from the host video. */
         if ((m->native_video ? host_video_write_ppm(m, e->path) : vga_write_ppm(m, e->path)) != 0)
