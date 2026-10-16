@@ -27,7 +27,8 @@ refuses "refuses INN_NATIVE=ON" "$(fake native INN_NATIVE:BOOL=ON)" INN_NATIVE
 refuses "refuses INN_NATIVE_HW=ON" "$(fake hw INN_NATIVE_HW:BOOL=ON)" INN_NATIVE_HW
 refuses "refuses a preloaded C: drive" "$(fake preload INN_WEB_PRELOAD_DIR:PATH=/x/inn-c)" INN_WEB_PRELOAD_DIR
 d=$(fake lifted-moved); sed -i 's|^INN_LIFTED_DIR:PATH=.*|INN_LIFTED_DIR:PATH=/elsewhere/lifted|' "$d/CMakeCache.txt"
-refuses "refuses INN_LIFTED_DIR set to another path" "$d" INN_LIFTED_DIR
+mkdir -p "$tmp/lifted-elsewhere" && sed -i "s|^INN_LIFTED_DIR:PATH=.*|INN_LIFTED_DIR:PATH=$tmp/lifted-elsewhere|" "$d/CMakeCache.txt"
+refuses "refuses INN_LIFTED_DIR set to another path that exists" "$d" "INN_LIFTED_DIR exists"
 d2=$(fake lifted-default); mkdir -p "$d2/home/private/lifted"; sed -i "s|^INN_LIFTED_DIR:PATH=.*|INN_LIFTED_DIR:PATH=$d2/home/private/lifted|; s|^CMAKE_HOME_DIRECTORY:INTERNAL=.*|CMAKE_HOME_DIRECTORY:INTERNAL=$d2/home|" "$d2/CMakeCache.txt"
 refuses "refuses a default INN_LIFTED_DIR that exists" "$d2" "INN_LIFTED_DIR exists"
 d=$(fake table); head -c 400 /dev/zero | tr '\0' 'x' > "$d/lifted_table.c"

@@ -30,11 +30,10 @@ case "${native^^}" in ON|TRUE|1|YES|Y) die "INN_NATIVE is ON: the native build c
 case "${hw^^}" in ON|TRUE|1|YES|Y) die "INN_NATIVE_HW is ON: the native build contains Sierra-derived code";; esac
 [ -z "$preload" ] || die "INN_WEB_PRELOAD_DIR is set: the build holds a user's game data"
 # INN_LIFTED_DIR always has a value (its default is <source>/private/lifted, which the public checkout lacks).
-# It counts as set when it was changed from the default or when the directory is there.
-if [ -n "$lifted" ]; then
-  if [ "$lifted" != "$home/private/lifted" ]; then die "INN_LIFTED_DIR is set ($lifted): lifted code is Sierra-derived"; fi
-  if [ -e "$lifted" ]; then die "INN_LIFTED_DIR exists ($lifted): the build compiled lifted code"; fi
-fi
+# CMake compiles lifted code only when that directory exists, so an existing directory is refused whatever its
+# path. A machine that holds the private tree packages a build configured with a path that does not exist
+# (e.g. -DINN_LIFTED_DIR=/nonexistent). The stub check below also catches a directory removed after the build.
+if [ -n "$lifted" ] && [ -e "$lifted" ]; then die "INN_LIFTED_DIR exists ($lifted): the build compiled lifted code"; fi
 # The generated table is a two-line stub in a public build; anything larger registers lifted code.
 if [ -f "$build/lifted_table.c" ] && [ "$(wc -c < "$build/lifted_table.c")" -gt 200 ]; then die "lifted_table.c is not the empty stub"; fi
 [ ! -e "$build/lifted_entries.h" ] || die "lifted_entries.h exists: the build compiled lifted code"

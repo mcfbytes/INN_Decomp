@@ -788,8 +788,9 @@ assets/{app,inn,legal}.<hash>.{js,css,wasm}   assets/scenes/<id>.<hash>.js   ass
 
 This repository is public. Only the hybrid build (the original program on the emulator, no Sierra-derived code
 compiled in) may be packaged. `package_web.sh` reads the build's `CMakeCache.txt` and refuses when `INN_NATIVE` or
-`INN_NATIVE_HW` is ON, when `INN_LIFTED_DIR` was changed from its default or the directory exists (the default
-value is always in the cache, so existence is what counts), when `lifted_table.c` is more than the two-line stub or
+`INN_NATIVE_HW` is ON, when the `INN_LIFTED_DIR` directory exists, whatever its path (CMake compiles lifted code only from
+an existing directory; on a machine that holds the private tree, configure the build to package with
+`-DINN_LIFTED_DIR=/nonexistent`), when `lifted_table.c` is more than the two-line stub or
 `lifted_entries.h` exists, when `INN_WEB_PRELOAD_DIR` is set, and when the build directory holds `inn.data`,
 `*.exe`, `*.drv`, `*.dll`, `resource.*`, `*.zip` or `*.img`. The packager copies only the files it names, refuses an
 unknown file among the scenes or songs, checks every output path against an allow list (and that none starts with
