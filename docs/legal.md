@@ -48,7 +48,15 @@ unless you have registered a designated agent and posted the agent's details.
   - If a preservation request ever needs a specific backup kept, put a legal hold (blob immutability) on that one
     blob rather than lengthening the rule.
   - The default server-side encryption covers the data at rest. Backups contain mail and posts in the clear, so
-    give the storage account private access only.
+    lock the storage account down without private endpoints:
+    - Turn off anonymous blob access and shared-key access, so the only way in is Entra ID.
+    - The VM's managed identity (or the service principal) gets a role scoped to the backup container that can
+      write and read but not delete. The lifecycle rule does the deleting.
+    - Require TLS 1.2, and turn on blob soft delete and versioning.
+    - To limit the network as well, add a free Microsoft.Storage service endpoint on the VM's subnet plus a
+      virtual-network rule on the account. The "trusted Microsoft services" exception does not cover VMs.
+      An IP rule for the VM's public address does not work from the same region, because that traffic does not
+      arrive from the public IP.
   - Secrets never go in backups; they live in the key vaults.
 - Have a written process for: takedown notices (the copyright page promises removal and notice to the user, then a
   restore window after a counter-notice), deletion and export requests (reply within 30 days; verify the
