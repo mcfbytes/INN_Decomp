@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "lift.h"
 #include "machine.h"
@@ -260,6 +261,16 @@ void machine_run_for(Machine *m, uint64_t us)
     uint64_t end = m->virtual_us + us;
     while (m->virtual_us < end && !m->exit_requested)
         machine_step(m);
+}
+
+int64_t machine_start_time(void)
+{
+    static int64_t start = -1;
+    if (start < 0) {
+        const char *epoch = getenv("INN_EPOCH");
+        start = epoch && *epoch ? strtoll(epoch, NULL, 10) : (int64_t)time(NULL);
+    }
+    return start;
 }
 
 uint64_t machine_now_ns(const Machine *m)

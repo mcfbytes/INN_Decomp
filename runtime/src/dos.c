@@ -228,7 +228,7 @@ void dos_init(Machine *m, const char *c_drive_host_dir)
     strcpy(d->cwd, "\\");
     d->cur_drive = DOS_DRIVE_C;
     d->ctrl_break = false;
-    d->base_time = time(NULL);
+    d->base_time = (time_t)machine_start_time();
     for (size_t i = 0; i < sizeof dos_vectors / sizeof dos_vectors[0]; i++)
         callback_register(m, dos_vectors[i].name, dos_vectors[i].fn, dos_vectors[i].vector);
     dos_info_init(m);

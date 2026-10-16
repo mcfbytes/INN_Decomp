@@ -225,9 +225,10 @@ static CallbackResult int15_system(Machine *m)
 
 static uint8_t to_bcd(int v) { return (uint8_t)((v / 10) << 4 | v % 10); }
 
-static struct tm host_now(void)
+/* Wall time now in the emulated machine: the start time advanced by emulated time. */
+static struct tm host_now(const Machine *m)
 {
-    time_t t = time(NULL);
+    time_t t = (time_t)machine_start_time() + (time_t)(m->virtual_us / 1000000);
     struct tm tm;
     struct tm *lt = localtime(&t);
     if (lt)
@@ -240,7 +241,7 @@ static struct tm host_now(void)
 static CallbackResult int1a_time(Machine *m)
 {
     /* Drivers poll AH=00h in tight loops and localtime is costly, so only RTC reads take it. */
-    struct tm tm = AH == 0x02 || AH == 0x04 ? host_now() : (struct tm){ 0 };
+    struct tm tm = AH == 0x02 || AH == 0x04 ? host_now(m) : (struct tm){ 0 };
     switch (AH) {
     case 0x00:
         CX = bda_rd16(m, BDA_TICKS + 2);
@@ -297,9 +298,9 @@ static void install_default_vectors(Machine *m)
     bios_set_vector(m, VEC_FONT_GRAPHICS, BIOS_SEG, ROM_FONT8_OFF);
 }
 
-static uint32_t ticks_since_midnight(void)
+static uint32_t ticks_since_midnight(const Machine *m)
 {
-    struct tm tm = host_now();
+    struct tm tm = host_now(m);
     uint64_t secs = (uint64_t)tm.tm_hour * 3600 + tm.tm_min * 60 + tm.tm_sec;
     return (uint32_t)(secs * TICKS_PER_DAY / 86400);
 }
@@ -312,7 +313,7 @@ static void install_bda(Machine *m)
     bda_wr16(m, BDA_EQUIPMENT, EQUIP_FLOPPY | EQUIP_MOUSE | EQUIP_VIDEO_COLOR80 |
                                    (m->fpu_present ? EQUIP_FPU : 0) | SERIAL_PORTS << EQUIP_SERIAL_SHIFT);
     bda_wr16(m, BDA_MEMORY_KB, CONVENTIONAL_KB);
-    uint32_t ticks = ticks_since_midnight();
+    uint32_t ticks = ticks_since_midnight(m);
     bda_wr16(m, BDA_TICKS, (uint16_t)ticks);
     bda_wr16(m, BDA_TICKS + 2, (uint16_t)(ticks >> 16));
 }

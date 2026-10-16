@@ -258,6 +258,10 @@ uint64_t machine_now_ns(const Machine *m);
  * ns of bus time, handled as a port access is. Callers pass m->io_cost_ns. */
 void machine_charge_c(Machine *m, uint32_t ns);
 
+/* Host time (seconds since 1970) at which emulated time 0 falls: INN_EPOCH when set, so runs that
+ * seed from the clock repeat, else the host clock at first use. The BIOS tick and DOS clock use it. */
+int64_t machine_start_time(void);
+
 void log_msg(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 _Noreturn void fatal(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 

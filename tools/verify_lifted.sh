@@ -11,7 +11,10 @@
 # INN_COVERAGE=1 writes the call coverage (docs/lifting.md, "Coverage") to <output dir>/coverage.txt;
 # any other value is used as the file name.
 # INN_SYNTH=<call lists> adds synthetic calls (docs/lifting.md, "Synthetic calls"); the environment passes it.
+# Runs repeat: the emulated clock starts at INN_EPOCH (default 750000000, 8 Oct 1993) in UTC, unless
+# INN_EPOCH= (empty) asks for the host clock.
 set -euo pipefail
+export INN_EPOCH=${INN_EPOCH-750000000} TZ=UTC
 BUILD=$1
 PORT=$2
 RUN_MS=${3:-95000}
