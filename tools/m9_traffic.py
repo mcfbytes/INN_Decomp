@@ -2,10 +2,13 @@
 """Compare two innkeeperd logs by client messages and host steps.
 
 usage: m9_traffic.py <a.server.log> <b.server.log> [--ignore-kinds K1,K2]
+                      [--ignore-client-kinds B1,B2]
 
 Keeps, in order, the hex after `client message len=N` and the text after
 `step=host `. ANSI colour codes are ignored. --ignore-kinds drops host steps
-whose text starts with a listed kind. Prints
+whose text starts with a listed kind. --ignore-client-kinds drops client
+messages whose first byte (the command) is listed, in hex, e.g. 2F for the
+land-occupancy polls; a diagnostic for timing races, not a pass criterion. Prints
 `traffic: N client messages, M host steps, identical` or the first difference
 with five lines of context from each side. Exit status is 1 on a difference.
 """
@@ -20,7 +23,7 @@ CLIENT = re.compile(r'client message len=\d+\s*(.*)$')
 HOST = re.compile(r'step=host (.*)$')
 
 
-def events(path, ignore):
+def events(path, ignore, ignore_client=frozenset()):
     text = ANSI.sub('', Path(path).read_text(errors='replace'))
     found = []
     clients = hosts = 0
@@ -28,7 +31,8 @@ def events(path, ignore):
         hits = []
         client = CLIENT.search(line)
         host = HOST.search(line)
-        if client:
+        if client and not (client.group(1).split()[:1] and
+                           int(client.group(1).split()[0], 16) in ignore_client):
             hits.append((client.start(), 'C', client.group(1).strip()))
         if host:
             body = host.group(1).strip()
@@ -60,10 +64,13 @@ def main(argv):
     parser.add_argument('a')
     parser.add_argument('b')
     parser.add_argument('--ignore-kinds', default='', help='comma-separated host-step prefixes to drop')
+    parser.add_argument('--ignore-client-kinds', default='',
+                        help='comma-separated hex first bytes of client messages to drop')
     args = parser.parse_args(argv)
+    ignore_client = frozenset(int(k, 16) for k in args.ignore_client_kinds.split(',') if k)
     ignore = [kind for kind in args.ignore_kinds.split(',') if kind]
-    left, n_left, m_left = events(args.a, ignore)
-    right, n_right, m_right = events(args.b, ignore)
+    left, n_left, m_left = events(args.a, ignore, ignore_client)
+    right, n_right, m_right = events(args.b, ignore, ignore_client)
     limit = min(len(left), len(right))
     differ = next((i for i in range(limit) if left[i] != right[i]), None)
     if differ is None and len(left) == len(right):

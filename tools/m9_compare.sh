@@ -15,7 +15,8 @@ Runs tools/m9_suite.sh once for each build (calls 0) into <out_dir>/hybrid and
 <out_dir>/native, then compares every scenario's server log and every
 screenshot both sides have (m9_screens.py --tolerant 3). Writes
 <out_dir>/report.txt with one line per scenario: PASS, or FAIL and the checks
-that did not match.
+that did not match. M9_TRAFFIC_OPTS adds options to m9_traffic.py, e.g.
+M9_TRAFFIC_OPTS='--ignore-client-kinds 2F' (a diagnostic).
 EOF
 }
 
@@ -67,7 +68,8 @@ main() {
             na_status=$(head -n 1 "$out/native/$name.status")
             [[ $hy_status == ok && $na_status == ok ]] || checks+=(status)
             if [[ -f $out/hybrid/$name.server.log && -f $out/native/$name.server.log ]]; then
-                if ! "$ROOT/tools/m9_traffic.py" "$out/hybrid/$name.server.log" \
+                # shellcheck disable=SC2086 # M9_TRAFFIC_OPTS is a list of options
+                if ! "$ROOT/tools/m9_traffic.py" ${M9_TRAFFIC_OPTS:-} "$out/hybrid/$name.server.log" \
                     "$out/native/$name.server.log" > "$tmp" 2>&1; then
                     checks+=(traffic)
                 fi
