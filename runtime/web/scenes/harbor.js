@@ -177,6 +177,34 @@ InnScenes.register((() => {
     for (const x of [200, 205, 210]) P.line(g, [[x, 186], [x - 1, 198]], P.alpha('#2c1408', 0.7), 0.8);
   }
 
+  // A crate on the quay, stencilled for the disks it holds. Two floppies poke out under the lid.
+  function diskCrate(g, P) {
+    const x = 54, w = 44, top = 158, bot = 184;
+    P.shadow(g, x + w / 2 + 2, bot + 1, 28, 3.6, 0.38);
+    g.save(); g.translate(x + 12, top + 1); g.rotate(-0.22); P.floppy(g, -6, -14, 12, '#d8382c'); g.restore();
+    g.save(); g.translate(x + 22, top + 1); g.rotate(0.14); P.floppy(g, -6, -15, 12, '#2c5cc8'); g.restore();
+    const front = [[x, top], [x + w, top], [x + w + 1, bot], [x - 1, bot]];
+    P.shape(g, front, ['#d8a860', '#8c5c2c'], { wob: 0.5, seed: 71, v: true, edge: '#2c1a0c', ea: 0.8 });
+    P.within(g, front, { wob: 0.5, seed: 71 }, () => {
+      g.fillStyle = P.alpha(P.col('#2c1a0c'), 0.55);
+      g.fillRect(x, top + 8, w, 1); g.fillRect(x, top + 17, w, 1);
+      g.fillRect(x + 3, top, 2, 26); g.fillRect(x + w - 5, top, 2, 26);
+      P.dabs(g, x, top, w, 26, ['#f0d49c', '#4a2c14'], 14, 1.3, 72, 0.3);
+    });
+    P.shape(g, [[x - 2, top - 3], [x + w + 2, top - 3], [x + w + 2, top + 1], [x - 2, top + 1]], ['#e8bc78', '#a06c34'], { wob: 0.3, seed: 73, edge: '#2c1a0c', ea: 0.8 });
+    P.text(g, 'DISKS', x + (w - 29) / 2 + 0.5, top + 10, '#f6f0dc', 1, 1);
+    for (const ax of [x + 12, x + w - 12]) {
+      g.fillStyle = P.col('#f6f0dc');
+      g.beginPath(); g.moveTo(ax, top + 18); g.lineTo(ax + 4, top + 23); g.lineTo(ax - 4, top + 23); g.closePath(); g.fill();
+      g.fillRect(ax - 1, top + 23, 2, 3);
+    }
+  }
+
+  // The lighthouse keeper's telephone, screwed to the tower beside the door.
+  function lighthousePhone(g, P) {
+    P.wallPhone(g, 294, 106, 1.3);
+  }
+
   function paint(g, P) {
     sky(g, P);
     sea(g, P);
@@ -185,6 +213,8 @@ InnScenes.register((() => {
     village(g, P);
     lighthouse(g, P);
     dock(g, P);
+    diskCrate(g, P);
+    lighthousePhone(g, P);
     if (P.dusk) P.glow(g, 210, 168, 90, '#ffa060', 0.14);
   }
 
@@ -397,5 +427,26 @@ InnScenes.register((() => {
       'Clouds drift by. None of them has a forwarding address either.'] },
   ];
 
-  return { id: 'harbor', title: 'The harbour', focus: { x: 245, y: 110 }, paint, anims, hotspots };
+  hotspots.push(
+    { id: 'crate', role: 'disks', x: 50, y: 142, w: 54, h: 46, say: ['A crate marked DISKS. The arrows say which way is up, and they are firm about it.'] },
+    { id: 'keeperphone', role: 'phone', x: 290, y: 104, w: 22, h: 28, say: ['The lighthouse has a telephone. It rings only when somebody out at sea feels lonely.'] });
+
+  const objects = {
+    disks: {
+      open: 'You prise up the lid of the crate. Floppies, packed in straw, and not a single herring.',
+      got: 'The keeper will take your call. Try the telephone on the lighthouse.',
+      again: 'The crate rattles. THIS SIDE UP, it reminds you.',
+      hint: 'Something is glinting on the quay beside the crate marked DISKS. It might be the crate.',
+    },
+    phone: {
+      refuse: 'You pick up the receiver. A foghorn voice says: "Disks first, please."',
+      answer: 'Lighthouse. Mind the rocks.',
+      hint: 'The telephone on the lighthouse is twinkling. The lamp pretends not to be jealous.',
+      busy: 'The lamp swings round and blinks twice. Busy.',
+    },
+  };
+
+  return { id: 'harbor', title: 'The harbour', focus: { x: 245, y: 110 }, paint, anims, hotspots, objects,
+    termAt: [196, 40],
+    spark: { disks: [48, 138, 58, 50], phone: [286, 102, 30, 32] } };
 })());

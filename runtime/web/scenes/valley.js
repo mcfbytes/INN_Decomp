@@ -207,6 +207,37 @@ InnScenes.register((() => {
     for (let i = 0; i < 6; i++) P.line(g, [[273.5 - i * 1.4 + 2, 194 - i * 8.6], [277.5 - i * 1.4 + 1, 194 - i * 8.6 - 0.6]], '#6c4a28', 1);
   }
 
+  // The box that holds the disks: a wooden crate by the road, floppies standing up in it like toast.
+  function diskCrate(g, P) {
+    const x = 82, w = 42, top = 157, bot = 177;
+    P.shadow(g, x + w / 2 + 2, bot + 1, 22, 3.4, 0.35);
+    const cols = ['#d8382c', '#2c5cc8', '#f0b020', '#2c9c58', '#8c3cb8', '#e8741c', '#d8382c'];
+    cols.forEach((c, i) => {
+      g.save();
+      g.translate(x + 5 + i * 5.3, top + 3);
+      g.rotate((i - 3) * 0.08);
+      P.floppy(g, -4.5, -14, 9, c);
+      g.restore();
+    });
+    const front = [[x, top], [x + w, top], [x + w + 1, bot], [x - 1, bot]];
+    P.shape(g, front, ['#c8924c', '#7c5224'], { wob: 0.5, seed: 61, v: true, edge: '#2c1a0c', ea: 0.7 });
+    P.within(g, front, { wob: 0.5, seed: 61 }, () => {
+      g.fillStyle = P.alpha(P.col('#2c1a0c'), 0.5);
+      g.fillRect(x, top + 5, w, 1); g.fillRect(x, top + 11, w, 1);
+      g.fillRect(x + 4, top, 1, 16); g.fillRect(x + w - 5, top, 1, 16);
+      P.dabs(g, x, top, w, 16, ['#f0d49c', '#4a2c14'], 10, 1.2, 62, 0.3);
+    });
+    // a paper tag, lettered by hand
+    P.rect(g, x + 4, top + 5, w - 8, 11, '#f6f0dc', { wob: 0.2, seed: 63, edge: '#2c1a0c', ea: 0.5 });
+    P.text(g, 'DISKS', x + (w - 29) / 2 + 0.5, top + 8, '#2c2c5c', 1, 1);
+    P.dabs(g, x - 6, bot - 3, w + 12, 6, ['#3e6020', '#7c9a30'], 8, 1.6, 64, 0.8);
+  }
+
+  // The telephone on the big pole: a wall set with a handset on a hook.
+  function poleTelephone(g, P) {
+    P.wallPhone(g, 244, 103, 1.3);
+  }
+
   function paint(g, P) {
     sky(g, P);
     volcano(g, P);
@@ -214,6 +245,8 @@ InnScenes.register((() => {
     town(g, P);
     ground(g, P);
     lines(g, P);
+    diskCrate(g, P);
+    poleTelephone(g, P);
   }
 
   // ---------- animated bits ----------
@@ -308,7 +341,7 @@ InnScenes.register((() => {
   const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
 
   const hotspots = [
-    { id: 'repairman', x: 250, y: 66, w: 26, h: 42, say: [
+    { id: 'repairman', role: 'phone', x: 250, y: 66, w: 26, h: 42, say: [
       'A repairman is stuck at the top of the pole. He says he is "just inspecting the line."',
       'The repairman has been up there since Tuesday. Nobody has told him which Tuesday.',
       'He waves. The pole wobbles. You both pretend that did not happen.'] },
@@ -336,5 +369,27 @@ InnScenes.register((() => {
       'A cloud drifts past. It does not have the right of way, but it has the confidence.'] },
   ];
 
-  return { id: 'valley', title: 'The valley', focus: { x: 215, y: 118 }, paint, anims, hotspots };
+  // The two objects that run the game: where the disks live and the telephone (adv.js).
+  hotspots.push(
+    { id: 'crate', role: 'disks', x: 80, y: 142, w: 48, h: 38, say: ['A crate of disks. It is labelled, which is more than most crates manage.'] },
+    { id: 'telephone', role: 'phone', x: 240, y: 102, w: 24, h: 30, say: ['A telephone, bolted to a pole. Somebody up there is expected to answer it.'] });
+
+  const objects = {
+    disks: {
+      open: 'You lift the lid of the crate. Rows of floppies look up at you, hopeful.',
+      got: 'The repairman up the pole is waving at his telephone. Perhaps he will take the call.',
+      again: 'The crate does not mind, but the floppies are starting to talk.',
+      hint: 'Something is glinting in the grass by the road. It looks like a crate with ideas.',
+    },
+    phone: {
+      refuse: 'You pick up the receiver. The repairman leans down and says: "Disks first, please."',
+      answer: 'Number please?',
+      hint: 'The telephone on the pole is twinkling. The repairman is pretending not to notice.',
+      busy: 'The repairman holds up one finger. He is already on the line.',
+    },
+  };
+
+  return { id: 'valley', title: 'The valley', focus: { x: 215, y: 118 }, paint, anims, hotspots, objects,
+    termAt: [166, 138],
+    spark: { disks: [80, 140, 48, 40], phone: [238, 100, 30, 32] } };
 })());

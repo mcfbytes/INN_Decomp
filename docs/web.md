@@ -52,24 +52,42 @@ The page asks for the install (unless `inn.data` provides one), then runs
 |---|---|
 | `com1=ws://host:port` | Server URL; default `ws://<page host>:2316` (`wss://` on an https page). The page also offers an editable field and remembers the last value. |
 | `autostart=1` | Start as soon as an install is available (preloaded or saved), without the Start button. |
-| `scene=<id>` | Landing backdrop: `town` (default, the flat pixel-art valley in `shell.html`), `valley`, `diner`, `tower` or `harbor`. An unknown id falls back to `town`. |
-| `scenes` | Any value: shows a small picker at the bottom left to flip between the backdrops live (it also updates `scene=` in the address bar). |
+| `scene=<id>` | Landing scene: `valley`, `diner`, `tower`, `harbor` or `town`. Without it (or with an unknown id) one of the five is picked at random per visit. |
+| `scenes` | Any value: shows a small picker at the bottom left to flip between the scenes live (it also updates `scene=` in the address bar). |
+| `classic=1` | The old layout for debugging: the setup card (picker, drop zone, Advanced, Connect, modem panel) over the scene, with no menu bar, score or narrator box. |
 | `perf=1` | Pass `--perf`: a timing line in the log every 5 s (see Performance). |
 | `ips=N` | Guest instruction rate (`--ips`), default 20000000. |
 
 ## Landing scenes
 
-`runtime/web/scene.js` is the engine and `runtime/web/scenes/<id>.js` one painting each. A scene module is
-`{ id, title, focus, paint(ctx, kit), anims, hotspots }` registered with `InnScenes.register`. `paint` draws a 320x200
+`runtime/web/scene.js` is the engine and `runtime/web/scenes/<id>.js` one painting each (valley, diner, tower, harbor
+and town). A scene module is `{ id, title, focus, paint(ctx, kit), anims, hotspots, objects, spark, termAt }` registered
+with `InnScenes.register`. `paint` draws a 320x200
 picture with Canvas 2D (soft gradients, wobbly brush shapes, dabs and grain); the engine adds a paper-and-wash texture,
 cuts a 256-colour palette from the result (median cut) and maps it with an 8x8 ordered dither, so the load takes about
-30 ms. The canvas is drawn with `image-rendering: pixelated` and covers the window, with the scene's `focus` kept beside
-the setup card (on a narrow portrait screen it hangs from the bottom edge under the card).
+30 ms. The canvas is drawn with `image-rendering: pixelated` and covers the window, centred on the scene's `focus`. On a
+narrow portrait screen the picture floats above a strip kept for the narrator box, fades into sky and ground at its
+edges and can be dragged sideways.
 
 Every scene has a day palette and a dusk palette; the dusk one is used when the browser is in dark mode. Small things move by
 re-compositing only their own rectangle (`anims`: clouds, glints, blinking lights, and gags that replay every 20 s or so),
 so the picture is never repainted per frame. All of it stops under `prefers-reduced-motion`. Hotspots are rectangles in
 scene pixels; clicking one, or resting the mouse on it for a second, shows a short narrator line in a bordered text box.
+
+Two hotspots per scene carry a `role`: `disks` (the object that holds the installation) and `phone` (the telephone). The
+scene's `spark` gives a rectangle for each, where a few pixels twinkle (a burst of a second every 2.6 s; a still
+twinkle when animation is off) while that object is the next step. `objects` holds the scene's own lines for each role
+(`open`, `got`, `again`, `hint` for the disks; `refuse`, `answer`, `hint`, `busy` for the phone) and `termAt` the corner
+where the modem box sits, on empty grass, sky or water. The five scenes:
+
+| Scene | Disks | Telephone |
+|---|---|---|
+| valley | a crate of floppies by the road | a wall phone on the big pole, the repairman answers "Number please?" |
+| diner | the chalkboard special "TODAY DISKS" and a plate of floppies | a payphone by the big sign |
+| tower | a spellbook on a lectern, a floppy embossed on its cover | a candlestick telephone on the balcony, by the switchboard window |
+| harbor | a crate marked DISKS with arrows, floppies poking out | a wall phone on the lighthouse |
+| town | a box of disks in the post office window | a red telephone booth, a snail first in the queue |
+
 Adding a scene: write `scenes/<id>.js`, add the id to `IDS` in `scene.js` and the file to the copy list in `CMakeLists.txt`.
 The artwork is original code; nothing is traced or copied from any game.
 
@@ -142,14 +160,35 @@ browser profile with an install that lacked the character files received all fou
 `shell.html` and `page.js` are a single-page app around the canvas; the DOS screens themselves are
 unchanged. The page has three views (`body[data-view]`): `setup`, `dialing` and `play`.
 
-**Setup.** A full-viewport scene of original pixel art (inline SVG on a 320x200 grid, `crispEdges`, a
-limited palette with dither seams): a town, autumn trees, a winding road, a telephone line and a volcano.
-It follows the system colour scheme (day palette in light, dusk with lit windows in dark) through the
-`--c-*` tokens at the top of the style block. Clouds, volcano smoke and the modem light animate unless
-`prefers-reduced-motion` is set. On it sits one card: drop the INN folder or a zip anywhere on the page
-(dropped folders are walked with `webkitGetAsEntry`) or use the pickers, then Connect. The server address
-and "Remember on this device" are under Advanced. `SITE_NAME` at the top of `page.js` is the one place
-for a name: empty (the default) shows no wordmark and the title "Online world"; a value is used for both.
+**Setup.** The landing is a scene (see Landing scenes), one of five painted ones picked at random per visit, and
+no card sits over it. It follows the system colour scheme (day palette in light, dusk with lit windows in dark).
+Setup is a small point-and-click game (`adv.js`; `page.js` calls its hooks):
+
+1. *Get the disks.* The scene's disks object sparkles. Clicking it opens the folder picker and the narrator offers
+   "Or perhaps a disk image (.zip)?" with `[Folder]` and `[.zip]` buttons. Dropping a folder or a .zip anywhere on the
+   picture works too (dropped folders are walked with `webkitGetAsEntry`). After loading, a small disk icon appears
+   top right and the narrator says so. A remembered install shows the icon from the start and the narrator greets the
+   returning player.
+2. *Dial.* With disks loaded, the telephone object sparkles. Clicking it (or Game, Dial) starts the client. Without
+   disks it refuses with a joke. If nothing happens for about 10 s the narrator nudges toward the sparkling object, at
+   most twice. Clicking empty scenery gives a dry remark.
+3. *Errors* that the card used to show (no `TSNEXEC.EXE`, a bad zip, an invalid server address, a lost connection)
+   appear in the narrator box with the same facts, the joke after them.
+
+The menu bar slides down when the pointer touches the top edge (always visible on touch screens and narrow windows, and
+while a menu is open). F10 or Alt opens it; the arrow keys move, Enter picks, Esc closes. It carries the ARIA menubar
+roles and does everything the picture does: Game (Load disks..., Load disk image (.zip)..., Dial, Hang up, and a
+"Sign in with ..." item per provider), Options (Server address..., Remember on this device, Animation), Scene (the five
+scenes) and Help (How do I play?, About). Server address opens a small dialog with the field the card's Advanced section
+had; it accepts only `ws://` or `wss://` addresses (empty means the default) and uses the same `inn.com1` key, stored
+when you dial. "Remember" is the same `inn.remember` checkbox. A playful score on the right ("Score: 0 of 1993") is kept
+in `sessionStorage`: loading the disks +10, dialing +5, connecting +25, each gag hotspot +1, each once per session. The
+Animation switch is kept in `localStorage` (`inn.anim`).
+
+`?classic=1` keeps the old card instead (folder and zip pickers, Advanced, Connect, modem panel): its markup is still in
+`shell.html` and `page.js` keeps driving it, so the two layouts share one code path. `SITE_NAME` at the top of
+`page.js` is the one place for a name: empty (the default) shows no wordmark and the title "Online world"; a value is
+used for both.
 
 **Providers.** Off by default: `AUTH_SERVER` at the top of `page.js` is empty, and innkeeperd's WebSocket
 port does not answer HTTP. With `AUTH_SERVER` set to a URL, or `?auth=<url>` in the page's address, the
@@ -158,9 +197,12 @@ address with `ws` turned into `http` (same host and port). A JSON array of `{id,
 entry. Any error, a 404 or an empty list keeps the section hidden, so there are no buttons without
 providers.
 
-**Dialing.** Connect starts the client and replaces the card with a modem panel: `ATZ`, `OK`,
-`ATDT <server>`, then `CONNECT` when the runtime logs `uart: websocket open`, and the game view opens
-1.4 s later. `uart: websocket closed|error` before that shows `NO CARRIER` and a Try again button.
+**Dialing.** Dial starts the client and opens a period-style terminal box near the telephone (`termAt`; docked at
+the bottom on a phone): `ATZ`, `OK`, `ATDT <server>`, then `CONNECT` when the runtime logs `uart: websocket open`. 1.4 s
+later an iris closes on the telephone and opens on the game view (about 0.8 s; instant under reduced motion or with
+Animation off). `uart: websocket closed|error` before that shows `NO CARRIER` and a playful line in the same box with
+`[Try again]` and `[Hang up]`. The runtime cannot be started twice, so both reload the page; Try again dials again by
+itself on the new load when the disks are still there (kept with Remember).
 
 **Play.** There is no app bar. The game fills the viewport at 4:3 on a dark letterbox. Controls are a
 translucent strip that slides in when the pointer is within 8 px of the top edge (it stays while hovered

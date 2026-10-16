@@ -1,20 +1,22 @@
 // Landing scenes: procedurally painted 320x200 backdrops in the look of early-90s hand-painted VGA
 // adventure art (soft washes, paper texture, wobbly brush edges, a 256-colour palette with ordered
 // dithering). Every scene is original artwork written as drawing code in runtime/web/scenes/<id>.js.
-// `?scene=<id>` picks one, `?scenes` shows a small picker. The id `town` is the older flat SVG that
-// stays in shell.html; it is the default. Query parameters are listed in docs/web.md.
+// `?scene=<id>` picks one (otherwise one is picked at random per visit), `?scenes` shows a small
+// picker. A scene names two hotspot roles, `disks` (holds the installation) and `phone` (dials), and
+// the rectangles where each one sparkles while it is the next step (adv.js drives the game around
+// them). Query parameters are listed in docs/web.md.
 'use strict';
 
 const InnScenes = (() => {
   const W = 320, H = 200;
-  const DEFAULT_ID = 'town';
-  const IDS = ['town', 'valley', 'diner', 'tower', 'harbor'];
+  const IDS = ['valley', 'diner', 'tower', 'harbor', 'town'];
+  const CLASSIC = new URLSearchParams(location.search).has('classic');
   const FPS = 10;
   const DITHER = 20;          // ordered-dither spread, in 8-bit levels
   const HOVER_MS = 1000, QUIP_MS = 7000, TYPE_MS = 22;
 
   const registry = {};
-  const state = { id: DEFAULT_ID, scene: null, built: null, running: false, t0: 0, last: 0, raf: 0 };
+  const state = { id: '', spark: { disks: false, phone: false }, scene: null, built: null, running: false, t0: 0, last: 0, raf: 0 };
   let els = null;
 
   // ---------- small numeric helpers ----------
@@ -83,7 +85,8 @@ const InnScenes = (() => {
     '-': '00000 00000 00000 11111 00000 00000 00000', '/': '00001 00010 00010 00100 01000 01000 10000',
     '!': '00100 00100 00100 00100 00100 00000 00100', '?': '01110 10001 00001 00010 00100 00000 00100',
     ',': '00000 00000 00000 00000 01100 00100 01000', ':': '00000 01100 01100 00000 01100 01100 00000',
-    '^': '00100 01110 10101 10100 10101 01110 00100',
+    '^': '00100 01110 10101 10100 10101 01110 00100', '&': '01100 10010 10100 01000 10101 10010 01101',
+    '+': '00000 00100 00100 11111 00100 00100 00000', '\'': '00100 00100 01000 00000 00000 00000 00000', '$': '00100 01111 10100 01110 00101 11110 00100',
   };
   const glyphRows = {};
   for (const k of Object.keys(GLYPHS)) glyphRows[k] = GLYPHS[k].split(' ');
@@ -337,6 +340,42 @@ const InnScenes = (() => {
       P.grain(g, 0, y0, 320, (y1 - y0) * 0.7, '#ffffff', Math.round(n / 3), seed + 1, 1);
     };
 
+    // A 3.5 inch floppy disk seen from the front, w pixels wide: body, metal shutter, paper label.
+    P.floppy = (g, x, y, w, body = '#2c3c8c', label = '#f6f0dc') => {
+      const k = w / 10;
+      P.shape(g, [[x, y], [x + w - 1.6 * k, y], [x + w, y + 1.6 * k], [x + w, y + w], [x, y + w]], [P.mix(body, '#ffffff', 0.18), body], { wob: 0.15, seed: 3, edge: '#0c0c20', ea: 0.7 });
+      g.fillStyle = P.col('#c8ccd8'); g.fillRect(x + 2.2 * k, y, 5 * k, 3.2 * k);
+      g.fillStyle = P.col('#5c6074'); g.fillRect(x + 5.6 * k, y + 0.6 * k, 1.2 * k, 2 * k);
+      g.fillStyle = P.col(label); g.fillRect(x + 1.4 * k, y + 5 * k, 7.2 * k, 4.6 * k);
+      g.fillStyle = P.alpha(P.col('#2c2c44'), 0.7);
+      g.fillRect(x + 2 * k, y + 6.4 * k, 4.5 * k, Math.max(1, 0.7 * k));
+    };
+
+    // An old wall telephone, 11 x 16 px with its handset on the left: backboard, two bells, mouthpiece, crank.
+    P.wallPhone = (g, x, y, sc = 1) => {
+      g.save(); g.translate(x, y); g.scale(sc, sc); x = 0; y = 0;
+      P.shape(g, [[x, y + 3], [x + 11, y + 3], [x + 11, y + 16], [x, y + 16]], ['#e0a458', '#a86a2c'], { wob: 0.3, seed: 8, edge: '#140a06', ea: 0.9 });
+      P.blob(g, x + 3, y + 3, 2.4, 2.2, ['#ffe27a', '#b8801c'], { wob: 0.1, seed: 3, n: 8, edge: '#3a2410', ea: 0.7 });
+      P.blob(g, x + 8, y + 3, 2.4, 2.2, ['#ffe27a', '#b8801c'], { wob: 0.1, seed: 4, n: 8, edge: '#3a2410', ea: 0.7 });
+      P.blob(g, x + 5.5, y + 9, 2.4, 2.4, ['#4a4a5c', '#14141c'], { wob: 0.1, seed: 5, n: 8, edge: '#000000', ea: 0.8 });
+      g.fillStyle = P.col('#ece4d0'); g.fillRect(x + 3, y + 13, 5, 1);
+      P.line(g, [[x + 11, y + 9], [x + 14, y + 11]], '#c8c8d0', 1);
+      P.blob(g, x + 14.5, y + 11.3, 1.2, 1.2, '#ffe27a', { wob: 0, seed: 1, n: 6 });
+      P.shape(g, [[x - 3.5, y + 5], [x - 1, y + 5], [x - 1, y + 14], [x - 3.5, y + 14]], ['#2c2c3c', '#0c0c14'], { wob: 0.15, seed: 6, edge: '#000', ea: 0.7 });
+      P.line(g, [[x - 2, y + 14], [x - 4, y + 17], [x + 1, y + 18], [x + 3, y + 16]], '#1c1c28', 1);
+      g.restore();
+    };
+
+    // A candlestick telephone, 8 x 12 px: heavy base, stem, mouthpiece, earpiece on its fork.
+    P.candlePhone = (g, x, y, sc = 1) => {
+      g.save(); g.translate(x, y); g.scale(sc, sc); x = 0; y = 0;
+      P.shape(g, [[x - 4, y], [x + 4, y], [x + 3, y - 2], [x - 3, y - 2]], ['#3c3c4c', '#0c0c14'], { wob: 0.15, seed: 2, edge: '#000', ea: 0.7 });
+      P.rect(g, x - 0.8, y - 9, 1.6, 7.5, ['#e8c04a', '#8c6418'], { wob: 0.1, seed: 3 });
+      P.shape(g, [[x - 2.4, y - 9], [x + 2.4, y - 9], [x + 1.6, y - 11.5], [x - 1.6, y - 11.5]], ['#e8c04a', '#8c6418'], { wob: 0.1, seed: 4, edge: '#3a2410', ea: 0.7 });
+      P.shape(g, [[x + 1, y - 6], [x + 4.5, y - 6.5], [x + 4.5, y - 4.5], [x + 1, y - 4]], ['#3c3c4c', '#0c0c14'], { wob: 0.1, seed: 5, edge: '#000', ea: 0.7 });
+      g.restore();
+    };
+
     // Pixel lettering. Returns the width drawn.
     P.text = (g, str, x, y, col, scale = 1, space = 1) => {
       g.fillStyle = col.charAt(0) === '#' ? P.col(col) : col;
@@ -482,16 +521,16 @@ const InnScenes = (() => {
 
     const hist = new Map();
     addHist(hist, base, 1, false);
-    const anims = (scene.anims || []).map((a) => ({ ...a, on: false, rect: [a.x, a.y, a.w, a.h] }));
+    const anims = (scene.anims || []).concat(sparkAnims(scene)).map((a) => ({ ...a, on: false, rect: [a.x, a.y, a.w, a.h] }));
     const sprite = canvas2d(W, H);
     for (const a of anims) {
       sprite.g.clearRect(0, 0, W, H);
       sprite.g.save();
-      a.draw(sprite.g, a.sample === undefined ? 0 : a.sample, P, a.gag ? 0.5 : undefined);
+      a.draw(sprite.g, a.sample === undefined ? 0 : a.sample, P, a.gag || a.when ? 0.5 : undefined);
       sprite.g.restore();
       addHist(hist, sprite.g.getImageData(a.x, a.y, a.w, a.h).data, 3, true);
     }
-    const extra = (scene.accents || []).map((hex) => parseHex(P.col(hex)));
+    const extra = (scene.accents || []).map((hex) => parseHex(P.col(hex))).concat(SPARK_COLS.map(parseHex));
     const palette = medianCut(hist, 256 - extra.length).concat(extra);
     const quant = makeQuantiser(palette);
 
@@ -514,13 +553,46 @@ const InnScenes = (() => {
     return m < a.gag.dur ? m / a.gag.dur : -1;
   }
 
+  // Twinkling pixels on an object that is the next step: a burst of a second every 2.6 s (static when
+  // motion is reduced), drawn only while state.spark[role] is set.
+  const SPARK_COLS = ['#ffffff', '#ffe040', '#fff4b0'];
+  const SPARK_EVERY = 2.6, SPARK_BURST = 1.1;
+
+  function sparkAnims(scene) {
+    return Object.entries(scene.spark || {}).map(([role, r]) => ({
+      x: r[0], y: r[1], w: r[2], h: r[3], sample: 0, role,
+      when: (t, still) => (!state.spark[role] ? -1 : still ? 0.5 : t % SPARK_EVERY < SPARK_BURST ? (t % SPARK_EVERY) / SPARK_BURST : -1),
+      draw(g, t, P, u) {
+        const rnd = mulberry(Math.floor(t / SPARK_EVERY) * 17 + role.length);
+        for (let i = 0; i < 5; i++) {
+          const px = Math.floor(r[0] + 3 + rnd() * (r[2] - 6)), py = Math.floor(r[1] + 3 + rnd() * (r[3] - 6));
+          const k = Math.sin(clamp(u + i * 0.07, 0, 1) * Math.PI);
+          if (k < 0.15) continue;
+          const arm = k > 0.7 ? 2 : 1;
+          g.fillStyle = SPARK_COLS[1];
+          g.fillRect(px - arm, py, arm * 2 + 1, 1);
+          g.fillRect(px, py - arm, 1, arm * 2 + 1);
+          g.fillStyle = SPARK_COLS[0];
+          g.fillRect(px, py, 1, 1);
+        }
+      },
+    }));
+  }
+
+  function setSpark(role, on) {
+    if (state.spark[role] === on) return;
+    state.spark[role] = on;
+    if (state.built && !state.running) frame(state.built, 0, true);
+  }
+
   function frame(b, t, still) {
     const rects = [];
     const live = [];
     for (const a of b.anims) {
       let u;
       let on = true;
-      if (a.gag) { u = gagPhase(a, t); on = !still && u >= 0; }
+      if (a.when) { u = a.when(t, still); on = u >= 0; }
+      else if (a.gag) { u = gagPhase(a, t); on = !still && u >= 0; }
       if (on) live.push([a, u]);
       if (on || a.on) rects.push(a.rect);
       a.on = on;
@@ -556,7 +628,12 @@ const InnScenes = (() => {
     }
   }
 
-  const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let animOff = false;
+  const reduced = () => animOff || matchMedia('(prefers-reduced-motion: reduce)').matches;
+  function setAnimation(on) {
+    animOff = !on;
+    if (state.built) { frame(state.built, 0, true); syncRunning(); }
+  }
   const isDark = () => !(matchMedia('(prefers-color-scheme: light)').matches && document.documentElement.dataset.theme !== 'dark');
   const landingShown = () => document.body.dataset.view === 'setup' || document.body.dataset.view === 'dialing';
 
@@ -585,22 +662,39 @@ const InnScenes = (() => {
 
   // ---------- placing the canvas, hotspots and the narrator box ----------
 
-  const view = { s: 1, ox: 0, oy: 0 };
+  const view = { s: 1, ox: 0, oy: 0, cx: 0, wide: false, top: '', bot: '' };
+  const adventure = () => !CLASSIC && typeof Adv !== 'undefined';
 
   function layout() {
     if (!els || !state.scene) return;
     const vw = innerWidth, vh = innerHeight;
     const f = state.scene.focus || { x: 220, y: 120 };
     const portrait = vw < vh;
-    // On a phone the card sits on top: the picture is smaller and hangs from the bottom edge.
-    const s = portrait ? Math.max(vw / W, vh * 0.66 / H) : Math.max(vw / W, vh / H);
-    const ox = clamp(vw * (portrait ? 0.5 : 0.62) - f.x * s, vw - W * s, 0);
-    const oy = portrait ? vh - H * s : clamp(vh * 0.55 - f.y * s, vh - H * s, 0);
-    view.s = s; view.ox = ox; view.oy = oy;
+    // On a phone the picture floats above a strip left for the narrator box and fades into sky and
+    // ground at its edges; drag it sideways.
+    const s = portrait ? Math.max(vw / W, clamp(vh - 250, vh * 0.45, vh * 0.62) / H) : Math.max(vw / W, vh / H);
+    if (!view.cx) view.cx = f.x;
+    const mid = CLASSIC && !portrait ? 0.62 : 0.5;     // the old card covers the left of the picture
+    const ox = clamp(vw * mid - view.cx * s, vw - W * s, 0);
+    const oy = portrait ? Math.max(40, vh - 210 - H * s) : clamp(vh * 0.5 - f.y * s, vh - H * s, 0);
+    view.s = s; view.ox = ox; view.oy = oy; view.wide = W * s > vw + 1;
+    view.cx = (vw * mid - ox) / s;
     const st = els.canvas.style;
-    st.maskImage = portrait ? 'linear-gradient(to bottom, transparent, #000 14%)' : '';
+    st.maskImage = portrait ? 'linear-gradient(to bottom, transparent, #000 12%, #000 88%, transparent)' : '';
     st.webkitMaskImage = st.maskImage;
     st.width = `${W * s}px`; st.height = `${H * s}px`; st.left = `${ox}px`; st.top = `${oy}px`;
+    if (view.top) els.root.style.background = `linear-gradient(to bottom, ${view.top} ${oy}px, ${view.bot} ${oy + H * s}px)`;
+  }
+
+  // Brings scene column x to the middle of the screen (a no-op when the whole picture fits).
+  function panTo(x) {
+    view.cx = x;
+    layout();
+  }
+
+  // Where a scene rectangle sits on screen, in CSS pixels.
+  function screenRect(r) {
+    return { x: view.ox + r[0] * view.s, y: view.oy + r[1] * view.s, w: r[2] * view.s, h: r[3] * view.s };
   }
 
   const quip = { timer: 0, hover: 0, hoverId: '', type: 0, count: {} };
@@ -621,10 +715,16 @@ const InnScenes = (() => {
     return null;
   }
 
-  function say(h) {
+  // The next line a hotspot says (they take turns).
+  function nextQuip(h) {
     const key = `${state.id}/${h.id}`;
     const n = quip.count[key] = (quip.count[key] || 0) + 1;
-    const text = h.say[(n - 1) % h.say.length];
+    return h.say[(n - 1) % h.say.length];
+  }
+
+  // The floating box of the ?classic=1 layout; the adventure layout uses the narrator box (adv.js).
+  function say(h) {
+    const text = nextQuip(h);
     const el = els.quip;
     clearTimeout(quip.timer); clearInterval(quip.type);
     el.hidden = false;
@@ -648,20 +748,32 @@ const InnScenes = (() => {
 
   function wireScene() {
     const root = els.root;
+    let down = null;
     root.addEventListener('pointermove', (e) => {
+      if (down && down.id === e.pointerId) {
+        const dx = e.clientX - down.x;
+        if (!down.moved && Math.abs(dx) > 8 && view.wide) { down.moved = true; els.canvas.classList.add('dragging'); }
+        if (down.moved) { panTo(down.cx - dx / view.s); return; }
+      }
       const h = hotAt(e.clientX, e.clientY);
       root.style.cursor = h ? 'pointer' : '';
       const id = h ? h.id : '';
       if (id === quip.hoverId) return;
       quip.hoverId = id;
       clearTimeout(quip.hover);
-      if (h && e.pointerType === 'mouse') quip.hover = setTimeout(() => say(h), HOVER_MS);
+      if (h && e.pointerType === 'mouse') quip.hover = setTimeout(() => (adventure() ? Adv.hover(h) : say(h)), HOVER_MS);
     });
+    root.addEventListener('pointerdown', (e) => { root.dataset.dragged = ''; down = { id: e.pointerId, x: e.clientX, cx: view.cx, moved: false }; });
+    const up = () => { const was = down && down.moved; down = null; els.canvas.classList.remove('dragging'); return was; };
+    root.addEventListener('pointercancel', up);
+    root.addEventListener('pointerup', (e) => { root.dataset.dragged = up() ? '1' : ''; void e; });
     root.addEventListener('pointerleave', () => { quip.hoverId = ''; clearTimeout(quip.hover); });
     root.addEventListener('click', (e) => {
+      if (root.dataset.dragged) { root.dataset.dragged = ''; return; }
       const h = hotAt(e.clientX, e.clientY);
       clearTimeout(quip.hover);
-      if (h) say(h); else hideQuip();
+      if (adventure()) Adv.click(h, e);
+      else if (h) say(h); else hideQuip();
     });
   }
 
@@ -669,7 +781,7 @@ const InnScenes = (() => {
 
   function chooseId() {
     const q = new URLSearchParams(location.search).get('scene');
-    return IDS.includes(q) ? q : DEFAULT_ID;
+    return IDS.includes(q) ? q : IDS[Math.floor(Math.random() * IDS.length)];
   }
 
   function loadScript(id) {
@@ -693,16 +805,22 @@ const InnScenes = (() => {
     b.display = { c: els.canvas, g: ctx };
     frame(b, 0, true);
     const top = b.base;
-    let tr = 0, tg = 0, tb = 0;
-    for (let x = 0; x < W; x++) { tr += top[x * 4]; tg += top[x * 4 + 1]; tb += top[x * 4 + 2]; }
-    els.root.style.background = toCss(tr / W, tg / W, tb / W);
+    let tr = 0, tg = 0, tb = 0, br = 0, bg = 0, bb = 0;
+    for (let x = 0; x < W; x++) {
+      tr += top[x * 4]; tg += top[x * 4 + 1]; tb += top[x * 4 + 2];
+      const q = ((H - 1) * W + x) * 4;
+      br += top[q]; bg += top[q + 1]; bb += top[q + 2];
+    }
+    view.top = toCss(tr / W, tg / W, tb / W);
+    view.bot = toCss(br / W, bg / W, bb / W);
+    layout();
     InnScenes.lastPaintMs = b.ms;
     console.log(`scene ${state.id}: painted in ${b.ms.toFixed(1)} ms`);
     syncRunning();
   }
 
   async function setScene(id, push) {
-    if (!IDS.includes(id)) id = DEFAULT_ID;
+    if (!IDS.includes(id)) id = IDS[0];
     hideQuip();
     state.id = id;
     for (const b of els.pick ? els.pick.querySelectorAll('button') : []) b.setAttribute('aria-pressed', String(b.dataset.id === id));
@@ -711,22 +829,18 @@ const InnScenes = (() => {
       u.searchParams.set('scene', id);
       history.replaceState(null, '', u);
     }
-    if (id === DEFAULT_ID) {
-      state.scene = null; state.built = null;
-      syncRunning();
-      els.svg.hidden = false; els.canvas.hidden = true;
-      return;
-    }
     try {
       const sc = await loadScript(id);
       if (state.id !== id) return;
       state.scene = sc;
-      els.svg.hidden = true; els.canvas.hidden = false;
+      view.cx = 0;
+      els.canvas.hidden = false;
       layout();
       paintNow();
+      if (typeof Adv !== 'undefined' && Adv.sceneChanged) Adv.sceneChanged(sc);
     } catch (err) {
       console.log(String(err));
-      if (id !== DEFAULT_ID) setScene(DEFAULT_ID, false);
+      if (id !== IDS[0]) setScene(IDS[0], false);
     }
   }
 
@@ -761,7 +875,7 @@ const InnScenes = (() => {
     box.setAttribute('role', 'status');
     root.append(canvas);
     document.body.append(box);
-    els = { root, canvas, quip: box, svg: root.querySelector('svg'), pick: null };
+    els = { root, canvas, quip: box, pick: null };
     if (new URLSearchParams(location.search).has('scenes')) els.pick = buildPicker();
     wireScene();
     addEventListener('resize', () => { layout(); hideQuip(); });
@@ -776,7 +890,9 @@ const InnScenes = (() => {
 
   return {
     register(def) { registry[def.id] = def; },
-    init, setScene, lastPaintMs: 0, ids: IDS,
+    init, setScene, setSpark, setAnimation, reduced, panTo, screenRect, nextQuip, hotAt,
+    scene: () => state.scene, id: () => state.id, view: () => view,
+    classic: CLASSIC, lastPaintMs: 0, ids: IDS,
   };
 })();
 

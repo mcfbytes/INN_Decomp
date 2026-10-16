@@ -19,55 +19,6 @@
     --pixel: "VT323", ui-monospace, "Cascadia Mono", Menlo, Consolas, monospace;
     --letterbox: #07060b;
     --scrim: rgba(8, 6, 20, .5);
-    --c-s0: #14123c;
-    --c-s1: #241a58;
-    --c-s2: #3c2470;
-    --c-s3: #6c3480;
-    --c-s4: #b04c7c;
-    --c-s5: #f08c5c;
-    --c-sun: #f4f0d8;
-    --c-sunhi: #ffffff;
-    --c-star: #e8e8ff;
-    --c-cl: #7c5c94;
-    --c-clsh: #54407c;
-    --c-mtn: #3c3468;
-    --c-volc: #2c2448;
-    --c-volcd: #1c1634;
-    --c-volch: #443868;
-    --c-lava: #ff7a24;
-    --c-sm: #5c4c78;
-    --c-h1: #5c4a58;
-    --c-h2: #4c5434;
-    --c-h3: #3c5428;
-    --c-tr: #982418;
-    --c-trl: #c04028;
-    --c-to: #c46418;
-    --c-tol: #e08c28;
-    --c-tg: #c89828;
-    --c-tgl: #e8bc48;
-    --c-trunk: #2c1c18;
-    --c-pine: #183a28;
-    --c-wc: #b8a088;
-    --c-wcd: #907860;
-    --c-wb: #8c4838;
-    --c-wbd: #6c3428;
-    --c-rb: #26386c;
-    --c-rbd: #1c2850;
-    --c-rr: #64261c;
-    --c-rrd: #481a14;
-    --c-aw: #a82c24;
-    --c-door: #2c1c18;
-    --c-win: #ffd24a;
-    --c-clockf: #ffe8a0;
-    --c-road: #8c7458;
-    --c-grass: #2c4c1c;
-    --c-lf1: #c46418;
-    --c-lf2: #982418;
-    --c-pole: #2c2018;
-    --c-box: #686878;
-    --c-led: #3cff6c;
-    --c-led2: #ff5040;
-    --star-o: 1;
   }
   @media (prefers-color-scheme: light) {
     :root:not([data-theme="dark"]) {
@@ -76,55 +27,6 @@
       --ok: #1f8a58; --warn: #b36a10; --bad: #c4301c;
       --shadow: 0 18px 50px -20px rgba(60, 40, 10, .45), 0 2px 6px rgba(60, 40, 10, .12);
       --letterbox: #14110f; --scrim: rgba(30, 20, 8, .35);
-      --c-s0: #4a98e0;
-      --c-s1: #68aeea;
-      --c-s2: #88c0f0;
-      --c-s3: #a8d2f4;
-      --c-s4: #c8e0f0;
-      --c-s5: #f0e6c4;
-      --c-sun: #ffe45c;
-      --c-sunhi: #fff6b0;
-      --c-star: #ffffff;
-      --c-cl: #ffffff;
-      --c-clsh: #c4d8ec;
-      --c-mtn: #8c98c0;
-      --c-volc: #7c5c6c;
-      --c-volcd: #5c4458;
-      --c-volch: #9c7c88;
-      --c-lava: #ff6a1c;
-      --c-sm: #a8a0b0;
-      --c-h1: #b49a4c;
-      --c-h2: #98a03c;
-      --c-h3: #7a9a34;
-      --c-tr: #c42c1c;
-      --c-trl: #e85030;
-      --c-to: #e8741c;
-      --c-tol: #f8a030;
-      --c-tg: #f0b830;
-      --c-tgl: #ffd860;
-      --c-trunk: #5c3a22;
-      --c-pine: #2c5a30;
-      --c-wc: #f2e2b6;
-      --c-wcd: #d4be8c;
-      --c-wb: #c0583c;
-      --c-wbd: #9c4030;
-      --c-rb: #38548c;
-      --c-rbd: #2a4070;
-      --c-rr: #8c3424;
-      --c-rrd: #6c2418;
-      --c-aw: #d83c2c;
-      --c-door: #5c3a22;
-      --c-win: #a4cce0;
-      --c-clockf: #fff6d8;
-      --c-road: #dcc080;
-      --c-grass: #4e7c28;
-      --c-lf1: #e8741c;
-      --c-lf2: #c42c1c;
-      --c-pole: #4a3424;
-      --c-box: #8c8c98;
-      --c-led: #3cff6c;
-      --c-led2: #ff5040;
-      --star-o: 0;
     }
   }
   * { box-sizing: border-box; }
@@ -135,71 +37,8 @@
   [hidden] { display: none !important; }
 
   /* ---- the landing scene (original pixel art, 320x200 grid) ---- */
-  .scene { position: fixed; inset: 0; z-index: 2; background: var(--c-s0); }
-  .scene svg { display: block; width: 100%; height: 100%; shape-rendering: crispEdges; }
-  .scene .s0 { fill: var(--c-s0); }
-  .scene .s1 { fill: var(--c-s1); }
-  .scene .s2 { fill: var(--c-s2); }
-  .scene .s3 { fill: var(--c-s3); }
-  .scene .s4 { fill: var(--c-s4); }
-  .scene .s5 { fill: var(--c-s5); }
-  .scene .sun { fill: var(--c-sun); }
-  .scene .sunhi { fill: var(--c-sunhi); }
-  .scene .star { fill: var(--c-star); }
-  .scene .cl { fill: var(--c-cl); }
-  .scene .clsh { fill: var(--c-clsh); }
-  .scene .mtn { fill: var(--c-mtn); }
-  .scene .volc { fill: var(--c-volc); }
-  .scene .volcd { fill: var(--c-volcd); }
-  .scene .volch { fill: var(--c-volch); }
-  .scene .lava { fill: var(--c-lava); }
-  .scene .sm { fill: var(--c-sm); }
-  .scene .h1 { fill: var(--c-h1); }
-  .scene .h2 { fill: var(--c-h2); }
-  .scene .h3 { fill: var(--c-h3); }
-  .scene .tr { fill: var(--c-tr); }
-  .scene .trl { fill: var(--c-trl); }
-  .scene .to { fill: var(--c-to); }
-  .scene .tol { fill: var(--c-tol); }
-  .scene .tg { fill: var(--c-tg); }
-  .scene .tgl { fill: var(--c-tgl); }
-  .scene .trunk { fill: var(--c-trunk); }
-  .scene .pine { fill: var(--c-pine); }
-  .scene .wc { fill: var(--c-wc); }
-  .scene .wcd { fill: var(--c-wcd); }
-  .scene .wb { fill: var(--c-wb); }
-  .scene .wbd { fill: var(--c-wbd); }
-  .scene .rb { fill: var(--c-rb); }
-  .scene .rbd { fill: var(--c-rbd); }
-  .scene .rr { fill: var(--c-rr); }
-  .scene .rrd { fill: var(--c-rrd); }
-  .scene .aw { fill: var(--c-aw); }
-  .scene .door { fill: var(--c-door); }
-  .scene .win { fill: var(--c-win); }
-  .scene .clockf { fill: var(--c-clockf); }
-  .scene .road { fill: var(--c-road); }
-  .scene .grass { fill: var(--c-grass); }
-  .scene .lf1 { fill: var(--c-lf1); }
-  .scene .lf2 { fill: var(--c-lf2); }
-  .scene .pole { fill: var(--c-pole); }
-  .scene .box { fill: var(--c-box); }
-  .scene .led { fill: var(--c-led); }
-  .scene .led2 { fill: var(--c-led2); }
-  .scene .stars { opacity: var(--star-o); }
-  .scene .wire { stroke: var(--c-pole); stroke-width: 1; }
-  .scene .roadl { stroke: var(--c-wc); }
-  .scene .cloud { animation: drift 160s linear infinite; }
-  .scene .cloud.c2 { animation-duration: 230s; animation-delay: -90s; }
-  .scene .cloud.c3 { animation-duration: 190s; animation-delay: -40s; }
-  .scene .cloud.c1 { animation-delay: -120s; }
-  .scene .smoke { animation: rise-smoke 9s ease-in-out infinite; }
-  .scene .led { animation: blink 1.6s steps(1) infinite; }
-  .scene .led2 { animation: blink 2.3s steps(1) infinite .4s; }
-  .scene .star:nth-child(3n) { animation: twinkle 3s steps(1) infinite; }
-  @keyframes drift { from { transform: translateX(-60px); } to { transform: translateX(380px); } }
-  @keyframes rise-smoke { 0%, 100% { transform: translateY(0); opacity: .9; } 50% { transform: translateY(-3px); opacity: .55; } }
+  .scene { position: fixed; inset: 0; z-index: 2; background: var(--letterbox); }
   @keyframes blink { 0% { opacity: 1; } 50% { opacity: .15; } }
-  @keyframes twinkle { 50% { opacity: .2; } }
 
   .scene { overflow: hidden; }
   #scene-canvas { position: absolute; display: block; image-rendering: pixelated; max-width: none; }
@@ -223,6 +62,86 @@
 
   body:not([data-view="setup"]):not([data-view="dialing"]) .scene,
   body:not([data-view="setup"]):not([data-view="dialing"]) #landing { display: none; }
+
+  /* ---- the adventure layer (adv.js): menu bar, narrator box, telephone box, inventory ---- */
+  body:not(.classic) #landing { display: none; }
+  .scene { touch-action: none; }
+  #scene-canvas { transition: left .5s ease-out; }
+  #scene-canvas.dragging { transition: none; }
+  body.dropping .scene::after { content: ""; position: absolute; inset: 10px; border: 4px dashed var(--accent); pointer-events: none;
+                                background: var(--accent-soft); }
+  .adv { font-family: var(--pixel); color: var(--text); }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; margin: 0; }
+  #menubar { position: fixed; top: 0; left: 0; right: 0; z-index: 12; height: 30px; display: flex; align-items: stretch; gap: 2px;
+             padding: 0 6px; background: var(--surface); border-bottom: 3px solid var(--border);
+             box-shadow: inset 0 -2px 0 var(--edge), 0 3px 0 rgba(0, 0, 0, .25); transform: translateY(-110%);
+             transition: transform .14s steps(3); font-size: 22px; line-height: 1; user-select: none; }
+  #menubar.show, #menubar.open, #menubar:focus-within { transform: none; }
+  @media (hover: none), (max-width: 700px) { #menubar { transform: none; } }
+  #menubar > button { border: 0; background: transparent; color: inherit; font: inherit; letter-spacing: .04em; padding: 0 12px; cursor: pointer; }
+  #menubar > button:hover, #menubar > button[aria-expanded="true"] { background: var(--accent); color: var(--accent-ink); }
+  #menubar .spacer { flex: 1; }
+  #menubar .score { align-self: center; position: relative; padding: 0 8px; letter-spacing: .05em; white-space: nowrap; }
+  #menubar .plus { position: absolute; right: 8px; top: 24px; color: var(--accent); font-size: 22px; animation: plus 1.4s steps(8) forwards;
+                   text-shadow: 1px 1px 0 var(--border); pointer-events: none; }
+  @keyframes plus { from { transform: translateY(0); opacity: 1; } to { transform: translateY(18px); opacity: 0; } }
+  #menupop { position: fixed; z-index: 13; min-width: 230px; padding: 3px; background: var(--surface); border: 3px solid var(--border);
+             box-shadow: inset 0 0 0 2px var(--edge), 4px 4px 0 rgba(0, 0, 0, .35); font-size: 22px; line-height: 1.1; }
+  #menupop .mi { display: flex; gap: 8px; padding: 5px 12px 5px 6px; cursor: pointer; white-space: nowrap; outline: none; }
+  #menupop .tick { width: 14px; text-align: center; }
+  #menupop .mi:focus, #menupop .mi:hover { background: var(--accent); color: var(--accent-ink); }
+  #menupop .mi[aria-disabled="true"] { opacity: .45; cursor: default; background: transparent; color: inherit; }
+  #menupop .sep { height: 2px; margin: 4px 2px; background: var(--faint); opacity: .5; }
+  #inv { position: fixed; right: 12px; top: 40px; z-index: 6; width: 44px; height: 44px; padding: 5px; background: var(--surface);
+         border: 3px solid var(--border); box-shadow: inset 0 0 0 2px var(--edge), 3px 3px 0 rgba(0, 0, 0, .35); }
+  #inv svg { display: block; width: 100%; height: 100%; }
+  #narr, #term { position: fixed; z-index: 8; background: var(--surface); border: 3px solid var(--border);
+                 box-shadow: inset 0 0 0 2px var(--edge), 4px 4px 0 rgba(0, 0, 0, .35); }
+  #narr { left: 50%; bottom: 16px; transform: translateX(-50%); width: min(680px, calc(100% - 32px)); padding: 10px 16px 12px;
+          font-size: 25px; line-height: 1.15; letter-spacing: .02em; max-height: 46vh; overflow: auto; cursor: default; }
+  @media (min-width: 701px) {
+    #narr[data-side="left"] { left: 16px; transform: none; }
+    #narr[data-side="right"] { left: auto; right: 16px; transform: none; }
+  }
+  #narr.bad { border-left-width: 10px; border-left-color: var(--bad); }
+  #narr p { margin: 0; }
+  #narr .text { min-height: 1.15em; }
+  .acts { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+  .acts:empty { display: none; }
+  .abtn { height: 30px; padding: 0 14px; border: 2px solid var(--border); background: var(--surface-2); color: var(--text);
+          font: 400 22px/1 var(--pixel); letter-spacing: .04em; cursor: pointer; box-shadow: inset 0 -3px 0 rgba(0, 0, 0, .18); }
+  .abtn.primary { background: var(--accent); color: var(--accent-ink); }
+  .abtn:hover { filter: brightness(1.1); }
+  .abtn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  #term { width: 360px; padding: 8px 12px 12px; }
+  #term.dock { left: 16px; right: 16px; bottom: 16px; width: auto; }
+  #term .bar { display: flex; justify-content: space-between; align-items: center; font-size: 22px; letter-spacing: .06em; color: var(--muted); }
+  #term .tlights { display: inline-flex; gap: 10px; font-style: normal; }
+  #term .tlights i { font-style: normal; font-size: 18px; padding-left: 14px; position: relative; }
+  #term .tlights i::before { content: ""; position: absolute; left: 0; top: 5px; width: 9px; height: 9px; background: #2c3a30; border: 1px solid var(--border); }
+  #term .tlights.tx i.tx::before { background: #3cff6c; box-shadow: 0 0 6px #3cff6c; }
+  #term .tlights.cd i.cd::before { background: #3cff6c; box-shadow: 0 0 6px #3cff6c; }
+  #term .tlights.err i.tx::before { background: #ff5040; box-shadow: 0 0 6px #ff5040; }
+  #term .who { margin: 2px 0 6px; font-size: 22px; color: var(--accent); }
+  #term .who:empty { display: none; }
+  #term .modem { min-height: 112px; }
+  #dlg { position: fixed; inset: 0; z-index: 16; display: grid; place-items: center; background: var(--scrim); padding: 16px; }
+  #dlg .box { width: min(440px, 100%); padding: 14px 16px 14px; background: var(--surface); border: 3px solid var(--border);
+              box-shadow: inset 0 0 0 2px var(--edge), 6px 6px 0 rgba(0, 0, 0, .35); }
+  #dlg h2 { margin: 0 0 4px; font: 400 30px/1.1 var(--pixel); }
+  #dlg .hint { margin: 0 0 10px; font: 400 21px/1.15 var(--pixel); color: var(--muted); }
+  #dlg .err { margin: 6px 0 0; font: 400 21px/1.15 var(--pixel); color: var(--bad); }
+  #dlg .err:empty { display: none; }
+  #iris { position: fixed; inset: 0; z-index: 30; pointer-events: all; background: transparent; }
+  body.adventure:not([data-view="setup"]):not([data-view="dialing"]) .adv { display: none; }
+  body.classic .adv { display: none; }
+  @media (max-width: 700px) {
+    #narr { width: auto; left: 16px; right: 16px; transform: none; }
+    #menubar { font-size: 20px; }
+    #menubar > button { padding: 0 8px; }
+    #menubar .score { font-size: 19px; padding: 0 4px; }
+    #menubar .score .lbl { display: none; }
+  }
 
   /* ---- cards ---- */
   .card { width: min(440px, 100%); background: var(--surface); color: var(--text); border: 3px solid var(--border);
@@ -382,9 +301,6 @@
     .drop svg { display: none; }
     .drop .hint { margin-bottom: 8px; }
   }
-  @media (max-width: 820px) and (orientation: portrait) {
-    .scene svg { position: absolute; left: -62%; bottom: 0; width: 180%; height: auto; aspect-ratio: 8 / 5; }
-  }
   @media (max-width: 520px) {
     #strip .lbl, .pill span { display: none; }
   }
@@ -393,409 +309,6 @@
 </head>
 <body data-view="setup">
 <div class="scene" aria-hidden="true">
-<svg viewBox="0 0 320 200" preserveAspectRatio="xMidYMax slice" xmlns="http://www.w3.org/2000/svg">
-<defs><pattern id="d0" width="2" height="2" patternUnits="userSpaceOnUse"><rect width="1" height="1" class="s1"/><rect x="1" y="1" width="1" height="1" class="s1"/></pattern><pattern id="d1" width="2" height="2" patternUnits="userSpaceOnUse"><rect width="1" height="1" class="s2"/><rect x="1" y="1" width="1" height="1" class="s2"/></pattern><pattern id="d2" width="2" height="2" patternUnits="userSpaceOnUse"><rect width="1" height="1" class="s3"/><rect x="1" y="1" width="1" height="1" class="s3"/></pattern><pattern id="d3" width="2" height="2" patternUnits="userSpaceOnUse"><rect width="1" height="1" class="s4"/><rect x="1" y="1" width="1" height="1" class="s4"/></pattern><pattern id="d4" width="2" height="2" patternUnits="userSpaceOnUse"><rect width="1" height="1" class="s5"/><rect x="1" y="1" width="1" height="1" class="s5"/></pattern></defs>
-<rect x="0" y="0" width="320" height="22" class="s0"/>
-<rect x="0" y="22" width="320" height="22" class="s1"/>
-<rect x="0" y="44" width="320" height="20" class="s2"/>
-<rect x="0" y="64" width="320" height="18" class="s3"/>
-<rect x="0" y="82" width="320" height="16" class="s4"/>
-<rect x="0" y="98" width="320" height="18" class="s5"/>
-<rect x="0" y="18" width="320" height="4" fill="url(#d0)"/>
-<rect x="0" y="40" width="320" height="4" fill="url(#d1)"/>
-<rect x="0" y="60" width="320" height="4" fill="url(#d2)"/>
-<rect x="0" y="78" width="320" height="4" fill="url(#d3)"/>
-<rect x="0" y="94" width="320" height="4" fill="url(#d4)"/>
-<g class="stars">
-<rect x="12" y="8" width="1" height="1" class="star"/>
-<rect x="40" y="20" width="1" height="1" class="star"/>
-<rect x="75" y="6" width="1" height="1" class="star"/>
-<rect x="110" y="26" width="1" height="1" class="star"/>
-<rect x="150" y="12" width="1" height="1" class="star"/>
-<rect x="188" y="30" width="1" height="1" class="star"/>
-<rect x="224" y="10" width="1" height="1" class="star"/>
-<rect x="268" y="24" width="1" height="1" class="star"/>
-<rect x="300" y="8" width="1" height="1" class="star"/>
-<rect x="30" y="40" width="1" height="1" class="star"/>
-<rect x="96" y="44" width="1" height="1" class="star"/>
-<rect x="210" y="48" width="1" height="1" class="star"/>
-<rect x="290" y="46" width="1" height="1" class="star"/>
-<rect x="130" y="4" width="1" height="1" class="star"/>
-<rect x="250" y="36" width="1" height="1" class="star"/>
-</g>
-<g class="orb" transform="translate(-97 -6)">
-<rect x="262" y="30" width="1" height="1" class="sun"/>
-<rect x="258" y="31" width="9" height="1" class="sun"/>
-<rect x="256" y="32" width="13" height="1" class="sun"/>
-<rect x="255" y="33" width="15" height="1" class="sun"/>
-<rect x="254" y="34" width="17" height="1" class="sun"/>
-<rect x="253" y="35" width="19" height="1" class="sun"/>
-<rect x="253" y="36" width="19" height="1" class="sun"/>
-<rect x="252" y="37" width="21" height="1" class="sun"/>
-<rect x="252" y="38" width="21" height="1" class="sun"/>
-<rect x="252" y="39" width="21" height="1" class="sun"/>
-<rect x="252" y="40" width="21" height="1" class="sun"/>
-<rect x="252" y="41" width="21" height="1" class="sun"/>
-<rect x="252" y="42" width="21" height="1" class="sun"/>
-<rect x="252" y="43" width="21" height="1" class="sun"/>
-<rect x="253" y="44" width="19" height="1" class="sun"/>
-<rect x="253" y="45" width="19" height="1" class="sun"/>
-<rect x="254" y="46" width="17" height="1" class="sun"/>
-<rect x="255" y="47" width="15" height="1" class="sun"/>
-<rect x="256" y="48" width="13" height="1" class="sun"/>
-<rect x="258" y="49" width="9" height="1" class="sun"/>
-<rect x="262" y="50" width="1" height="1" class="sun"/>
-<rect x="258" y="35" width="4" height="2" class="sunhi"/>
-<rect x="257" y="37" width="2" height="2" class="sunhi"/>
-</g>
-<g class="cloud c1"><g transform="translate(30 20)">
-<rect x="4" y="4" width="26" height="4" class="cl"/>
-<rect x="8" y="0" width="12" height="4" class="cl"/>
-<rect x="18" y="2" width="14" height="4" class="cl"/>
-<rect x="0" y="6" width="34" height="3" class="cl"/>
-<rect x="2" y="9" width="30" height="1" class="clsh"/>
-</g></g>
-<g class="cloud c2"><g transform="translate(150 38)">
-<rect x="4" y="4" width="36" height="4" class="cl"/>
-<rect x="8" y="0" width="16" height="4" class="cl"/>
-<rect x="25" y="2" width="19" height="4" class="cl"/>
-<rect x="0" y="6" width="47" height="3" class="cl"/>
-<rect x="2" y="9" width="42" height="1" class="clsh"/>
-</g></g>
-<g class="cloud c3"><g transform="translate(220 12)">
-<rect x="4" y="4" width="26" height="4" class="cl"/>
-<rect x="8" y="0" width="12" height="4" class="cl"/>
-<rect x="18" y="2" width="14" height="4" class="cl"/>
-<rect x="0" y="6" width="34" height="3" class="cl"/>
-<rect x="2" y="9" width="30" height="1" class="clsh"/>
-</g></g>
-<g class="cloud c2"><g transform="translate(90 54)">
-<rect x="4" y="4" width="26" height="4" class="cl"/>
-<rect x="8" y="0" width="12" height="4" class="cl"/>
-<rect x="18" y="2" width="14" height="4" class="cl"/>
-<rect x="0" y="6" width="34" height="3" class="cl"/>
-<rect x="2" y="9" width="30" height="1" class="clsh"/>
-</g></g>
-<polygon points="0,109 2,109 4,109 6,109 8,109 10,108 12,108 14,108 16,107 18,107 20,107 22,106 24,106 26,106 28,106 30,106 32,106 34,106 36,106 38,106 40,106 42,107 44,107 46,107 48,107 50,107 52,107 54,107 56,107 58,106 60,106 62,105 64,105 66,104 68,103 70,102 72,102 74,101 76,100 78,99 80,99 82,98 84,98 86,97 88,97 90,97 92,97 94,97 96,97 98,98 100,98 102,98 104,98 106,98 108,98 110,98 112,98 114,98 116,98 118,98 120,97 122,97 124,97 126,96 128,96 130,96 132,95 134,95 136,95 138,95 140,95 142,95 144,95 146,96 148,96 150,97 152,97 154,98 156,99 158,99 160,100 162,101 164,101 166,102 168,102 170,103 172,103 174,103 176,104 178,104 180,104 182,104 184,104 186,103 188,103 190,103 192,103 194,103 196,103 198,104 200,104 202,104 204,105 206,105 208,106 210,106 212,107 214,108 216,108 218,109 220,109 222,110 224,110 226,110 228,110 230,110 232,110 234,109 236,109 238,109 240,108 242,107 244,107 246,106 248,106 250,105 252,105 254,104 256,104 258,104 260,104 262,104 264,104 266,104 268,104 270,104 272,104 274,104 276,104 278,104 280,104 282,104 284,103 286,103 288,103 290,102 292,101 294,101 296,100 298,99 300,98 302,98 304,97 306,96 308,96 310,96 312,95 314,95 316,95 318,95 320,95 320,130 0,130" class="mtn"/>
-<g transform="translate(196 32) scale(.72)"><polygon points="6,118 36,92 52,78 60,70 80,70 88,78 104,92 132,118" class="volc"/>
-<polygon points="80,70 88,78 104,92 132,118 96,118 90,92" class="volcd"/>
-<rect x="60" y="69" width="20" height="2" class="lava"/>
-<rect x="66" y="71" width="8" height="1" class="lava"/>
-<polygon points="52,78 60,70 62,74 58,84 50,92 40,92" class="volch"/>
-<g class="smoke"><rect x="68" y="60" width="6" height="4" class="sm"/><rect x="72" y="52" width="8" height="5" class="sm"/><rect x="78" y="43" width="10" height="6" class="sm"/></g></g>
-<polygon points="0,114 2,114 4,113 6,113 8,112 10,112 12,111 14,111 16,111 18,111 20,111 22,111 24,111 26,111 28,110 30,110 32,110 34,110 36,109 38,109 40,108 42,107 44,107 46,106 48,105 50,105 52,104 54,104 56,104 58,104 60,104 62,104 64,104 66,104 68,105 70,105 72,106 74,107 76,107 78,108 80,108 82,109 84,109 86,109 88,110 90,110 92,110 94,110 96,110 98,110 100,110 102,110 104,111 106,111 108,111 110,112 112,112 114,113 116,113 118,114 120,115 122,115 124,116 126,116 128,116 130,116 132,116 134,116 136,116 138,116 140,115 142,114 144,114 146,113 148,113 150,112 152,111 154,111 156,110 158,110 160,110 162,110 164,110 166,110 168,109 170,109 172,109 174,109 176,109 178,109 180,108 182,108 184,107 186,107 188,106 190,106 192,105 194,105 196,104 198,104 200,104 202,104 204,104 206,104 208,104 210,105 212,105 214,106 216,106 218,107 220,108 222,108 224,109 226,110 228,110 230,110 232,111 234,111 236,111 238,111 240,111 242,111 244,111 246,111 248,111 250,112 252,112 254,112 256,113 258,113 260,114 262,114 264,115 266,115 268,116 270,116 272,116 274,116 276,116 278,116 280,116 282,115 284,115 286,114 288,113 290,113 292,112 294,111 296,111 298,110 300,110 302,109 304,109 306,109 308,108 310,108 312,108 314,108 316,108 318,108 320,108 320,200 0,200" class="h1"/>
-<polygon points="0,117 2,117 4,117 6,117 8,117 10,117 12,116 14,116 16,116 18,116 20,116 22,115 24,115 26,115 28,115 30,115 32,115 34,115 36,115 38,115 40,115 42,116 44,116 46,117 48,117 50,118 52,118 54,119 56,120 58,120 60,121 62,121 64,122 66,123 68,123 70,123 72,124 74,124 76,124 78,124 80,124 82,124 84,124 86,124 88,124 90,124 92,124 94,124 96,123 98,123 100,123 102,123 104,124 106,124 108,124 110,124 112,124 114,124 116,124 118,125 120,125 122,125 124,125 126,125 128,125 130,125 132,124 134,124 136,124 138,123 140,123 142,122 144,122 146,121 148,120 150,120 152,119 154,118 156,118 158,117 160,117 162,116 164,116 166,116 168,116 170,115 172,115 174,115 176,115 178,115 180,116 182,116 184,116 186,116 188,116 190,116 192,116 194,116 196,117 198,117 200,116 202,116 204,116 206,116 208,116 210,116 212,116 214,116 216,116 218,116 220,116 222,116 224,116 226,116 228,117 230,117 232,117 234,118 236,119 238,119 240,120 242,120 244,121 246,122 248,122 250,123 252,123 254,124 256,124 258,125 260,125 262,125 264,125 266,125 268,125 270,125 272,125 274,125 276,125 278,124 280,124 282,124 284,124 286,124 288,123 290,123 292,123 294,123 296,123 298,123 300,123 302,124 304,124 306,124 308,124 310,124 312,124 314,124 316,123 318,123 320,123 320,200 0,200" class="h2"/>
-<rect x="99" y="122" width="2" height="4" class="trunk"/>
-<rect x="99" y="113" width="2" height="2" class="tr"/>
-<rect x="98" y="114" width="4" height="2" class="tr"/>
-<rect x="97" y="115" width="6" height="2" class="tr"/>
-<rect x="96" y="117" width="8" height="2" class="tr"/>
-<rect x="97" y="118" width="6" height="2" class="tr"/>
-<rect x="98" y="117" width="2" height="2" class="trl"/>
-<rect x="111" y="121" width="2" height="3" class="trunk"/>
-<rect x="111" y="113" width="2" height="2" class="tg"/>
-<rect x="110" y="114" width="4" height="2" class="tg"/>
-<rect x="109" y="115" width="6" height="2" class="tg"/>
-<rect x="108" y="116" width="8" height="2" class="tg"/>
-<rect x="109" y="117" width="6" height="2" class="tg"/>
-<rect x="110" y="116" width="2" height="2" class="tgl"/>
-<rect x="127" y="123" width="2" height="4" class="trunk"/>
-<rect x="127" y="113" width="2" height="2" class="to"/>
-<rect x="126" y="114" width="4" height="2" class="to"/>
-<rect x="125" y="115" width="6" height="2" class="to"/>
-<rect x="124" y="117" width="8" height="2" class="to"/>
-<rect x="125" y="119" width="6" height="2" class="to"/>
-<rect x="126" y="117" width="2" height="2" class="tol"/>
-<rect x="267" y="120" width="2" height="4" class="trunk"/>
-<rect x="267" y="112" width="2" height="2" class="tr"/>
-<rect x="266" y="113" width="4" height="2" class="tr"/>
-<rect x="265" y="114" width="6" height="2" class="tr"/>
-<rect x="264" y="116" width="8" height="2" class="tr"/>
-<rect x="265" y="117" width="6" height="2" class="tr"/>
-<rect x="266" y="116" width="2" height="2" class="trl"/>
-<rect x="291" y="123" width="2" height="4" class="trunk"/>
-<rect x="291" y="114" width="2" height="2" class="to"/>
-<rect x="290" y="115" width="4" height="2" class="to"/>
-<rect x="289" y="116" width="6" height="2" class="to"/>
-<rect x="288" y="118" width="8" height="2" class="to"/>
-<rect x="289" y="119" width="6" height="2" class="to"/>
-<rect x="290" y="118" width="2" height="2" class="tol"/>
-<rect x="305" y="122" width="2" height="3" class="trunk"/>
-<rect x="305" y="114" width="2" height="2" class="tg"/>
-<rect x="304" y="115" width="4" height="2" class="tg"/>
-<rect x="303" y="116" width="6" height="2" class="tg"/>
-<rect x="302" y="117" width="8" height="2" class="tg"/>
-<rect x="303" y="118" width="6" height="2" class="tg"/>
-<rect x="304" y="117" width="2" height="2" class="tgl"/>
-<rect x="13" y="124" width="2" height="4" class="trunk"/>
-<rect x="13" y="114" width="2" height="2" class="to"/>
-<rect x="12" y="115" width="4" height="2" class="to"/>
-<rect x="11" y="116" width="6" height="2" class="to"/>
-<rect x="10" y="118" width="8" height="2" class="to"/>
-<rect x="11" y="120" width="6" height="2" class="to"/>
-<rect x="12" y="118" width="2" height="2" class="tol"/>
-<rect x="35" y="121" width="2" height="4" class="trunk"/>
-<rect x="35" y="113" width="2" height="2" class="tr"/>
-<rect x="34" y="114" width="4" height="2" class="tr"/>
-<rect x="33" y="115" width="6" height="2" class="tr"/>
-<rect x="32" y="117" width="8" height="2" class="tr"/>
-<rect x="33" y="118" width="6" height="2" class="tr"/>
-<rect x="34" y="117" width="2" height="2" class="trl"/>
-<rect x="53" y="123" width="2" height="4" class="trunk"/>
-<rect x="53" y="114" width="2" height="2" class="tg"/>
-<rect x="52" y="115" width="4" height="2" class="tg"/>
-<rect x="51" y="116" width="6" height="2" class="tg"/>
-<rect x="50" y="118" width="8" height="2" class="tg"/>
-<rect x="51" y="119" width="6" height="2" class="tg"/>
-<rect x="52" y="118" width="2" height="2" class="tgl"/>
-<rect x="77" y="123" width="2" height="3" class="trunk"/>
-<rect x="77" y="116" width="2" height="2" class="to"/>
-<rect x="76" y="116" width="4" height="2" class="to"/>
-<rect x="75" y="117" width="6" height="2" class="to"/>
-<rect x="74" y="119" width="8" height="2" class="to"/>
-<rect x="75" y="120" width="6" height="2" class="to"/>
-<rect x="76" y="119" width="2" height="2" class="tol"/>
-<rect x="88" y="123" width="2" height="3" class="trunk"/>
-<rect x="87" y="112" width="4" height="4" class="pine"/>
-<rect x="86" y="116" width="7" height="4" class="pine"/>
-<rect x="84" y="120" width="10" height="4" class="pine"/>
-<rect x="89" y="111" width="1" height="3" class="pine"/>
-<rect x="282" y="122" width="2" height="3" class="trunk"/>
-<rect x="281" y="112" width="4" height="4" class="pine"/>
-<rect x="280" y="116" width="7" height="4" class="pine"/>
-<rect x="278" y="120" width="10" height="4" class="pine"/>
-<rect x="283" y="111" width="1" height="3" class="pine"/>
-<polygon points="0,132 2,132 4,132 6,132 8,133 10,133 12,133 14,133 16,133 18,133 20,133 22,133 24,133 26,133 28,133 30,133 32,133 34,133 36,133 38,133 40,133 42,133 44,132 46,132 48,132 50,132 52,132 54,131 56,131 58,131 60,131 62,130 64,130 66,130 68,130 70,129 72,129 74,129 76,129 78,129 80,129 82,129 84,129 86,129 88,129 90,129 92,129 94,129 96,129 98,129 100,129 102,129 104,129 106,129 108,130 110,130 112,130 114,130 116,131 118,131 120,131 122,131 124,132 126,132 128,132 130,132 132,132 134,133 136,133 138,133 140,133 142,133 144,133 146,133 148,133 150,133 152,133 154,133 156,133 158,133 160,133 162,133 164,133 166,133 168,133 170,132 172,132 174,132 176,132 178,132 180,131 182,131 184,131 186,131 188,130 190,130 192,130 194,130 196,129 198,129 200,129 202,129 204,129 206,129 208,129 210,129 212,129 214,129 216,129 218,129 220,129 222,129 224,129 226,129 228,129 230,129 232,129 234,130 236,130 238,130 240,130 242,131 244,131 246,131 248,131 250,132 252,132 254,132 256,132 258,132 260,133 262,133 264,133 266,133 268,133 270,133 272,133 274,133 276,133 278,133 280,133 282,133 284,133 286,133 288,133 290,133 292,133 294,133 296,132 298,132 300,132 302,132 304,132 306,131 308,131 310,131 312,131 314,130 316,130 318,130 320,130 320,200 0,200" class="h3"/>
-<rect x="140" y="122" width="20" height="12" class="wc"/>
-<rect x="140" y="132" width="20" height="2" class="wcd"/>
-<polygon points="138,122 162,122 150,115" class="rb"/>
-<polygon points="151,116 162,122 151,122" class="rbd"/>
-<rect x="149" y="128" width="3" height="6" class="door"/>
-<rect x="140" y="122" width="4" height="3" class="aw"/>
-<rect x="144" y="122" width="4" height="3" class="wc"/>
-<rect x="148" y="122" width="4" height="3" class="aw"/>
-<rect x="152" y="122" width="4" height="3" class="wc"/>
-<rect x="156" y="122" width="4" height="3" class="aw"/>
-<rect x="143" y="127" width="3" height="3" class="win"/>
-<rect x="153" y="127" width="3" height="3" class="win"/>
-<rect x="166" y="120" width="22" height="14" class="wb"/>
-<rect x="166" y="132" width="22" height="2" class="wbd"/>
-<polygon points="164,120 190,120 177,110" class="rr"/>
-<polygon points="178,111 190,120 178,120" class="rrd"/>
-<rect x="176" y="128" width="3" height="6" class="door"/>
-<rect x="169" y="124" width="3" height="3" class="win"/>
-<rect x="180" y="124" width="3" height="3" class="win"/>
-<rect x="184" y="106" width="3" height="6" class="wbd"/>
-<rect x="207" y="90" width="8" height="24" class="wc"/>
-<rect x="207" y="90" width="8" height="1" class="wcd"/>
-<polygon points="205,90 217,90 211,80" class="rb"/>
-<rect x="211" y="76" width="1" height="5" class="door"/>
-<rect x="212" y="76" width="3" height="2" class="aw"/>
-<rect x="209" y="94" width="4" height="4" class="clockf"/>
-<rect x="211" y="95" width="1" height="2" class="door"/>
-<rect x="194" y="112" width="34" height="22" class="wc"/>
-<rect x="194" y="132" width="34" height="2" class="wcd"/>
-<polygon points="192,112 230,112 211,105" class="rb"/>
-<polygon points="212,106 230,112 212,112" class="rbd"/>
-<rect x="209" y="124" width="4" height="10" class="door"/>
-<rect x="200" y="118" width="3" height="4" class="win"/>
-<rect x="219" y="118" width="3" height="4" class="win"/>
-<rect x="200" y="126" width="3" height="4" class="win"/>
-<rect x="219" y="126" width="3" height="4" class="win"/>
-<rect x="234" y="122" width="20" height="12" class="wb"/>
-<rect x="234" y="132" width="20" height="2" class="wbd"/>
-<polygon points="232,122 256,122 244,114" class="rb"/>
-<polygon points="245,115 256,122 245,122" class="rbd"/>
-<rect x="243" y="128" width="3" height="6" class="door"/>
-<rect x="237" y="126" width="3" height="3" class="win"/>
-<rect x="246" y="126" width="3" height="3" class="win"/>
-<rect x="262" y="127" width="14" height="8" class="wc"/>
-<rect x="262" y="133" width="14" height="2" class="wcd"/>
-<polygon points="260,127 278,127 269,121" class="rr"/>
-<polygon points="270,122 278,127 270,127" class="rrd"/>
-<rect x="268" y="129" width="3" height="6" class="door"/>
-<rect x="264" y="129" width="3" height="3" class="win"/>
-<rect x="159" y="131" width="2" height="3" class="trunk"/>
-<rect x="159" y="125" width="2" height="2" class="to"/>
-<rect x="158" y="125" width="4" height="2" class="to"/>
-<rect x="157" y="126" width="6" height="2" class="to"/>
-<rect x="156" y="128" width="8" height="2" class="to"/>
-<rect x="157" y="129" width="6" height="2" class="to"/>
-<rect x="158" y="128" width="2" height="2" class="tol"/>
-<rect x="189" y="133" width="2" height="2" class="trunk"/>
-<rect x="189" y="127" width="2" height="2" class="tr"/>
-<rect x="188" y="127" width="4" height="2" class="tr"/>
-<rect x="187" y="128" width="6" height="2" class="tr"/>
-<rect x="186" y="129" width="8" height="2" class="tr"/>
-<rect x="187" y="130" width="6" height="2" class="tr"/>
-<rect x="188" y="129" width="2" height="2" class="trl"/>
-<rect x="257" y="132" width="2" height="3" class="trunk"/>
-<rect x="257" y="125" width="2" height="2" class="tg"/>
-<rect x="256" y="125" width="4" height="2" class="tg"/>
-<rect x="255" y="126" width="6" height="2" class="tg"/>
-<rect x="254" y="128" width="8" height="2" class="tg"/>
-<rect x="255" y="129" width="6" height="2" class="tg"/>
-<rect x="256" y="128" width="2" height="2" class="tgl"/>
-<rect x="229" y="135" width="2" height="2" class="trunk"/>
-<rect x="229" y="129" width="2" height="2" class="to"/>
-<rect x="228" y="129" width="4" height="2" class="to"/>
-<rect x="227" y="130" width="6" height="2" class="to"/>
-<rect x="226" y="131" width="8" height="2" class="to"/>
-<rect x="227" y="132" width="6" height="2" class="to"/>
-<rect x="228" y="131" width="2" height="2" class="tol"/>
-<rect x="133" y="132" width="2" height="3" class="trunk"/>
-<rect x="133" y="126" width="2" height="2" class="tr"/>
-<rect x="132" y="126" width="4" height="2" class="tr"/>
-<rect x="131" y="127" width="6" height="2" class="tr"/>
-<rect x="130" y="129" width="8" height="2" class="tr"/>
-<rect x="131" y="130" width="6" height="2" class="tr"/>
-<rect x="132" y="129" width="2" height="2" class="trl"/>
-<polygon points="210,134 206,137 203,140 200,142 197,145 193,148 190,150 186,153 181,156 176,159 170,162 163,164 156,167 148,170 140,172 132,175 123,178 115,181 108,184 102,186 96,189 91,192 88,194 86,197 84,200 116,200 116,197 117,194 119,192 122,189 126,186 131,184 137,181 143,178 150,175 157,172 164,170 170,167 176,164 181,162 186,159 190,156 194,153 197,150 199,148 202,145 204,142 206,140 209,137 212,134" class="road"/>
-<polyline fill="none" class="roadl" stroke-width="1" stroke-dasharray="3 5" points="185,156 181,158 175,161 169,164 162,167 155,169 148,172 140,175 133,178 126,180 119,183 113,186 108,189 105,191 102,194 100,197 100,200"/>
-<rect x="21" y="165" width="2" height="13" class="trunk"/>
-<rect x="17" y="138" width="10" height="6" class="to"/>
-<rect x="13" y="141" width="18" height="6" class="to"/>
-<rect x="11" y="145" width="22" height="6" class="to"/>
-<rect x="9" y="151" width="26" height="6" class="to"/>
-<rect x="12" y="156" width="20" height="6" class="to"/>
-<rect x="16" y="151" width="6" height="2" class="tol"/>
-<rect x="49" y="180" width="2" height="10" class="trunk"/>
-<rect x="46" y="158" width="8" height="5" class="tr"/>
-<rect x="43" y="161" width="14" height="5" class="tr"/>
-<rect x="41" y="164" width="18" height="5" class="tr"/>
-<rect x="40" y="168" width="20" height="5" class="tr"/>
-<rect x="42" y="172" width="16" height="5" class="tr"/>
-<rect x="45" y="168" width="5" height="2" class="trl"/>
-<rect x="295" y="159" width="2" height="13" class="trunk"/>
-<rect x="291" y="132" width="10" height="6" class="tr"/>
-<rect x="287" y="135" width="18" height="6" class="tr"/>
-<rect x="285" y="139" width="22" height="6" class="tr"/>
-<rect x="283" y="145" width="26" height="6" class="tr"/>
-<rect x="286" y="150" width="20" height="6" class="tr"/>
-<rect x="290" y="145" width="6" height="2" class="trl"/>
-<rect x="271" y="180" width="2" height="10" class="trunk"/>
-<rect x="268" y="160" width="8" height="5" class="to"/>
-<rect x="265" y="163" width="14" height="5" class="to"/>
-<rect x="263" y="166" width="18" height="5" class="to"/>
-<rect x="262" y="170" width="20" height="5" class="to"/>
-<rect x="264" y="174" width="16" height="5" class="to"/>
-<rect x="267" y="170" width="5" height="2" class="tol"/>
-<rect x="7" y="185" width="2" height="11" class="trunk"/>
-<rect x="4" y="162" width="8" height="5" class="tg"/>
-<rect x="1" y="165" width="14" height="5" class="tg"/>
-<rect x="-1" y="168" width="18" height="5" class="tg"/>
-<rect x="-3" y="173" width="22" height="5" class="tg"/>
-<rect x="0" y="177" width="16" height="5" class="tg"/>
-<rect x="3" y="173" width="5" height="2" class="tgl"/>
-<rect x="311" y="182" width="2" height="10" class="trunk"/>
-<rect x="308" y="160" width="8" height="5" class="tg"/>
-<rect x="305" y="163" width="14" height="5" class="tg"/>
-<rect x="303" y="166" width="18" height="5" class="tg"/>
-<rect x="302" y="170" width="20" height="5" class="tg"/>
-<rect x="304" y="174" width="16" height="5" class="tg"/>
-<rect x="307" y="170" width="5" height="2" class="tgl"/>
-<rect x="249" y="160" width="2" height="6" class="trunk"/>
-<rect x="248" y="148" width="4" height="3" class="tg"/>
-<rect x="246" y="149" width="8" height="3" class="tg"/>
-<rect x="245" y="151" width="10" height="3" class="tg"/>
-<rect x="244" y="154" width="12" height="3" class="tg"/>
-<rect x="246" y="156" width="8" height="3" class="tg"/>
-<rect x="247" y="154" width="3" height="2" class="tgl"/>
-<rect x="119" y="148" width="2" height="4" class="trunk"/>
-<rect x="119" y="138" width="2" height="2" class="to"/>
-<rect x="118" y="139" width="4" height="2" class="to"/>
-<rect x="117" y="140" width="6" height="2" class="to"/>
-<rect x="116" y="142" width="8" height="2" class="to"/>
-<rect x="117" y="144" width="6" height="2" class="to"/>
-<rect x="118" y="142" width="2" height="2" class="tol"/>
-<rect x="89" y="159" width="2" height="5" class="trunk"/>
-<rect x="88" y="148" width="4" height="2" class="tr"/>
-<rect x="87" y="149" width="6" height="2" class="tr"/>
-<rect x="86" y="151" width="8" height="2" class="tr"/>
-<rect x="85" y="153" width="10" height="2" class="tr"/>
-<rect x="86" y="155" width="8" height="2" class="tr"/>
-<rect x="88" y="153" width="2" height="2" class="trl"/>
-<rect x="291" y="146" width="2" height="4" class="trunk"/>
-<rect x="291" y="136" width="2" height="2" class="to"/>
-<rect x="290" y="137" width="4" height="2" class="to"/>
-<rect x="289" y="138" width="6" height="2" class="to"/>
-<rect x="288" y="140" width="8" height="2" class="to"/>
-<rect x="289" y="142" width="6" height="2" class="to"/>
-<rect x="290" y="140" width="2" height="2" class="tol"/>
-<rect x="66" y="167" width="2" height="3" class="trunk"/>
-<rect x="65" y="150" width="4" height="4" class="pine"/>
-<rect x="64" y="154" width="7" height="4" class="pine"/>
-<rect x="62" y="158" width="10" height="4" class="pine"/>
-<rect x="61" y="162" width="13" height="4" class="pine"/>
-<rect x="59" y="166" width="16" height="4" class="pine"/>
-<rect x="67" y="149" width="1" height="3" class="pine"/>
-<rect x="236" y="173" width="2" height="3" class="trunk"/>
-<rect x="235" y="156" width="4" height="4" class="pine"/>
-<rect x="234" y="160" width="7" height="4" class="pine"/>
-<rect x="232" y="164" width="10" height="4" class="pine"/>
-<rect x="231" y="168" width="13" height="4" class="pine"/>
-<rect x="229" y="172" width="16" height="4" class="pine"/>
-<rect x="237" y="155" width="1" height="3" class="pine"/>
-<rect x="20" y="185" width="1" height="3" class="grass"/>
-<rect x="22" y="186" width="1" height="2" class="grass"/>
-<rect x="24" y="185" width="1" height="3" class="grass"/>
-<rect x="60" y="196" width="1" height="3" class="grass"/>
-<rect x="62" y="197" width="1" height="2" class="grass"/>
-<rect x="64" y="196" width="1" height="3" class="grass"/>
-<rect x="150" y="190" width="1" height="3" class="grass"/>
-<rect x="152" y="191" width="1" height="2" class="grass"/>
-<rect x="154" y="190" width="1" height="3" class="grass"/>
-<rect x="170" y="178" width="1" height="3" class="grass"/>
-<rect x="172" y="179" width="1" height="2" class="grass"/>
-<rect x="174" y="178" width="1" height="3" class="grass"/>
-<rect x="240" y="190" width="1" height="3" class="grass"/>
-<rect x="242" y="191" width="1" height="2" class="grass"/>
-<rect x="244" y="190" width="1" height="3" class="grass"/>
-<rect x="190" y="170" width="1" height="3" class="grass"/>
-<rect x="192" y="171" width="1" height="2" class="grass"/>
-<rect x="194" y="170" width="1" height="3" class="grass"/>
-<rect x="106" y="184" width="1" height="3" class="grass"/>
-<rect x="108" y="185" width="1" height="2" class="grass"/>
-<rect x="110" y="184" width="1" height="3" class="grass"/>
-<rect x="280" y="182" width="1" height="3" class="grass"/>
-<rect x="282" y="183" width="1" height="2" class="grass"/>
-<rect x="284" y="182" width="1" height="3" class="grass"/>
-<rect x="36" y="188" width="2" height="1" class="lf1"/>
-<rect x="44" y="192" width="2" height="1" class="lf2"/>
-<rect x="138" y="172" width="2" height="1" class="lf1"/>
-<rect x="147" y="176" width="2" height="1" class="lf2"/>
-<rect x="226" y="184" width="2" height="1" class="lf1"/>
-<rect x="262" y="196" width="2" height="1" class="lf2"/>
-<rect x="180" y="194" width="2" height="1" class="lf1"/>
-<rect x="100" y="196" width="2" height="1" class="lf2"/>
-<rect x="13" y="118" width="2" height="82" class="pole"/>
-<rect x="10" y="121" width="8" height="1" class="pole"/>
-<rect x="61" y="124" width="2" height="48" class="pole"/>
-<rect x="58" y="127" width="8" height="1" class="pole"/>
-<rect x="101" y="126" width="2" height="32" class="pole"/>
-<rect x="99" y="129" width="6" height="1" class="pole"/>
-<rect x="129" y="128" width="2" height="22" class="pole"/>
-<rect x="127" y="131" width="6" height="1" class="pole"/>
-<rect x="149" y="127" width="2" height="15" class="pole"/>
-<rect x="147" y="130" width="6" height="1" class="pole"/>
-<rect x="162" y="128" width="2" height="10" class="pole"/>
-<rect x="160" y="131" width="6" height="1" class="pole"/>
-<polyline fill="none" class="wire" points="-6,116 -5,117 -3,117 -2,118 0,118 1,119 3,119 4,119 5,119 7,120 8,120 10,120 11,119 13,119 14,119"/>
-<polyline fill="none" class="wire" points="14,119 17,121 21,122 24,123 28,124 31,125 35,126 38,126 41,127 45,127 48,127 52,127 55,126 59,126 62,125"/>
-<polyline fill="none" class="wire" points="62,125 65,126 68,127 71,128 73,129 76,129 79,129 82,130 85,130 88,130 91,129 93,129 96,128 99,128 102,127"/>
-<polyline fill="none" class="wire" points="102,127 104,128 106,129 108,129 110,130 112,130 114,130 116,131 118,131 120,131 122,130 124,130 126,130 128,130 130,129"/>
-<polyline fill="none" class="wire" points="130,129 131,129 133,130 134,130 136,130 137,130 139,130 140,130 141,130 143,130 144,130 146,129 147,129 149,129 150,128"/>
-<polyline fill="none" class="wire" points="150,128 151,128 152,129 153,129 154,129 155,129 156,130 156,130 157,130 158,130 159,130 160,130 161,129 162,129 163,129"/>
-<polyline fill="none" class="wire" points="-6,120 -5,121 -3,121 -2,122 0,122 1,123 3,123 4,123 5,123 7,124 8,124 10,124 11,123 13,123 14,123"/>
-<polyline fill="none" class="wire" points="14,123 17,125 21,126 24,127 28,128 31,129 35,130 38,130 41,131 45,131 48,131 52,131 55,130 59,130 62,129"/>
-<polyline fill="none" class="wire" points="62,129 65,130 68,131 71,132 73,133 76,133 79,133 82,134 85,134 88,134 91,133 93,133 96,132 99,132 102,131"/>
-<polyline fill="none" class="wire" points="102,131 104,132 106,133 108,133 110,134 112,134 114,134 116,135 118,135 120,135 122,134 124,134 126,134 128,134 130,133"/>
-<polyline fill="none" class="wire" points="130,133 131,133 133,134 134,134 136,134 137,134 139,134 140,134 141,134 143,134 144,134 146,133 147,133 149,133 150,132"/>
-<polyline fill="none" class="wire" points="150,132 151,132 152,133 153,133 154,133 155,133 156,134 156,134 157,134 158,134 159,134 160,134 161,133 162,133 163,133"/>
-<rect x="17" y="150" width="9" height="7" class="box"/>
-<rect x="19" y="152" width="2" height="2" class="led"/>
-<rect x="22" y="152" width="2" height="2" class="led2"/>
-</svg>
 </div>
 
 <main id="landing">
@@ -918,6 +431,7 @@
 
 <script src="zip.js"></script>
 <script src="saves.js"></script>
+<script src="adv.js"></script>
 <script src="scene.js"></script>
 <script src="page.js"></script>
 {{{ SCRIPT }}}
