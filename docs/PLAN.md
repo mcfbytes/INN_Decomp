@@ -94,6 +94,10 @@ produces the game.
       The original data files are still read at run time. Still open: Sound Blaster digital audio on
       the native path, and an Asyncify fallback for browsers without JSPI. Details in [native.md](native.md).
 
+Hosting (ledgered 2026-10-16 in innkeeper's `docs/PLAN.md` Phase 7): the public hybrid web build on Azure
+Static Web Apps, `innkeeperd` on Azure Container Apps scaled 0 to 1, and an optional OIDC sign-in that
+provisions the drive's account and binds the WebSocket. The lifted and native builds are not published.
+
 Later (noted 2026-10-15): optionally run the older TSN 2.1 media as well. Its binaries differ from INN's,
 so lifts do not hook and it runs on the interpreter. It needs an installed TSN folder (the sets are
 install media), a page that finds the TSN program, a TSN land catalog in `innkeeperd`, and per-land
