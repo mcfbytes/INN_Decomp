@@ -113,6 +113,11 @@ void uart_init(Machine *m);
 int uart_attach(Machine *m, int com, SerialLink link);
 /* The link attached to COM1/COM2 (NULL for a bad port number). */
 SerialLink *uart_link(Machine *m, int com);
+/* Link constructors, shared by the UART and the native host link (host_link.h). A failed
+ * construction returns a link whose send is NULL. The TCP link connects in the background; the
+ * WebSocket one exists in browser builds only. */
+SerialLink serial_link_tcp(const char *host, int port);
+SerialLink serial_link_ws(const char *url);
 /* Raw TCP client link to e.g. innkeeperd's line port; 0 on success, -1 on failure. */
 int uart_attach_tcp(Machine *m, int com, const char *host, int port);
 /* Browser builds: WebSocket link (ws:// or wss:// URL, binary frames of raw bytes); the native

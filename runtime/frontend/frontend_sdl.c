@@ -17,6 +17,9 @@
 #include "input_script.h"
 #include "exec_stub.h"
 #include "host_rules.h"
+#if INN_NATIVE_HW
+#include "host_link.h"
+#endif
 #include "machine.h"
 #if __has_include("dos.h")
 #include "dos.h"
@@ -619,6 +622,10 @@ static int parse_args(int argc, char **argv, Options *o)
 
 static int attach_com1(Machine *m, const char *spec)
 {
+#if INN_NATIVE_HW
+    /* The converted drivers read the link through the host API, not the UART. */
+    return host_link_open(m, spec);
+#endif
     if (!strncmp(spec, "ws://", 5) || !strncmp(spec, "wss://", 6))
         return uart_attach_ws(m, UART_COM1, spec);
     char host[256];

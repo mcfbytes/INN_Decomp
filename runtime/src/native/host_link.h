@@ -8,9 +8,13 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "devices.h"
 #include "machine.h"
 
 int host_link_open(Machine *m, const char *spec);      /* host:port or ws:// / wss:// URL */
+/* Takes ownership of a link built elsewhere (tests, other transports) in place of host_link_open. */
+int host_link_attach(Machine *m, SerialLink link);
+void host_link_close(Machine *m);
 bool host_link_carrier(Machine *m);                    /* connected: DCD, DSR and CTS */
 int host_link_send(Machine *m, const uint8_t *buf, int len); /* bytes taken; fewer while connecting */
 int host_link_recv(Machine *m, uint8_t *buf, int cap);
@@ -19,7 +23,11 @@ void host_link_break(Machine *m);                      /* sends the CR stand-in 
 /* The driver's ring pump (the UART interrupt's work, done without a UART) lives with the lifted driver
  * and registers itself here; host_link_pump runs it at safe points in native mode and as a machine
  * ticker in emulated mode (games call TSNEXEC meanwhile). */
-void host_link_set_pump(Machine *m, void (*pump)(Machine *m));
+void host_link_set_pump(Machine *m, void (*pump)(Machine *m)); /* NULL unregisters */
+/* Throttled to one run per millisecond of emulated time, and not while interrupts are held (a shadow
+ * run); the driver's own kick calls its pump directly. */
 void host_link_pump(Machine *m);
+/* Runs the pump now, whatever the throttle, for bytes the driver just queued. Not re-entered. */
+void host_link_kick(Machine *m);
 
 #endif
