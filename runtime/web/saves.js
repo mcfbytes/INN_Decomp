@@ -10,8 +10,11 @@ const InnSaves = (() => {
   const REQUEST_TIMEOUT_MS = 15000;
   const STATE_PREFIX = 'inn.saves.';
   const FIXED = ['INN\\YSERBIUS\\MYCHARS.DAT', 'INN\\YSERBIUS\\AUTOMAPS.DAT',
-    'INN\\TWINION\\TWINCHAR.DAT', 'INN\\TWINION\\AUTOMAPS.DAT', 'INN\\PLAYER.DIR'];
-  const PERSONA = /^INN\\([A-Z0-9_$-]{1,8})\.DTA$/;
+    'INN\\TWINION\\TWINCHAR.DAT', 'INN\\TWINION\\AUTOMAPS.DAT', 'INN\\PLAYER.DIR',
+    'INN\\LL\\PLAYER.DIR', 'INN\\SL\\PLAYER.DIR'];
+  // Personas: the hub's, CasinoLand's (LL) and SierraLand's (SL); the CasinoLand bankroll.
+  const PERSONA = /^INN\\(?:LL\\|SL\\)?([A-Z0-9_$-]{1,8})\.DTA$/;
+  const BANKROLL = /^INN\\LL\$\$[0-9]{1,4}\.DAT$/;
   const PASSWORD_STEM = 'PASS_SET';
 
   let env = null;            // { fs, drive, log, notify, persist, send, status }
@@ -29,7 +32,7 @@ const InnSaves = (() => {
   // The server's allowlist, mirrored so the page does not offer what the host would refuse.
   function canonical(raw) {
     const path = raw.replace(/\//g, '\\').toUpperCase().replace(/^\\/, '');
-    if (FIXED.includes(path)) return path;
+    if (FIXED.includes(path) || BANKROLL.test(path)) return path;
     const m = PERSONA.exec(path);
     return m && m[1] !== PASSWORD_STEM ? path : null;
   }
@@ -128,10 +131,11 @@ const InnSaves = (() => {
   // Every allowlisted file the drive has now.
   function localPaths() {
     const found = FIXED.filter((rel) => hostPath(rel));
-    const inn = hostPath('INN');
-    if (inn) {
-      for (const name of env.fs.readdir(inn)) {
-        const rel = canonical(`INN\\${name}`);
+    for (const dir of ['INN', 'INN\\LL', 'INN\\SL']) {
+      const host = hostPath(dir);
+      if (!host) continue;
+      for (const name of env.fs.readdir(host)) {
+        const rel = canonical(`${dir}\\${name}`);
         if (rel && !found.includes(rel)) found.push(rel);
       }
     }

@@ -76,7 +76,9 @@ repository; this is the browser side.
   `Module.sendControl(text)` sends one (a 1 MiB file fits; the text is staged in the heap, not on the
   stack). `runtime/web/saves.js` (`InnSaves`) is the only user.
 - **Which files.** `INN\YSERBIUS\MYCHARS.DAT`, `AUTOMAPS.DAT`, `INN\TWINION\TWINCHAR.DAT`, `AUTOMAPS.DAT`,
-  `INN\PLAYER.DIR` and `INN\*.DTA` except `PASS_SET.DTA`, which never leaves the browser. The host
+  `INN\PLAYER.DIR` and `INN\*.DTA` except `PASS_SET.DTA`, which never leaves the browser; the same two in
+  `INN\LL` and `INN\SL` (CasinoLand and SierraLand personas) and the CasinoLand bankroll `INN\LL$$<n>.DAT`
+  (`LLSYSTEM.DAT`, CasinoLand's access password, stays local). The host
   enforces the same list. Names are matched without regard to case against the drive's own spelling.
 - **When.** The host sends a manifest as soon as the line has logged on (`LoginAccepted`); before that it
   answers `not_logged_on`. For each path, comparing the local SHA-256 with the hash and version last
