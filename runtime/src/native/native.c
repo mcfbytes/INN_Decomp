@@ -56,6 +56,12 @@ void native_set_active(Machine *m, bool on)
     if (on == m->native)
         return;
     m->native = on;
+#ifdef INN_NATIVE
+    if (on)
+        host_video_init(m);
+    else
+        host_video_to_vga(m);
+#endif
     if (on) {
         native_reanchor(m);
         if (!n->cfg.strict && !dosrt_interp_profile) {

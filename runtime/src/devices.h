@@ -68,6 +68,12 @@ uint8_t vga_mode(Machine *m);
 /* One DAC colour. Stored 6-bit, the same mask a 3C9h write applies. */
 void vga_dac_set(Machine *m, uint8_t index, uint8_t r, uint8_t g, uint8_t b);
 void vga_dac_get(Machine *m, uint8_t index, uint8_t rgb[3]);
+/* Mixed-mode hand-off (host_video_to_vga / host_video_from_vga). mem is the 128 KB window A0000-BFFFF
+ * as plain bytes; only mode 13h (pixels at the start) and 03h (text cells at +0x18000) are carried.
+ * The load keeps the registers when the mode is unchanged and never clears; both return false for a
+ * mode they cannot carry. */
+bool vga_load_state(Machine *m, uint8_t mode, const uint8_t dac[256][3], const uint8_t *mem);
+bool vga_read_state(Machine *m, uint8_t *mode, uint8_t dac[256][3], uint8_t *mem);
 /* Renders the current frame as 0xAARRGGBB pixels into a VGA_MAX_W*VGA_MAX_H buffer. */
 void vga_render(Machine *m, uint32_t *rgba_out, int *w, int *h);
 /* Writes a PPM (P6) of the current frame; returns 0 or -1 on I/O error. */

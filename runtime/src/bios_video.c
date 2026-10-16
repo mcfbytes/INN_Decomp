@@ -1,7 +1,12 @@
 /* INT 10h video BIOS: mode set, cursor, text output (text and graphics modes), pixels,
  * palette and DAC services, font pointers and VGA identification. */
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
 #include "bios_internal.h"
 #include "font.h"
+#include "host_video.h"
 #include "vga_internal.h"
 
 enum {
@@ -15,6 +20,7 @@ enum {
     OVERSCAN_REG = 0x11,
     VGA_COLOR_DCC = 0x08, VGA_MEMORY_256K = 0x03,
     VESA_FAILED = 0x0100,
+    PIXELS_BASE = 0xA0000, PIXELS_W = 320, PIXELS_H = 200,
 };
 
 /* What the BIOS tells programs about each mode. */
@@ -39,6 +45,28 @@ static const ModeInfo *mode_info(uint8_t mode)
 }
 
 static bool is_text(Machine *m) { return vga_mode(m) == MODE_TEXT; }
+
+/* Graphics-mode pixels: the host video keeps mode 13h as plain bytes at A0000. */
+static void px_put(Machine *m, int x, int y, uint8_t color, bool xor_mode)
+{
+    if (!m->native_video) {
+        vga_put_pixel(m, x, y, color, xor_mode);
+        return;
+    }
+    if (x < 0 || y < 0 || x >= PIXELS_W || y >= PIXELS_H)
+        return;
+    uint32_t at = PIXELS_BASE + (uint32_t)(y * PIXELS_W + x);
+    mem_wr8(m, at, xor_mode ? (uint8_t)(mem_rd8(m, at) ^ color) : color);
+}
+
+static uint8_t px_get(Machine *m, int x, int y)
+{
+    if (!m->native_video)
+        return vga_get_pixel(m, x, y);
+    if (x < 0 || y < 0 || x >= PIXELS_W || y >= PIXELS_H)
+        return 0;
+    return mem_rd8(m, PIXELS_BASE + (uint32_t)(y * PIXELS_W + x));
+}
 
 /* ---- cursor ---- */
 
@@ -82,7 +110,7 @@ static void draw_glyph(Machine *m, int col, int row, uint8_t ch, uint8_t color)
             bool on = bits & (0x80 >> x);
             if (xor_mode && !on)
                 continue;
-            vga_put_pixel(m, col * 8 + x, row * height + y, on ? (uint8_t)(color & 0x7F) : 0, xor_mode);
+            px_put(m, col * 8 + x, row * height + y, on ? (uint8_t)(color & 0x7F) : 0, xor_mode);
         }
     }
 }
@@ -109,7 +137,7 @@ static void copy_cell(Machine *m, uint8_t page, int col, int src_row, int dst_ro
     int h = bda_rd8(m, BDA_CHAR_HEIGHT);
     for (int y = 0; y < h; y++)
         for (int x = 0; x < 8; x++)
-            vga_put_pixel(m, col * 8 + x, dst_row * h + y, vga_get_pixel(m, col * 8 + x, src_row * h + y), false);
+            px_put(m, col * 8 + x, dst_row * h + y, px_get(m, col * 8 + x, src_row * h + y), false);
 }
 
 static void blank_cell(Machine *m, uint8_t page, int col, int row, uint8_t attr)
@@ -121,7 +149,7 @@ static void blank_cell(Machine *m, uint8_t page, int col, int row, uint8_t attr)
     int h = bda_rd8(m, BDA_CHAR_HEIGHT);
     for (int y = 0; y < h; y++)
         for (int x = 0; x < 8; x++)
-            vga_put_pixel(m, col * 8 + x, row * h + y, attr, false);
+            px_put(m, col * 8 + x, row * h + y, attr, false);
 }
 
 typedef struct Window { int top, left, bottom, right; } Window;
@@ -184,7 +212,11 @@ static void set_mode(Machine *m, uint8_t al)
     uint8_t mode = al & MODE_MASK;
     if (mode <= 0x02 || mode == 0x07)
         mode = MODE_TEXT; /* other text modes fall back to 80x25 colour */
-    if (!vga_set_mode(m, mode, !(al & MODE_NO_CLEAR))) {
+    if (m->native_video) {
+        if (mode != MODE_TEXT && mode != HOST_VIDEO_320X200X8)
+            fatal("native: INT 10h mode %02X", mode);
+        host_video_set_mode(m, mode, !(al & MODE_NO_CLEAR));
+    } else if (!vga_set_mode(m, mode, !(al & MODE_NO_CLEAR))) {
         log_msg("int10: unsupported video mode %02X", mode);
         return;
     }
@@ -225,6 +257,22 @@ static void dac_block(Machine *m, bool write)
 {
     Vga *v = vga_state(m);
     uint32_t addr = real_addr(ES, DX);
+    if (m->native_video) {
+        uint8_t rgb[VGA_DAC_SIZE * 3];
+        int count = BX + CX > VGA_DAC_SIZE ? VGA_DAC_SIZE - BX : CX;
+        if (count <= 0)
+            return;
+        if (write) {
+            for (int i = 0; i < count * 3; i++)
+                rgb[i] = mem_rd8(m, addr + (uint32_t)i) & 0x3F;
+            host_video_set_dac(m, (uint8_t)BX, count, rgb);
+        } else {
+            host_video_get_dac(m, (uint8_t)BX, count, rgb);
+            for (int i = 0; i < count * 3; i++)
+                mem_wr8(m, addr + (uint32_t)i, rgb[i]);
+        }
+        return;
+    }
     for (int i = 0; i < CX && BX + i < VGA_DAC_SIZE; i++)
         for (int c = 0; c < 3; c++, addr++) {
             if (write)
@@ -256,10 +304,23 @@ static void palette_service(Machine *m)
             mem_wr8(m, real_addr(ES, (uint16_t)(DX + i)), v->attr[i < ATTR_PALETTE_REGS ? i : OVERSCAN_REG]);
         break;
     case 0x10:
+        if (m->native_video) {
+            const uint8_t rgb[3] = { DH & 0x3F, CH & 0x3F, CL & 0x3F };
+            host_video_set_dac(m, BL, 1, rgb);
+            break;
+        }
         v->dac[BL][0] = DH & 0x3F, v->dac[BL][1] = CH & 0x3F, v->dac[BL][2] = CL & 0x3F;
         break;
     case 0x12: dac_block(m, true); break;
-    case 0x15: DH = v->dac[BL][0], CH = v->dac[BL][1], CL = v->dac[BL][2]; break;
+    case 0x15:
+        if (m->native_video) {
+            uint8_t rgb[3];
+            host_video_get_dac(m, BL, 1, rgb);
+            DH = rgb[0], CH = rgb[1], CL = rgb[2];
+            break;
+        }
+        DH = v->dac[BL][0], CH = v->dac[BL][1], CL = v->dac[BL][2];
+        break;
     case 0x17: dac_block(m, false); break;
     case 0x1A: BX = 0; break;
     default: break;
@@ -322,8 +383,39 @@ static void read_cell(Machine *m)
     AX = is_text(m) ? mem_rd16(m, text_addr(m, BH, pos & 0xFF, pos >> 8)) : 0;
 }
 
+/* While native only the services INN uses (found with INN_BIOS_AUDIT=1) and the text and DAC services
+ * around them work; the rest would touch VGA registers that do not exist. */
+static bool native_supported(const Machine *m)
+{
+    switch (AH) {
+    case 0x00: case 0x01: case 0x02: case 0x03: case 0x06: case 0x07: case 0x09: case 0x0A: case 0x0E: case 0x0F:
+    case 0x1A:
+        return true;
+    case 0x10: return AL == 0x10 || AL == 0x12 || AL == 0x15 || AL == 0x17;
+    case 0x11: return AL == 0x30;
+    default: return false;
+    }
+}
+
+/* INN_BIOS_AUDIT=1: INT 10h call counts per AH/AL, logged at exit. */
+static uint32_t audit_count[256][256];
+static bool audit_on;
+
+static void audit_dump(void)
+{
+    for (int ah = 0; ah < 256; ah++)
+        for (int al = 0; al < 256; al++)
+            if (audit_count[ah][al])
+                log_msg("bios audit: AH=%02X AL=%02X %u", ah, al, (unsigned)audit_count[ah][al]);
+    fflush(stderr);
+}
+
 static CallbackResult int10_video(Machine *m)
 {
+    if (audit_on)
+        audit_count[AH][AL]++;
+    if (m->native && !native_supported(m))
+        fatal("native: INT 10h AX=%04X", AX);
     switch (AH) {
     case 0x00: set_mode(m, AL); break;
     case 0x01:
@@ -365,5 +457,10 @@ static CallbackResult int10_video(Machine *m)
 void bios_video_init(Machine *m)
 {
     callback_register(m, "int10", int10_video, VEC_VIDEO);
+    const char *audit = getenv("INN_BIOS_AUDIT");
+    if (audit && !strcmp(audit, "1") && !audit_on) {
+        audit_on = true;
+        atexit(audit_dump);
+    }
     set_mode(m, MODE_TEXT);
 }

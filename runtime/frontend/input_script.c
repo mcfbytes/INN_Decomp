@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "devices.h"
+#include "host_video.h"
 #include "input_script.h"
 
 enum { MAX_EVENTS = 4096, HOLD_US = 60000, TYPE_GAP_US = 120000, LINE_MAX = 512, PATH_MAX_LEN = 256 };
@@ -154,7 +155,8 @@ static void apply_event(Machine *m, const Event *e)
     case EV_BUTTON_DOWN: mouse_host_button(m, e->a, true); break;
     case EV_BUTTON_UP: mouse_host_button(m, e->a, false); break;
     case EV_SHOT:
-        if (vga_write_ppm(m, e->path) != 0)
+        /* M9 stand-in until package 6: native mode takes its shots from the host video. */
+        if ((m->native_video ? host_video_write_ppm(m, e->path) : vga_write_ppm(m, e->path)) != 0)
             log_msg("script: cannot write %s", e->path);
         break;
     }

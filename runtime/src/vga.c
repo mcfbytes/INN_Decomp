@@ -346,6 +346,41 @@ void vga_dac_get(Machine *m, uint8_t index, uint8_t rgb[3])
     rgb[2] = v->dac[index][2];
 }
 
+enum { VGA_STATE_PIXELS = 64000, VGA_STATE_TEXT_AT = 0x18000, MODE_TEXT80 = 0x03, MODE_320X200X8 = 0x13 };
+
+bool vga_load_state(Machine *m, uint8_t mode, const uint8_t dac[256][3], const uint8_t *mem)
+{
+    Vga *v = vga_state(m);
+    if (mode != MODE_TEXT80 && mode != MODE_320X200X8)
+        return false;
+    if (v->mode != mode)
+        vga_set_mode(m, mode, false);
+    memmove(v->dac, dac, sizeof v->dac);
+    if (mode == MODE_320X200X8) {
+        for (uint32_t n = 0; n < VGA_STATE_PIXELS; n++)
+            v->planes[n & 3][n >> 2] = mem[n];
+    } else {
+        memcpy(v->text, mem + VGA_STATE_TEXT_AT, VGA_TEXT_SIZE);
+    }
+    return true;
+}
+
+bool vga_read_state(Machine *m, uint8_t *mode, uint8_t dac[256][3], uint8_t *mem)
+{
+    Vga *v = vga_state(m);
+    if (v->mode != MODE_TEXT80 && v->mode != MODE_320X200X8)
+        return false;
+    *mode = v->mode;
+    memmove(dac, v->dac, sizeof v->dac);
+    if (v->mode == MODE_320X200X8) {
+        for (uint32_t n = 0; n < VGA_STATE_PIXELS; n++)
+            mem[n] = v->planes[n & 3][n >> 2];
+    } else {
+        memcpy(mem + VGA_STATE_TEXT_AT, v->text, VGA_TEXT_SIZE);
+    }
+    return true;
+}
+
 uint16_t vga_crtc_start(const Vga *v)
 {
     return (uint16_t)(v->crtc[CRTC_START_HI] << 8 | v->crtc[CRTC_START_LO]);
