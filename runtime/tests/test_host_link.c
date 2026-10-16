@@ -116,6 +116,52 @@ static void test_pipe(void)
     machine_destroy(m);
 }
 
+/* 10000 baud is 1000 us per byte; the line carries one byte per byte time each way. */
+static void test_pacing(void)
+{
+    enum { BAUD = 10000, BYTE_US = 1000 };
+    Machine *m = machine_create();
+    Pipe p = { .up = true };
+    uint8_t buf[8];
+    unsetenv("INN_LINK_PACING");
+    host_link_attach(m, (SerialLink){ &p, pipe_send, pipe_recv, pipe_connected, pipe_close });
+    host_link_set_rate(m, BAUD);
+
+    m->virtual_us = 100000;
+    CHECK(host_link_send(m, (const uint8_t *)"abcde", 5) == 1, "an idle line takes one byte");
+    CHECK(host_link_send(m, (const uint8_t *)"bcde", 4) == 0, "the line is busy for a byte time");
+    m->virtual_us += BYTE_US;
+    CHECK(host_link_send(m, (const uint8_t *)"bcde", 4) == 1, "one more a byte time later");
+    m->virtual_us += 3 * BYTE_US;
+    CHECK(host_link_send(m, (const uint8_t *)"cde", 3) == 3, "credit for the byte times that passed");
+    m->virtual_us += 1000000;
+    CHECK(host_link_send(m, (const uint8_t *)"abcde", 5) == 1, "an idle line gives no burst");
+
+    memcpy(p.in, "OK\r\n", 4);
+    p.in_len = 4;
+    CHECK(host_link_recv(m, buf, sizeof buf) == 1, "receive takes one byte first");
+    CHECK(host_link_recv(m, buf, sizeof buf) == 0, "and none until the next byte time");
+    m->virtual_us += BYTE_US;
+    CHECK(host_link_recv(m, buf, sizeof buf) == 1 && buf[0] == 'K', "then the next");
+
+    p.out_len = 0;
+    host_link_break(m);
+    CHECK(p.out_len == 1, "a break needs no line time");
+
+    host_link_set_rate(m, 0);
+    CHECK(host_link_send(m, (const uint8_t *)"abcde", 5) == 5, "rate 0 is unpaced");
+    host_link_close(m);
+
+    setenv("INN_LINK_PACING", "0", 1);
+    Pipe q = { .up = true };
+    host_link_attach(m, (SerialLink){ &q, pipe_send, pipe_recv, pipe_connected, pipe_close });
+    host_link_set_rate(m, BAUD);
+    CHECK(host_link_send(m, (const uint8_t *)"abcde", 5) == 5, "INN_LINK_PACING=0 turns pacing off");
+    unsetenv("INN_LINK_PACING");
+    host_link_close(m);
+    machine_destroy(m);
+}
+
 static int pump_sends;
 static void sending_pump(Machine *m)
 {
@@ -215,6 +261,7 @@ int main(void)
 {
     test_pipe();
     test_pump_calls();
+    test_pacing();
     test_open_failures();
 #ifndef __EMSCRIPTEN__
     test_tcp();

@@ -9,7 +9,7 @@
 #include "native.h"
 
 /* The pump is throttled by emulated time: a socket read per safe point would dwarf the work between. */
-enum { HOST_LINK_PUMP_US = 1000 };
+enum { HOST_LINK_PUMP_US = 1000, BYTE_BITS = 10, PACE_IDLE_US = 2000 };
 
 typedef struct HostLink {
     Machine *owner;
@@ -18,6 +18,8 @@ typedef struct HostLink {
     uint64_t next_pump_us;
     bool in_pump;
     bool dtr_logged;
+    uint32_t byte_us;               /* line time of one byte; 0 while the link is unpaced */
+    uint64_t tx_next_us, rx_next_us; /* when the line is free for the next byte each way */
 } HostLink;
 
 /* One link per process: the client has one modem. The state follows the machine that opened it. */
@@ -66,6 +68,7 @@ int host_link_attach(Machine *m, SerialLink link)
     host.next_pump_us = 0;
     host.in_pump = false;
     host.dtr_logged = false;
+    host.byte_us = 0;
     return 0;
 }
 
@@ -96,6 +99,29 @@ int host_link_open(Machine *m, const char *spec)
     return 0;
 }
 
+/* Bytes the line can carry now: one per byte time, with credit only for the last PACE_IDLE_US, so an
+ * idle line does not release a burst. */
+static int allowance(Machine *m, uint64_t *next, int want)
+{
+    if (!host.byte_us || want <= 0)
+        return want;
+    uint64_t now = m->virtual_us;
+    if (now < *next)
+        return 0;
+    if (now - *next > PACE_IDLE_US)
+        *next = now;
+    uint64_t n = 1 + (now - *next) / host.byte_us;
+    return n < (uint64_t)want ? (int)n : want;
+}
+
+void host_link_set_rate(Machine *m, uint32_t baud)
+{
+    const char *pacing = getenv("INN_LINK_PACING");
+    if (host.owner != m)
+        return;
+    host.byte_us = baud && !(pacing && !strcmp(pacing, "0")) ? BYTE_BITS * 1000000u / baud : 0;
+}
+
 bool host_link_carrier(Machine *m)
 {
     enter(m);
@@ -107,14 +133,23 @@ int host_link_send(Machine *m, const uint8_t *buf, int len)
 {
     enter(m);
     SerialLink *l = link_of(m);
-    return l ? l->send(l->ctx, buf, len) : -1;
+    if (!l)
+        return -1;
+    int n = allowance(m, &host.tx_next_us, len);
+    int taken = n ? l->send(l->ctx, buf, n) : 0;
+    if (taken > 0 && host.byte_us)
+        host.tx_next_us += (uint64_t)taken * host.byte_us;
+    return taken;
 }
 
 int host_link_recv(Machine *m, uint8_t *buf, int cap)
 {
     enter(m);
     SerialLink *l = link_of(m);
-    int n = l && l->recv ? l->recv(l->ctx, buf, cap) : 0;
+    int want = l && l->recv ? allowance(m, &host.rx_next_us, cap) : 0;
+    int n = want ? l->recv(l->ctx, buf, want) : 0;
+    if (n > 0 && host.byte_us)
+        host.rx_next_us += (uint64_t)n * host.byte_us;
     if (n > 0 && m->native)
         native_wake(m);
     return n;
@@ -133,7 +168,10 @@ void host_link_break(Machine *m)
 {
     /* innkeeperd takes a CR between frames for the PAD escape a real BREAK would cause. */
     static const uint8_t BREAK_STANDIN = '\r';
-    host_link_send(m, &BREAK_STANDIN, 1);
+    SerialLink *l = link_of(m);
+    enter(m);
+    if (l)
+        l->send(l->ctx, &BREAK_STANDIN, 1); /* a BREAK is not a character: no line time */
 }
 
 /* Emulated and hybrid-hw runs have no safe points; the machine's tickers stand in for them. */
