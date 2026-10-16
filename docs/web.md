@@ -571,7 +571,10 @@ CasinoLand and SierraLand pairs follow the same views, but only the hub's was ex
 (`docs/legal.md` is the checklist). Fields: `siteName`, `operatorName`, `contactEmail`, `privacyEmail` (optional,
 falls back to `contactEmail`), `dmcaAgent` `{name, address, email, phone}`, `governingLaw`, `serverLocation`,
 `effectiveDate`, `termsVersion` (an integer, starting at 1), `minimumAge` (18). Optional extras: `auditRetentionDays`
-(shown in the privacy notice, default 90) and `authServer` (overrides `AUTH_SERVER`). `siteName` overrides
+(shown in the privacy notice, default 90), `authServer` (overrides `AUTH_SERVER`) and `gameServer`. The game line
+the page dials is `gameServer` when set, else the sign-in server's origin as `ws(s)` (innkeeperd serves both on one
+listener; in production Caddy fronts it as `wss://game.<domain>`), else the page's own host on port 2316. A player's
+address under Advanced, or `?com1=`, still wins. `siteName` overrides
 `SITE_NAME` in `page.js`; the title stays "Online world" when neither is set. The CMake copy list puts `site.json`
 and `legal/` next to `inn.html`.
 
@@ -834,9 +837,9 @@ assets/{app,inn,legal}.<hash>.{js,css,wasm}   assets/scenes/<id>.<hash>.js   ass
   remains); `img-src 'self' data: blob:`; `media-src 'self' blob:`; `base-uri 'none'`; `form-action 'none'`;
   `object-src 'none'`; `frame-ancestors 'none'`. No `unsafe-eval`.
 - **`connect-src`** is the part the operator sets: `'self'`, one `--game wss://host:port` per game server (the
-  page's default server is the page's own host on the WebSocket port; a custom address typed under Advanced is
-  blocked unless its origin is listed), one `--auth https://host` per sign-in server (`authServer` in `site.json`
-  is added automatically), and `--connect-any` for `ws: wss: https:` if you want visitors to type any server.
+  page's default server is described under `site.json` above; a custom address typed under Advanced is blocked
+  unless its origin is listed), one `--auth https://host` per sign-in server (`authServer` and `gameServer` in the
+  build's `site.json` are added automatically, and each sign-in origin's `wss://` twin is allowed too), and `--connect-any` for `ws: wss: https:` if you want visitors to type any server.
   The packager warns when `--game` is missing. To change it later, edit the `Content-Security-Policy` string in
   `staticwebapp.config.json` and redeploy.
 - **Other.** `Referrer-Policy: no-referrer`, `X-Content-Type-Options: nosniff`, a `Permissions-Policy` that turns

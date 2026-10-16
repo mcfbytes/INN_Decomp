@@ -270,9 +270,20 @@ function log(text) {
   if (lines.length > LOG_LINES_MAX) pre.textContent = lines.slice(-LOG_LINES_MAX).join('\n');
 }
 
+// The game line: site.json's gameServer, else the sign-in server's origin as ws(s) (innkeeperd answers both
+// on one listener, and in production one TLS host fronts it), else this page's host on the default port.
 function defaultServer() {
+  const set = Site.cfg.gameServer || wsBase(params.get('auth') ?? (Site.cfg.authServer || AUTH_SERVER));
+  if (set) return set;
   const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
   return `${scheme}://${location.hostname || '127.0.0.1'}:${WS_PORT_DEFAULT}`;
+}
+
+function wsBase(server) {
+  try {
+    const url = new URL(server);
+    return /^https?:$/.test(url.protocol) ? url.origin.replace(/^http/, 'ws') : '';
+  } catch { return ''; }
 }
 
 // ---- the runtime (inn.js and inn.wasm) is fetched when it is wanted (docs/web.md, "Loading the runtime") ----
@@ -790,6 +801,8 @@ async function onRuntimeReady() {
 
 function wirePage() {
   $('com1').value = params.get('com1') || storageGet(SERVER_KEY) || defaultServer();
+  // site.json arrives after this, and it may name the server.
+  Site.ready.then(() => { if (!params.get('com1') && !storageGet(SERVER_KEY)) $('com1').value = defaultServer(); });
   $('remember').checked = storageGet(REMEMBER_KEY) !== '0';
   $('pick-zip').addEventListener('change', (e) => e.target.files[0] && pick(filesFromZip, e.target.files[0]));
   $('pick-dir').addEventListener('change', (e) => e.target.files.length && pick(filesFromFolder, e.target.files));

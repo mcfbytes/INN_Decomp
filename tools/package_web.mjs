@@ -1,7 +1,8 @@
 // Builds the deployable page from a finished public web build. Called by package_web.sh, which has
 // already refused lifted/native builds. Usage: node package_web.mjs <build> <out> <esbuild> [options]
 //   --game <ws(s)://host[:port]>   game server the page may open (repeatable)
-//   --auth <http(s)://host>        sign-in server (repeatable; site.json "authServer" is added too)
+//   --auth <http(s)://host>        sign-in server (repeatable; site.json "authServer" is added too). Its ws(s)
+//                                  twin is allowed as well: the page dials the sign-in server when no game server is set
 //   --connect-any                  CSP lets the page connect to any ws/wss/https origin (operator typed addresses)
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
@@ -110,13 +111,17 @@ put('site.json', read('site.json'));
 const unset = ['siteName', 'operatorName', 'contactEmail', 'privacyEmail', 'governingLaw', 'serverLocation', 'effectiveDate'].filter((k) => !site[k]);
 if (unset.length) console.warn(`package_web: note: site.json leaves ${unset.join(', ')} unset (the legal pages will say so); edit it in the out directory before deploying`);
 if (site.authServer) auths.push(site.authServer);
+if (site.gameServer) games.push(site.gameServer);
 
 // ---- staticwebapp.config.json ----
 const connect = ["'self'"];
 for (const g of games) connect.push(origin(g, ['ws:', 'wss:']));
-for (const a of new Set(auths)) connect.push(origin(a, ['http:', 'https:']));
+for (const a of new Set(auths)) {
+  const o = origin(a, ['http:', 'https:']);
+  connect.push(o, o.replace(/^http/, 'ws'));
+}
 if (connectAny) connect.push('ws:', 'wss:', 'https:');
-if (!games.length && !connectAny) console.warn('package_web: note: no --game given; the CSP lets the page reach only its own origin' + (auths.length ? ' and the sign-in server' : ''));
+if (!games.length && !connectAny) console.warn('package_web: note: no --game given; the CSP lets the page reach only its own origin' + (auths.length ? ' and the sign-in server (which it then dials)' : ''));
 const csp = [
   "default-src 'none'",
   `script-src 'self' 'wasm-unsafe-eval' ${[...inlineHashes].join(' ')}`.trim(),

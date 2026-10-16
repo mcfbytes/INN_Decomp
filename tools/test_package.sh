@@ -52,6 +52,7 @@ assert len(open(p, 'rb').read()) < 20480
 h = c['globalHeaders']
 assert "frame-ancestors 'none'" in h['Content-Security-Policy'] and "'unsafe-eval'" not in h['Content-Security-Policy']
 assert 'wss://play.example.test:2316' in h['Content-Security-Policy'] and 'https://auth.example.test' in h['Content-Security-Policy']
+assert 'wss://auth.example.test' in h['Content-Security-Policy']
 assert h['Cross-Origin-Opener-Policy'] == 'same-origin-allow-popups' and h['Referrer-Policy']
 assert c['mimeTypes']['.wasm'] == 'application/wasm'
 r = {x['route']: x for x in c['routes']}

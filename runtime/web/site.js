@@ -18,7 +18,7 @@ const Site = (() => {
     siteName: '', operatorName: '', contactEmail: '', privacyEmail: '',
     dmcaAgent: { name: '', address: '', email: '', phone: '' },
     governingLaw: '', serverLocation: '', effectiveDate: '', termsVersion: 1, minimumAge: 18,
-    auditRetentionDays: 90, authServer: '',
+    auditRetentionDays: 90, authServer: '', gameServer: '',
   };
   const LINKS = [
     { label: 'Terms of Use', short: 'Terms', href: 'legal/terms.html' },
@@ -40,7 +40,7 @@ const Site = (() => {
 
   function merge(d) {
     if (!d || typeof d !== 'object') return;
-    for (const k of ['siteName', 'operatorName', 'contactEmail', 'privacyEmail', 'governingLaw', 'serverLocation', 'effectiveDate', 'authServer'])
+    for (const k of ['siteName', 'operatorName', 'contactEmail', 'privacyEmail', 'governingLaw', 'serverLocation', 'effectiveDate', 'authServer', 'gameServer'])
       cfg[k] = str(d[k]);
     if (d.dmcaAgent && typeof d.dmcaAgent === 'object')
       for (const k of Object.keys(cfg.dmcaAgent)) cfg.dmcaAgent[k] = str(d.dmcaAgent[k]);

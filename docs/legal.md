@@ -14,7 +14,7 @@ verification (docs/web.md, "Legal pages and the age notice").
 The repo ships it empty on purpose. Set: `siteName`, `operatorName`, `contactEmail`, `privacyEmail` (optional),
 `dmcaAgent` (`name`, `address`, `email`, `phone`), `governingLaw` (a US state or a country), `serverLocation`
 (for example "United States (Azure)"), `effectiveDate`, `termsVersion` and `minimumAge`. Optional: `auditRetentionDays`
-(matches the server setting below) and `authServer`. Do not commit your real values to the public repo; keep them
+(matches the server setting below), `authServer` and `gameServer` (see docs/web.md). Do not commit your real values to the public repo; keep them
 in your deployment. An unfilled field shows a bright placeholder and a banner on the legal pages, so a
 half-configured site is obvious.
 
