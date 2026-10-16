@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "devices.h"
+#include "lift_internal.h"
 #include "exec_stub.h"
 
 static int failures;
@@ -117,6 +118,38 @@ static void test_pit(void)
     double hz = 0;
     CHECK(pit_speaker(m, &hz) && hz > 1000 && hz < 1002, "speaker at ~1001 Hz, got %f", hz);
     finish(m);
+}
+
+/* Edges that fall due while the CPU cannot take them. With IF set inside lifted C they are owed
+ * and delivered afterwards, as the CPU would have taken them on time; otherwise the 8259's IRR
+ * holds one request and the rest are lost, as on the chip. */
+static uint32_t ticks_after_hold(bool in_lifted_c)
+{
+    static const uint8_t SPIN[] = { 0xFB, 0xEB, 0xFE }; /* sti; jmp $ */
+    Machine *m = boot();
+    load(m, SPIN, sizeof SPIN);
+    port_out(m, 0x43, 0x34, 1); /* ch0, lo/hi, mode 2, 1 kHz */
+    port_out(m, 0x40, 1193 & 0xFF, 1);
+    port_out(m, 0x40, 1193 >> 8, 1);
+    machine_run_for(m, 1000);
+    uint32_t t0 = bda_ticks(m);
+    LiftState *s = m->lift;
+    m->irq_hold = true; /* no delivery for 10 ms: 10 edges fall due */
+    s->c_depth = in_lifted_c;
+    machine_run_for(m, 10000);
+    m->irq_hold = false;
+    s->c_depth = 0;
+    machine_run_for(m, 3000);
+    uint32_t n = bda_ticks(m) - t0;
+    finish(m);
+    return n;
+}
+
+static void test_pit_held_edges(void)
+{
+    uint32_t lost = ticks_after_hold(false), owed = ticks_after_hold(true);
+    CHECK(lost >= 3 && lost <= 5, "held edges collapse into one request (got %u ticks)", lost);
+    CHECK(owed >= 12 && owed <= 14, "edges owed to lifted C are all delivered (got %u ticks)", owed);
 }
 
 /* mov ah,AH; int 16h; mov [500h],ax; jmp $ */
@@ -316,6 +349,7 @@ int main(void)
 {
     test_pic();
     test_pit();
+    test_pit_held_edges();
     test_keyboard();
     test_vga();
     test_uart();

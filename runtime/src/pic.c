@@ -68,6 +68,20 @@ void pic_raise_irq(Machine *m, int irq)
     pic_update(m);
 }
 
+/* True while irq is requested and not yet accepted by the CPU. */
+bool pic_irq_pending(Machine *m, int irq)
+{
+    return pic_state(m)->chip[irq >> 3].irr & (1u << (irq & 7));
+}
+
+/* True when a CPU with interrupts enabled would take irq at once: unmasked and not in service. */
+bool pic_irq_deliverable(Machine *m, int irq)
+{
+    const Pic8259 *p = &pic_state(m)->chip[irq >> 3];
+    uint8_t bit = (uint8_t)(1u << (irq & 7));
+    return !(p->imr & bit) && !(p->isr & bit);
+}
+
 void pic_lower_irq(Machine *m, int irq)
 {
     Pic8259 *p = &pic_state(m)->chip[irq >> 3];

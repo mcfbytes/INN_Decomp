@@ -28,6 +28,8 @@ enum { PIC_IRQ_TIMER = 0, PIC_IRQ_KEYBOARD = 1, PIC_IRQ_CASCADE = 2, PIC_IRQ_COM
        PIC_IRQ_COM1 = 4, PIC_IRQ_SB = 7, PIC_IRQ_MOUSE = 12 };
 
 void pic_init(Machine *m);
+bool pic_irq_pending(Machine *m, int irq);     /* requested, not yet accepted by the CPU */
+bool pic_irq_deliverable(Machine *m, int irq); /* unmasked and not in service */
 /* pic_raise_irq / pic_lower_irq / pic_acknowledge are declared in machine.h. Lines are
  * edge-triggered: raising an already-high line does nothing. */
 

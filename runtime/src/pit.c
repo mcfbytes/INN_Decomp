@@ -4,6 +4,7 @@
 
 #include "audio.h"
 #include "devices.h"
+#include "lift.h"
 
 enum {
     PIT_PORT_CH0 = 0x40, PIT_PORT_CMD = 0x43, PORT_SYSCTL_B = 0x61,
@@ -13,7 +14,7 @@ enum {
     READBACK_NO_COUNT = 0x20,
     SYSB_GATE2 = 0x01, SYSB_SPEAKER = 0x02, SYSB_REFRESH = 0x10, SYSB_OUT2 = 0x20,
     REFRESH_PERIOD_NS = 15085,
-    MAX_IRQS_PER_TICK = 4,
+    MAX_IRQS_PER_TICK = 4, MAX_OWED_EDGES = 64,
 };
 
 typedef struct PitChannel {
@@ -21,6 +22,7 @@ typedef struct PitChannel {
     uint32_t reload;       /* 1..65536 */
     uint64_t start_clock;  /* PIT clock at load or gate */
     uint64_t periods_seen; /* channel 0: IRQ edges already raised */
+    uint8_t owed;          /* channel 0: edges the CPU would have taken but lifted C could not */
     uint16_t latch;
     bool latched, read_hi, write_hi, armed, fired;
     uint8_t write_lo;
@@ -73,6 +75,7 @@ static void channel_load(Machine *m, PitChannel *c, uint32_t value)
     c->reload = value ? value : PIT_FULL_COUNT;
     c->start_clock = pit_clock(m);
     c->periods_seen = 0;
+    c->owed = 0;
     c->armed = true;
     c->fired = false;
 }
@@ -172,6 +175,22 @@ static void pit_out(Machine *m, uint16_t port, uint32_t value, int size)
     }
 }
 
+/* One IRQ0 edge. A request still in the 8259's IRR absorbs the edge, as on the chip. The exception
+ * is lifted C running with IF set: the CPU would have taken the earlier interrupt on time and
+ * gone on to this one, but C cannot be interrupted, so the edge is owed and raised once the
+ * request has been accepted. */
+static void pit_edge(Machine *m, PitChannel *c)
+{
+    if (pic_irq_pending(m, PIC_IRQ_TIMER)) {
+        if (lift_in_c(m) && (m->cpu.flags & F_IF) && pic_irq_deliverable(m, PIC_IRQ_TIMER) &&
+            c->owed < MAX_OWED_EDGES)
+            c->owed++;
+        return;
+    }
+    pic_lower_irq(m, PIC_IRQ_TIMER);
+    pic_raise_irq(m, PIC_IRQ_TIMER);
+}
+
 /* One IRQ0 edge per elapsed period; several periods inside one slice still yield an edge each
  * slice (at most MAX_IRQS_PER_TICK are counted), which is what INT 08h counters expect. */
 static void pit_tick(Machine *m)
@@ -182,19 +201,20 @@ static void pit_tick(Machine *m)
     if (!periodic(c)) {
         if (!c->fired && elapsed(m, c) >= c->reload) {
             c->fired = true;
-            pic_lower_irq(m, PIC_IRQ_TIMER);
-            pic_raise_irq(m, PIC_IRQ_TIMER);
+            pit_edge(m, c);
         }
         return;
     }
     uint64_t periods = elapsed(m, c) / c->reload;
-    if (periods == c->periods_seen)
-        return;
-    if (periods - c->periods_seen > MAX_IRQS_PER_TICK)
-        c->periods_seen = periods - MAX_IRQS_PER_TICK;
-    c->periods_seen++;
-    pic_lower_irq(m, PIC_IRQ_TIMER);
-    pic_raise_irq(m, PIC_IRQ_TIMER);
+    if (periods != c->periods_seen) {
+        if (periods - c->periods_seen > MAX_IRQS_PER_TICK)
+            c->periods_seen = periods - MAX_IRQS_PER_TICK;
+        c->periods_seen++;
+        pit_edge(m, c);
+    } else if (c->owed && !pic_irq_pending(m, PIC_IRQ_TIMER)) {
+        c->owed--;
+        pit_edge(m, c);
+    }
 }
 
 double pit_timer_hz(Machine *m)
