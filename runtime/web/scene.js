@@ -760,6 +760,7 @@ const InnScenes = (() => {
       const id = h ? h.id : '';
       if (id === quip.hoverId) return;
       quip.hoverId = id;
+      if (h && h.role === 'disks') wantRuntime();   // page.js: the player is reaching for the disks
       clearTimeout(quip.hover);
       if (h && e.pointerType === 'mouse') quip.hover = setTimeout(() => (adventure() ? Adv.hover(h) : say(h)), HOVER_MS);
     });
@@ -815,6 +816,7 @@ const InnScenes = (() => {
     view.bot = toCss(br / W, bg / W, bb / W);
     layout();
     InnScenes.lastPaintMs = b.ms;
+    performance.mark('inn-scene-painted');   // the first one is the landing's first paint (measured in docs/web.md)
     console.log(`scene ${state.id}: painted in ${b.ms.toFixed(1)} ms`);
     syncRunning();
   }
