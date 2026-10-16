@@ -97,9 +97,10 @@ function installRoot(paths) {
   return hit.slice(0, hit.length - PROGRAM.exe.length);
 }
 
-// Native music is adl.drv. Sound Blaster digital audio is not played, so a music
-// line that names another driver is rewritten in the browser's copy of the file.
+// Native builds play music through adl.drv only (Sound Blaster digital audio is not native yet), so
+// there a music line that names another driver is rewritten in the browser's copy of the file.
 function ensureAdlib(configPaths) {
+  if (!Module.innNative) return;
   let noted = false;
   for (const cfg of configPaths) {
     const text = new TextDecoder('latin1').decode(FS.readFile(cfg));
