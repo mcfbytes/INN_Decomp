@@ -94,6 +94,12 @@ produces the game.
       functions then call each other directly instead of through entry hooks, and the interpreter
       remains only for shadow verification. The original data files are still read at run time.
 
+Later (noted 2026-10-15): optionally run the older TSN 2.1 media as well. Its binaries differ from INN's,
+so lifts do not hook and it runs on the interpreter. It needs an installed TSN folder (the sets are
+install media), a page that finds the TSN program, a TSN land catalog in `innkeeperd`, and per-land
+version ranges where TSN and INN scripts differ. INN may be largely a retheme of TSN, which a
+comparison of the two sets' scripts would show.
+
 ## 5. Verification
 
 - Boot traces: interpreter vs DOSBox-X (`../TSN-INN-Decomp/tools/dosbox/`) on the same inputs.
