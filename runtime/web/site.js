@@ -208,6 +208,8 @@ const Site = (() => {
 
   return {
     cfg, ready, LINKS, ensure, attest, blocking,
+    ok: () => st.phase === 'ok',            // the notice has been answered yes
+    refused: () => st.phase === 'refused',
     whenClear: () => ensure(),
     contact: () => cfg.contactEmail,
   };
