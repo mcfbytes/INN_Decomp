@@ -244,6 +244,7 @@ Machine *machine_create(void);
 void machine_destroy(Machine *m);
 /* Called every scheduler slice (TICK_SLICE_US of emulated time) after the CPU ran. */
 void machine_add_ticker(Machine *m, TickFn fn);
+void machine_remove_ticker(Machine *m, TickFn fn); /* no-op when fn is not registered */
 /* Advances emulated time by us microseconds: CPU slices interleaved with device ticks. */
 void machine_run_for(Machine *m, uint64_t us);
 /* Runs the CPU until the current slice is used up or the CPU stops; ends the slice if used up. */

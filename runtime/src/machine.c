@@ -92,6 +92,16 @@ static bool vga_port(uint16_t port)
     return port >= 0x3B0 && port <= 0x3DF;
 }
 
+void machine_remove_ticker(Machine *m, TickFn fn)
+{
+    for (int i = 0; i < m->ticker_count; i++)
+        if (m->tickers[i] == fn) {
+            memmove(&m->tickers[i], &m->tickers[i + 1], (size_t)(m->ticker_count - i - 1) * sizeof m->tickers[0]);
+            m->ticker_count--;
+            return;
+        }
+}
+
 static void end_slice(Machine *m);
 
 /* Drivers time out on fixed poll counts, which only works if port I/O costs real bus time. Lifted
