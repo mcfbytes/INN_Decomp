@@ -3,6 +3,15 @@
 // notice is a self-declaration, and docs/legal.md says so. Not legal advice.
 'use strict';
 
+// The packaged page (tools/package_web.sh) serves content-hashed files and lists them in
+// <script type="application/json" id="inn-assets">. Lazy loads (scenes, songs) ask here for the real
+// address. A dev build has no such list and the name is used as written.
+const innAsset = (() => {
+  let map = {};
+  try { map = JSON.parse(document.getElementById('inn-assets').textContent) || {}; } catch { /* dev build */ }
+  return (name) => map[name] || name;
+})();
+
 const Site = (() => {
   const CONSENT_KEY = 'inn.consent', REFUSED_KEY = 'inn.refused';
   const DEFAULTS = {

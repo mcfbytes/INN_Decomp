@@ -636,6 +636,135 @@ boot, dial, logon and town map, guest clock 20 MIPS: speed 1.000 throughout, hos
 capacity 45 to 91 MIPS across runs (2x to 4x headroom; the lower end with OPL synthesis running).
 Raising the guest clock: 50 and 70 MIPS stay at 1.000; 90 MIPS falls to 0.84 to 0.99 with no runaway.
 
+## Packaging and deployment
+
+`tools/package_web.sh <build-dir> <out-dir>` turns a finished public build into the folder that goes to Azure
+Static Web Apps. The dev workflow does not change: `cmake --build` still copies the page files unminified, and
+nothing below is needed to run or test locally.
+
+```
+emcmake cmake -S . -B build-web -G Ninja && cmake --build build-web
+tools/package_web.sh build-web dist --game wss://play.example.net:2316 --auth https://play.example.net
+# or: cmake --build build-web --target package-web   (writes build-web/package; -DINN_PACKAGE_ARGS="--game;wss://...;--auth;https://...")
+tools/test_package.sh build-web      # the guards and the output checks
+```
+
+### The tool: esbuild, one binary
+
+The page is classic scripts that share globals, with no `import`/`export` and no npm dependencies, and the browser
+loads no provider SDK (sign-in is redirect based; the provider libraries are Rust crates in innkeeperd). So the job
+is "minify, concatenate, hash", not "bundle a module graph". esbuild does that in one MIT-licensed binary, in
+milliseconds, and brings no `node_modules`. The script downloads `@esbuild/linux-x64` 0.28.2 (released 2026-08-08)
+into the gitignored `.cache/esbuild-0.28.2/`, checks its SHA-256 (pinned in the script) and refuses on a mismatch.
+Webpack, Vite or Rollup would add a dependency tree and a config for no gain here. Node (already needed for the
+headless tests) runs the small driver `tools/package_web.mjs`: hashing, HTML rewriting, the config file.
+
+What the packager does:
+
+- The eight page scripts (`site zip saves auth music adv scene page`) become one `assets/app.<hash>.js`, in the
+  order the shell lists them (classic scripts share one global scope, so one concatenated script behaves as the
+  eight did). The inline `<style>` becomes `assets/app.<hash>.css`. Inline scripts stay inline, minified, and their
+  hashes go into the CSP.
+- `inn.js` and `inn.wasm` get hashed names (`inn.js` names the wasm exactly once, and the packager rewrites it).
+  Emscripten's output is already minified, so it is not minified again.
+- `scenes/*.js` and `music/*.js` get hashed names. The page finds them through
+  `<script type="application/json" id="inn-assets">`, which `innAsset()` in `site.js` reads; a dev build has no such list and the
+  names are used as written. The three legal pages keep their paths (people link to them); their script and
+  style are hashed. `site.json` is not hashed, because operators edit it.
+
+### What is lazy, and what is not
+
+| | Loaded | Why |
+|---|---|---|
+| the scene shown (`scenes/<id>.js`, 14-17 KB min) | when that scene is shown; the others only when picked from the Scene menu | already lazy before packaging; saves 28 KB gzip against loading all five |
+| its song (`music/<id>.js`, about 1 KB) | with the scene | same |
+| the synth and the audio context | on the first gesture (the age answer counts) | `ensureCtx()` builds them then; the code is 6 KB gzip inside `app.js` |
+| legal pages | when opened | separate pages |
+| `auth.js` | **with the page, not deferred** | 3.1 KB gzip minified. A deployment with sign-in needs it for the first `/auth/providers` answer anyway, `adv.js` and `page.js` call `InnAuth` synchronously in about forty places, and the saved request would cost as much as it saves. Without sign-in the page makes no `/auth/providers` request at all (`?auth=` empty). |
+| `adv.js`, `music.js` (6 and 11 KB gzip) | with the page | the landing screen is the adventure and its menu bar; they are the first paint, and `adv.js` calls `InnMusic` while building |
+| `inn.wasm` (338 KB gzip) | with the page, in parallel with the landing art | a visitor who never adds disks does fetch it; deferring it until Connect would put its download (and the 64 MB memory setup) on the Connect click. The right gate is "after the disks are picked", which needs a loader change in `page.js`; listed as an open item. |
+
+Measured on 2026-10-16, landing with the town scene, bytes on the wire (level 9 gzip, default brotli):
+
+| | raw before | gzip before | brotli before | raw after | gzip after | brotli after |
+|---|---:|---:|---:|---:|---:|---:|
+| `inn.html` | 31,949 | 8,546 | 7,483 | 8,202 | 2,969 | 2,494 |
+| page scripts (after: `app.js` + `app.css`) | 192,540 | 64,961 | 56,508 | 133,747 | 47,624 | 41,444 |
+| `inn.js` | 192,142 | 46,805 | 40,349 | 192,153 | 46,815 | 40,405 |
+| `site.json` | 269 | 170 | 130 | 269 | 170 | 130 |
+| scene and song (town) | 26,793 | 8,793 | 7,532 | 17,548 | 6,934 | 5,959 |
+| `inn.wasm` | 977,166 | 338,444 | 266,962 | 977,166 | 338,444 | 266,962 |
+| **first load** | 1,420,859 | 467,719 | 378,964 | 1,329,085 | 442,956 | 357,394 |
+| first paint (html, scripts, css) | 224,758 | 73,677 | 64,121 | 142,218 | 50,763 | 44,068 |
+| requests | 14 | | | 8 | | |
+
+With sign-in configured the page adds `GET /auth/providers` (and `/auth/session` once signed in): a few hundred
+bytes either way, since `auth.js` is in `app.js` in both cases. The wasm is 76% of the first load; what packaging
+can reach is the 25 KB gzip of everything else, and it takes the first-paint path from 74 KB to 51 KB gzip and
+from 14 requests to 8.
+
+### Output and headers
+
+```
+inn.html  site.json  staticwebapp.config.json
+legal/{terms,privacy,copyright}.html
+assets/{app,inn,legal}.<hash>.{js,css,wasm}   assets/scenes/<id>.<hash>.js   assets/music/<id>.<hash>.js
+```
+
+`staticwebapp.config.json` (SWA reads it from the root; its limit is 20 KB):
+
+- **Caching.** `/assets/*`: `public, max-age=31536000, immutable` (every name is content-hashed, so a new
+  build is a new URL). `/`, `/inn.html`, `/site.json`, `/legal/*`: `no-cache`. `/` is rewritten to `/inn.html`.
+  There is no `navigationFallback`: the page has no client-side routes, so an unknown path is a plain 404.
+- **MIME.** `.wasm` is `application/wasm`, which `WebAssembly.instantiateStreaming` requires (Emscripten uses
+  it; the packaged run logged no fallback warning).
+- **CSP**, in `globalHeaders`: `default-src 'none'`; `script-src 'self' 'wasm-unsafe-eval'` plus the hashes of
+  the inline scripts (the theme snippet in `<head>` runs before first paint, so it stays inline);
+  `style-src 'self' https://fonts.googleapis.com` and `font-src https://fonts.gstatic.com` (VT323);
+  `style-src-attr 'unsafe-inline'` (a few `style=` attributes and the page sets inline styles; no inline `<style>`
+  remains); `img-src 'self' data: blob:`; `media-src 'self' blob:`; `base-uri 'none'`; `form-action 'none'`;
+  `object-src 'none'`; `frame-ancestors 'none'`. No `unsafe-eval`.
+- **`connect-src`** is the part the operator sets: `'self'`, one `--game wss://host:port` per game server (the
+  page's default server is the page's own host on the WebSocket port; a custom address typed under Advanced is
+  blocked unless its origin is listed), one `--auth https://host` per sign-in server (`authServer` in `site.json`
+  is added automatically), and `--connect-any` for `ws: wss: https:` if you want visitors to type any server.
+  The packager warns when `--game` is missing. To change it later, edit the `Content-Security-Policy` string in
+  `staticwebapp.config.json` and redeploy.
+- **Other.** `Referrer-Policy: no-referrer`, `X-Content-Type-Options: nosniff`, a `Permissions-Policy` that turns
+  off camera, microphone, geolocation, payment, USB, serial and HID.
+- **`Cross-Origin-Opener-Policy: same-origin-allow-popups`.** The sign-in popup posts its result to
+  `window.opener`. Tested with the dev provider: this value signs in, plain `same-origin` severs the opener (the
+  popup stays on `/auth/callback` and the page never gets the session). A provider whose own login page sends `Cross-Origin-Opener-Policy: same-origin` can make the browser
+  drop the opener when the popup navigates there (untested; the dev provider sends none). The page already falls
+  back to a full-page redirect when the popup is blocked, and an operator who hits this can leave COOP out.
+- **Compression.** SWA compresses text responses itself and does not serve `.br` or `.gz` files next to the
+  originals, so the packager writes none. (Whether it compresses `application/wasm` is not stated in its
+  documentation; check `Content-Encoding` on `inn.<hash>.wasm` after the first deploy. If it does not, a CDN in
+  front or Front Door compression would save 640 KB on that file.)
+
+### Deploying to Static Web Apps
+
+1. Build the public hybrid build (no `INN_NATIVE`, no `private/lifted`, no `INN_WEB_PRELOAD_DIR`), then run
+   `tools/package_web.sh` with the operator's origins.
+2. Fill in `site.json` in the output (operator name, contact addresses, governing law, effective date, and
+   `authServer` if the sign-in server has its own origin); the legal pages say what is missing.
+3. Deploy the folder as the app content with no build step, for example
+   `swa deploy ./dist --deployment-token <token>` or the GitHub Action with `app_location: dist`,
+   `skip_app_build: true`. Nothing here contacts Azure; the deployment is the operator's step.
+4. The game server and the sign-in server must list the page's origin: `innkeeperd --page-origin https://<site>`.
+
+### The IP guard
+
+This repository is public. Only the hybrid build (the original program on the emulator, no Sierra-derived code
+compiled in) may be packaged. `package_web.sh` reads the build's `CMakeCache.txt` and refuses when `INN_NATIVE` or
+`INN_NATIVE_HW` is ON, when `INN_LIFTED_DIR` was changed from its default or the directory exists (the default
+value is always in the cache, so existence is what counts), when `lifted_table.c` is more than the two-line stub or
+`lifted_entries.h` exists, when `INN_WEB_PRELOAD_DIR` is set, and when the build directory holds `inn.data`,
+`*.exe`, `*.drv`, `*.dll`, `resource.*`, `*.zip` or `*.img`. The packager copies only the files it names, refuses an
+unknown file among the scenes or songs, checks every output path against an allow list (and that none starts with
+`MZ` or `PK`), and writes no game data: the visitor's install is read in the browser at runtime. `tools/test_package.sh`
+covers each refusal.
+
 ## Verifying headlessly
 
 Playwright drives Chromium against the build: pick the zip with `setInputFiles('#pick-zip', ...)` or

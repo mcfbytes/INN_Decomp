@@ -112,6 +112,12 @@ if(EMSCRIPTEN)
           music/valley.js music/diner.js music/tower.js music/harbor.js music/town.js)
     configure_file(runtime/web/${script} ${CMAKE_BINARY_DIR}/${script} COPYONLY)
   endforeach()
+  # `cmake --build <dir> --target package-web` writes the deployable page to <dir>/package (docs/web.md,
+  # "Packaging and deployment"). The script refuses lifted, native and preloaded builds. Pass the operator's
+  # origins with -DINN_PACKAGE_ARGS="--game;wss://host:port;--auth;https://host".
+  set(INN_PACKAGE_ARGS "" CACHE STRING "Extra arguments for tools/package_web.sh (--game URL, --auth URL, --connect-any)")
+  add_custom_target(package-web COMMAND ${CMAKE_SOURCE_DIR}/tools/package_web.sh ${CMAKE_BINARY_DIR} ${CMAKE_BINARY_DIR}/package ${INN_PACKAGE_ARGS}
+    DEPENDS inn VERBATIM USES_TERMINAL)
   if(INN_NATIVE)
     # The JSPI proof (docs/native.md section 4): test_native under Node, suspending inside setjmp.
     enable_testing()

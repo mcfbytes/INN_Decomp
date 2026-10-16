@@ -475,7 +475,7 @@ const InnMusic = (() => {
     if (songs[id]) return Promise.resolve(songs[id]);
     return new Promise((resolve, reject) => {
       const sc = document.createElement('script');
-      sc.src = `music/${id}.js`;
+      sc.src = innAsset(`music/${id}.js`);
       sc.onload = () => (songs[id] ? resolve(songs[id]) : reject(new Error(`no song ${id}`)));
       sc.onerror = () => reject(new Error(`could not load music/${id}.js`));
       document.head.append(sc);
