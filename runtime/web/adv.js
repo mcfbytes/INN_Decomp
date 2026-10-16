@@ -12,7 +12,7 @@ const Adv = (() => {
   const SCORE_MAX = 1993;
   const POINTS = { disks: 10, dial: 5, connect: 25, signin: 5, gag: 1 };
   const HINT_IDLE_MS = 10000, HINT_MAX = 2, TYPE_MS = 22, SHOW_MS = 7000, BAR_HIDE_MS = 1400;
-  const IRIS_CLOSE_MS = 480, IRIS_OPEN_MS = 320;
+  const IRIS_CLOSE_MS = 480, IRIS_OPEN_MS = 320, NOW_MS = 3000;
 
   const GENERIC = [
     'You can\'t dial a cloud. Well, you can, but nobody answers.',
@@ -509,6 +509,8 @@ const Adv = (() => {
       : 'Nothing will be kept on this device after the next dial. Not even the disks.');
   }
 
+  function toggleMusic() { InnMusic.toggle(); }
+
   function toggleAnim() {
     adv.anim = !adv.anim;
     store.set(ANIM_KEY, adv.anim ? '1' : '0', 'local');
@@ -541,6 +543,7 @@ const Adv = (() => {
         { label: 'Server address…', fn: openServerDialog },
         { label: 'Remember on this device', check: () => $('remember').checked, fn: toggleRemember, off: () => !page.persistent },
         { label: 'Animation', check: () => adv.anim, fn: toggleAnim },
+        { label: `Music: ${InnMusic.enabled() ? 'on' : 'off'}`, fn: toggleMusic },
       ] },
       { name: 'Scene', items: InnScenes.ids.map((id) => ({
         label: id.charAt(0).toUpperCase() + id.slice(1), radio: () => InnScenes.id() === id, fn: () => InnScenes.setScene(id, true) })) },
@@ -677,6 +680,7 @@ const Adv = (() => {
         return;
       }
       if (!inBar) return;
+      if (document.activeElement === ui.music && (e.key === 'Enter' || e.key === ' ')) return;   // the button's own click
       const n = tops().length;
       const k = e.key;
       const inPop = ui.pop.contains(document.activeElement);
@@ -771,6 +775,8 @@ const Adv = (() => {
   // ---------- the iris-out into the game ----------
 
   function transition(done) {
+    // The game has its own sound, never both: the fade ends with the iris (close + open).
+    InnMusic.leave(reduced() ? 300 : IRIS_CLOSE_MS + IRIS_OPEN_MS);
     if (reduced()) return done();
     const sc = InnScenes.scene();
     const r = sc && sc.spark && sc.spark.phone ? InnScenes.screenRect(sc.spark.phone) : null;
@@ -884,7 +890,8 @@ const Adv = (() => {
       go();
     },
 
-    sceneChanged() {
+    sceneChanged(sc) {
+      if (sc && sc.id) InnMusic.setScene(sc.id);
       if (!ui) return;
       if (!sign.busy) narrHide();
       refresh();
@@ -913,7 +920,12 @@ const Adv = (() => {
     }
     ui.scoreText = el('span', { textContent: `${score.pts} of ${SCORE_MAX}` });
     ui.score = el('span', { className: 'score' }, el('span', { className: 'lbl', textContent: 'Score: ' }), ui.scoreText);
-    bar.append(el('span', { className: 'spacer' }), ui.score);
+    ui.music = el('button', { type: 'button', id: 'musicbtn', textContent: '\u266a', title: 'Music (M)' });
+    ui.music.setAttribute('aria-label', 'Music');
+    ui.music.setAttribute('aria-pressed', String(InnMusic.enabled()));
+    ui.music.addEventListener('click', toggleMusic);
+    ui.nowp = el('p', { id: 'nowp', className: 'adv', hidden: true, role: 'status' });
+    bar.append(el('span', { className: 'spacer' }), ui.music, ui.score);
     ui.pop = el('div', { id: 'menupop', className: 'adv', role: 'menu', hidden: true });
     const item = (title, svg) => {
       const n = el('div', { className: 'item', title, role: 'img', hidden: true });
@@ -965,7 +977,7 @@ const Adv = (() => {
         ui.pers, ui.persErr, el('div', { className: 'acts' }, ui.persOk, ui.persCancel)));
     ui.pdlg.firstChild.setAttribute('aria-labelledby', 'pdlg-title');
     ui.iris = el('div', { id: 'iris', hidden: true });
-    document.body.append(files, bar, ui.pop, ui.inv, ui.narr, ui.term, ui.dlg, ui.pdlg, ui.iris);
+    document.body.append(files, bar, ui.pop, ui.inv, ui.narr, ui.nowp, ui.term, ui.dlg, ui.pdlg, ui.iris);
     ui.persOk.addEventListener('click', savePersonaDialog);
     ui.persCancel.addEventListener('click', () => closePersonaDialog(true));
     ui.pdlg.addEventListener('pointerdown', (e) => { if (e.target === ui.pdlg) closePersonaDialog(true); });
@@ -991,6 +1003,21 @@ const Adv = (() => {
     document.body.classList.add('adventure');
     build();
     wireMenu();
+    InnMusic.hooks.guard = () => !!openDialog();
+    InnMusic.on((what, arg) => {
+      if (what === 'state') {
+        ui.music.setAttribute('aria-pressed', String(arg));
+        say(arg ? 'Music on. A band tunes up somewhere out of sight.' : 'Music off. The band packs up, quietly.');
+      } else if (what === 'track') {
+        clearTimeout(adv.nowTimer);
+        ui.nowp.textContent = `Now playing: ${arg.title}`;
+        ui.nowp.hidden = false;
+        adv.nowTimer = setTimeout(() => { ui.nowp.hidden = true; }, NOW_MS);
+      } else if (what === 'gone') {
+        clearTimeout(adv.nowTimer);
+        ui.nowp.hidden = true;
+      }
+    });
     adv.anim = store.get(ANIM_KEY, 'local') !== '0';
     if (!adv.anim) { InnScenes.setAnimation(false); document.body.classList.add('still'); }
     window.addEventListener('resize', () => { if (ui.term.dataset.open === '1') placeTerm(); });

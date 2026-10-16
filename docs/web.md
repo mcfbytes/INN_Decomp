@@ -91,6 +91,77 @@ where the modem box sits, on empty grass, sky or water. The five scenes:
 Adding a scene: write `scenes/<id>.js`, add the id to `IDS` in `scene.js` and the file to the copy list in `CMakeLists.txt`.
 The artwork is original code; nothing is traced or copied from any game.
 
+## Music
+
+The landing plays one short looping background track per scene. It is a tiny sequencer and synthesizer in
+`runtime/web/music.js` on the Web Audio API, and the songs are text in `runtime/web/music/<scene>.js`. There are no
+samples, no MIDI files and no third-party code, and the whole thing (code and all five songs) is about 35 KB. Every
+composition is original work, written for this project, and is licensed with it under GPL-3.0-or-later. None of
+them quotes or imitates an existing tune.
+
+| Scene | Title | Key, meter, tempo | Form |
+|---|---|---|---|
+| town | Main Street, Mostly Paved | F major, 4/4, 104, light swing | AABA, 32 bars |
+| valley | Hay Fever Waltz | G major / E minor, 3/4, 92 | A B A C A, 40 bars |
+| diner | The Pie Is Not a Metaphor | A blues, 4/4, 100, shuffle | three 12-bar choruses |
+| tower | The Stairs Have Opinions | D Dorian, 4/4, 72 | AA'BA'', 32 bars |
+| harbor | Buoy Meets Gull | G Mixolydian, 6/8, 100 | AA'BA'', 32 bars |
+
+### Synthesis
+
+The sound is meant to recall an early-90s FM card: every voice is two operators. A modulator oscillator (at a set
+ratio to the note) drives the frequency of a carrier oscillator, and both the modulation index and the carrier level
+have their own envelopes, so a pluck is bright for a moment and then mellows, and a brass note swells in. Optional extras
+are a delayed vibrato and a second, slightly detuned carrier. Eight patches are defined in `PATCH`: `harpsichord`,
+`flute`, `strings`, `brass`, `bass`, `bell`, `organ` and `pluck`. Percussion (`k` kick, `s` snare, `h` closed hat,
+`o` open hat, `r` rim) is a pitch-swept sine and filtered noise from a fixed noise buffer. The mix is up to 8 voices at
+once (a new note steals the voice nearest its end, with a 20 ms ramp), then a gentle compressor, and the overall level is
+around -18 dBFS RMS with peaks below -5 dBFS. Every gain change is a ramp; nothing steps.
+
+Scheduling is a look-ahead: a 40 ms timer schedules the next 0.45 s of notes on `AudioContext.currentTime`, so the timer's
+jitter never reaches the audio and the loop point is sample-accurate. `engine(ctx, out)` works on any context, so the
+same code renders offline.
+
+### Notation
+
+A song is `InnMusic.song({ id, title, bpm, bar, bars, swing, sig, chords, parts })`. The grid is a sixteenth note (a
+"step"; `bpm` counts quarter notes, four steps each), `bar` is the steps per bar (16 for 4/4, 12 for 3/4 and 6/8) and
+`swing` delays the off-beat eighths by that fraction of an eighth. `chords` has one entry per bar (`'F'`, `'D7'`, `'Gm'`,
+`'Am7'`, `'F.D'` for two chords splitting the bar); every part follows the song for `bars` bars and the last bar leads
+back into the first.
+
+A part is `{ i: patch, v: volume, pan, d: patch to use at dusk }` plus one of:
+
+- `n`: notes, as text with `|` between bars. ABC-like pitches: `C D E F G A B` is the octave from middle C, `c d e f g a b` the
+  next, `c'` above and `C,` below; `^` sharp, `_` flat, `=` natural before the note (`sig: '_B'` flats every B). A number
+  after a note or rest (`z`) is its length in steps; `l<n>` sets the default length, `v<n>` the velocity (1 to 15);
+  `[CEG]4` is a chord, `!` makes a note short, `~` ties it to the next note of the same pitch. Each bar must add up to
+  `bar` steps; the engine warns in the console for any that do not.
+- `p`: a generated accompaniment from the chord list, one pattern string per bar (cycled), one character per step: `1 3 5 6 7 8`
+  chord tones in the bass range, `f` the fifth below, `n` a chromatic approach to the next chord's root, `c` the whole chord,
+  `x y z w` the first to fourth tone of the chord in the part's `lo` range, `.` holds and `-` rests.
+- `i: 'drums'` with `p`: drum patterns, one string per bar (cycled); `(kh)` plays two at once and capitals are accents.
+
+### Adding a track
+
+Write `music/<id>.js` calling `InnMusic.song`, add it to the copy list in `CMakeLists.txt`, and name it by scene id.
+To check it without listening, render it: `parse` errors (bars that do not add up) are listed by `InnMusic.compile(song).errors`.
+
+### Playback rules
+
+- Nothing is created before a user gesture and there is no "enable audio" prompt. The first click or key press once the
+  18+ notice has been answered starts it, and that includes the "I am 18 or older" click; a returning visitor starts it
+  with their first click or key press. It stays silent on the refusal screen.
+- Changing the scene crossfades to the new scene's track in about a second. When the iris into the game starts it fades out
+  over 1.5 s (0.3 s with reduced motion), then the context is closed for good, so it never overlaps the game's own sound.
+- While the tab is hidden the context is suspended; it resumes when the tab is shown.
+- Controls: Options, Music: on/off; the note button at the right of the menu bar (`aria-pressed`); the M key on the
+  landing (not while typing in a field, not with a dialog open, never in the game view). The choice is kept in
+  `localStorage` as `inn.music`. The default is on, except that `prefers-reduced-data` or the Save-Data hint make it off
+  until the visitor turns it on. Reduced motion does not affect music.
+- A "Now playing: <title>" line shows for three seconds when a track starts.
+- In dark (dusk) mode a track plays 10% slower and 20% softer, and a part with a `d` patch uses that patch instead.
+
 ## The C: drive
 
 | Source | How it gets to `/c` |
