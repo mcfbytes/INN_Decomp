@@ -12,6 +12,9 @@ const SCALES = ['sharp', 'smooth', 'crt'];
 const TOAST_MS = 6000;
 // The one place for a site name. Empty means no wordmark and the neutral title below.
 const SITE_NAME = '';
+// Sign-in providers: '' asks no server; a URL asks that server's /auth/providers. '?auth=<url>' in the
+// page's address overrides it, and any other non-empty '?auth=' value asks the game server's address.
+const AUTH_SERVER = '';
 const NEUTRAL_TITLE = 'Online world';
 const STRIP_EDGE_PX = 8, STRIP_HIDE_MS = 1500, CONNECT_HOLD_MS = 1400;
 const FRAME_W = 960, SNAP_KEEP = 0.96;
@@ -128,7 +131,10 @@ function httpBase(server) {
 
 async function loadProviders() {
   const list = $('provider-list');
-  const base = httpBase($('com1').value.trim() || defaultServer());
+  // Only a server that has sign-in is asked (innkeeper PLAN Phase 7): innkeeperd's WebSocket port does
+  // not answer HTTP, so probing it on every load only fills both consoles with errors.
+  const configured = new URLSearchParams(location.search).get('auth') ?? AUTH_SERVER;
+  const base = configured === '' ? '' : httpBase(configured) || httpBase($('com1').value.trim() || defaultServer());
   let found = [];
   try {
     if (base) {

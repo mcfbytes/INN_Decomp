@@ -151,8 +151,10 @@ It follows the system colour scheme (day palette in light, dusk with lit windows
 and "Remember on this device" are under Advanced. `SITE_NAME` at the top of `page.js` is the one place
 for a name: empty (the default) shows no wordmark and the title "Online world"; a value is used for both.
 
-**Providers.** The page fetches `<server http base>/auth/providers` (the server address with `ws` turned
-into `http`, same host and port); a JSON array of `{id, name, url}` shows a "Sign in with ..." button per
+**Providers.** Off by default: `AUTH_SERVER` at the top of `page.js` is empty, and innkeeperd's WebSocket
+port does not answer HTTP. With `AUTH_SERVER` set to a URL, or `?auth=<url>` in the page's address, the
+page fetches `<that origin>/auth/providers`; any other non-empty `?auth=` value asks the game server's
+address with `ws` turned into `http` (same host and port). A JSON array of `{id, name, url}` shows a "Sign in with ..." button per
 entry. Any error, a 404 or an empty list keeps the section hidden, so there are no buttons without
 providers.
 
