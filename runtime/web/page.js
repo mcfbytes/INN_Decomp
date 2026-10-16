@@ -101,6 +101,7 @@ function dialBegin(server) {
   dialLine('ATZ');
   dialLine('OK');
   if (page.musicNote) dialLine(page.musicNote);
+  if (page.prefetchNote) dialLine(page.prefetchNote);
   if (page.cardId) dialLine(`AT+CARD=${page.cardId}`);
   dialLine(`ATDT ${server.replace(/^wss?:\/\//, '')}`);
   adv('dialBegin');
@@ -182,7 +183,7 @@ async function loadProviders() {
 // Writes the account number into every LSCI.CFG (the root one and the land copies LSCIGET made) and
 // the stored password into INN\PASS_SET.DTA, so the client's own logon runs unchanged (innkeeper
 // docs/protocol/messages.md section 4.1; the encoder is in auth.js). Then the persona (below).
-function writeCredentials(account, password, persona) {
+async function writeCredentials(account, password, persona) {
   const file = InnAuth.passwordFile(password);
   const configs = findConfigs(DRIVE);
   if (!configs.length) throw new Error('LSCI.CFG not found in the installation.');
@@ -194,8 +195,39 @@ function writeCredentials(account, password, persona) {
   const existing = FS.readdir(dir).find((n) => /^pass_set\.dta$/i.test(n)) || 'PASS_SET.DTA';
   FS.writeFile(`${dir}/${existing}`, file);
   log(`signed-in account ${account} written to LSCI.CFG and ${existing}`);
-  if (persona) writePersona(account, persona);
+  if (persona) {
+    await prefetchSaves(account, persona);
+    writePersona(account, persona);
+  }
   return syncDrive(false);
+}
+
+// A browser that has never held this account would otherwise dial with a made-up persona: the client reads its
+// persona once, at Select Player, before the host's manifest exists, and writes it back over the host's copy.
+// So the account's files are fetched over HTTP first (innkeeperd `GET /auth/accounts/<id>/saves`, authorised by
+// the session token) and written into the drive, recorded as synced. If that fails the line is dialed anyway,
+// as it used to be, with a narrator note and a line in the modem output. Format and reasons: docs/web.md.
+async function prefetchSaves(account, persona) {
+  page.prefetchNote = '';
+  InnSaves.init({ fs: FS, drive: DRIVE, log });
+  InnSaves.setLine(persona);
+  let why = '';
+  try {
+    const listing = await InnAuth.saves(account);
+    if (!listing || !Array.isArray(listing.files)) throw new InnAuth.AuthError('server', 'The saves answer was not understood.', 200);
+    const done = await InnSaves.prefetch(account, listing, (path) => InnAuth.saveFile(account, path));
+    log(`saves: ${done.restored} of ${listing.files.length} file${listing.files.length === 1 ? '' : 's'} fetched before dialing${done.failed ? `, ${done.failed} failed` : ''}`);
+    if (done.failed) why = `${done.failed} file${done.failed === 1 ? '' : 's'} would not come`;
+  } catch (e) {
+    why = e.kind === 'network' ? 'the sign-in server did not answer'
+      : e.status ? `the server answered ${e.status}` : String(e.message || e);
+    log(`saves: not fetched before dialing: ${why}`);
+  }
+  if (!why) return;
+  page.prefetchNote = `; SAVES NOT FETCHED (${why})`;
+  adv('say', `Your saved files could not be fetched from the server (${why}). Dialing anyway with what this browser holds, so a persona may start out blank. The operator suggests patience.`);
+  const reduced = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  await new Promise((resolve) => setTimeout(resolve, reduced ? 1200 : 2800));
 }
 
 // The client's "Select Player" shows what INN\PLAYER.DIR lists and reads each persona from its .DTA, so for a

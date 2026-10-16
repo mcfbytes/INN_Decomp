@@ -203,6 +203,7 @@ const InnAuth = (() => {
     try {
       res = await fetch(`${st.base}${path}`, {
         method,
+        signal: opts.timeout ? AbortSignal.timeout(opts.timeout) : undefined,
         headers: Object.assign({ accept: 'application/json' }, st.token ? { authorization: `Bearer ${st.token}` } : {},
           body === undefined ? {} : { 'content-type': 'application/json' }),
         body: body === undefined ? undefined : JSON.stringify(body),
@@ -240,6 +241,12 @@ const InnAuth = (() => {
   const attestNow = (value) => call('POST', '/auth/attest', { attest: value });
   const createAccount = (persona) => call('POST', '/auth/accounts', { persona });
   const credential = (id) => call('POST', `/auth/accounts/${id}/credential`);
+
+  // The account's saved files, before the dial (innkeeperd `GET /auth/accounts/<id>/saves`): a listing with
+  // the bytes (base64) of as many files as fit under 2 MiB, and one file by path for the rest.
+  const SAVES_TIMEOUT_MS = 8000;
+  const saves = (id) => call('GET', `/auth/accounts/${id}/saves`, undefined, { timeout: SAVES_TIMEOUT_MS });
+  const saveFile = (id, path) => call('GET', `/auth/accounts/${id}/saves?path=${encodeURIComponent(path)}`, undefined, { timeout: SAVES_TIMEOUT_MS });
 
   async function logout() {
     try { await call('POST', '/auth/logout'); } catch { /* the token is forgotten either way */ }
@@ -288,7 +295,7 @@ const InnAuth = (() => {
   const api = {
     encodePassword, passwordFile, setCfgId, personaProblem, PERSONA_RE,
     personaFile, playerDir, personaStem, packLook, unpackLook, randomLook, LOOK,
-    configure, setAttest: (fn) => { st.attest = fn; }, attestNow, loadToken, saveToken, forget, loginUrl, call, fetchSession, createAccount, credential, logout,
+    configure, setAttest: (fn) => { st.attest = fn; }, attestNow, loadToken, saveToken, forget, loginUrl, call, fetchSession, createAccount, credential, saves, saveFile, logout,
     popupLogin, redirectLogin, AuthError,
     state: st,
     token: () => st.token || loadToken(),
