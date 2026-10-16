@@ -97,6 +97,24 @@ function installRoot(paths) {
   return hit.slice(0, hit.length - PROGRAM.exe.length);
 }
 
+// Native music is adl.drv. Sound Blaster digital audio is not played, so a music
+// line that names another driver is rewritten in the browser's copy of the file.
+function ensureAdlib(configPaths) {
+  let noted = false;
+  for (const cfg of configPaths) {
+    const text = new TextDecoder('latin1').decode(FS.readFile(cfg));
+    const next = text.replace(/^(\s*music\s*=\s*)(\S+)/gim, (line, prefix, value) => {
+      if (value.toLowerCase() === 'adl.drv') return line;
+      if (!noted) {
+        toast('Music in this build uses adl.drv. LSCI.CFG named another music driver; that line was rewritten in the browser copy.');
+        noted = true;
+      }
+      return `${prefix}adl.drv`;
+    });
+    if (next !== text) FS.writeFile(cfg, next);
+  }
+}
+
 // Folder pickers drop empty directories, but the interpreter needs its swap directory to exist.
 function createVirtualDirs(configPaths) {
   for (const cfg of configPaths) {
@@ -135,6 +153,7 @@ function installFiles(files) {
     count++;
   }
   createVirtualDirs(configs);
+  ensureAdlib(configs);
   return count;
 }
 
@@ -151,7 +170,9 @@ function syncDrive(populate) {
 async function mountDrive() {
   if (exists(programPath())) {
     page.drive = 'preloaded';
-    createVirtualDirs(findConfigs(DRIVE));
+    const configs = findConfigs(DRIVE);
+    createVirtualDirs(configs);
+    ensureAdlib(configs);
     return;
   }
   if (!exists(DRIVE)) FS.mkdir(DRIVE);
@@ -161,7 +182,9 @@ async function mountDrive() {
   await syncDrive(true);
   if (exists(programPath())) {
     page.drive = 'saved';
-    createVirtualDirs(findConfigs(DRIVE));
+    const configs = findConfigs(DRIVE);
+    createVirtualDirs(configs);
+    ensureAdlib(configs);
   }
 }
 

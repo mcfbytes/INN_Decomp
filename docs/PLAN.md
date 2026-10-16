@@ -88,11 +88,11 @@ produces the game.
       Baron is reached through SierraLand's Waiting Room with 2-4 players; `innkeeperd` has no Red Baron
       service or queue yet ([redbaron.md](redbaron.md)). Red Baron census and lifting plan done (private
       `BARON-PLAN.md`).
-- [ ] **M9** Web-native port (goal set 2026-10-14). Once a program is fully lifted, its video, sound,
-      timer and serial code talks to the host directly: frames to a canvas, music and effects to
-      WebAudio, the link to a WebSocket, with no emulated VGA, OPL, PIT or UART behind it. Lifted
-      functions then call each other directly instead of through entry hooks, and the interpreter
-      remains only for shadow verification. The original data files are still read at run time.
+- [x] **M9** Web-native port (2026-10-16). The INN client is native: video, AdLib music, the timer,
+      input and the link call the host, and lifted functions call each other directly. Games stay on
+      the emulator in mixed mode. The interpreter remains for shadow verification and for those games.
+      The original data files are still read at run time. Still open: Sound Blaster digital audio on
+      the native path, and an Asyncify fallback for browsers without JSPI. Details in [native.md](native.md).
 
 Later (noted 2026-10-15): optionally run the older TSN 2.1 media as well. Its binaries differ from INN's,
 so lifts do not hook and it runs on the interpreter. It needs an installed TSN folder (the sets are

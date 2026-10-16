@@ -15,6 +15,20 @@ cmake --build build-web
 Output in `build-web/`: `inn.html` (from `runtime/web/shell.html`), `inn.js`, `inn.wasm`, and the page
 scripts `page.js`, `saves.js` and `zip.js` copied from `runtime/web/`. The default build type is `Release` (`-O3`).
 
+The native client (INN as C, games still on the emulator) is the same page with two cache variables.
+JSPI is required; Asyncify does not link this configuration:
+
+```
+source /mnt/source/tools/emsdk/emsdk_env.sh
+emcmake cmake -S . -B build-web-native -G Ninja -DINN_WEB_SUSPEND=JSPI -DINN_NATIVE=ON
+cmake --build build-web-native
+```
+
+Serve `build-web-native/` the same way as `build-web/`. Chromium-based browsers run it. A browser
+without JSPI does not; use the hybrid build above for that. When `private/lifted` is present it is
+picked up (`INN_LIFTED_DIR`). Without lifted code the binary still builds, and the native boot reports
+that TSNEXEC has no native entry and runs it on the emulator.
+
 | CMake cache variable | Default | Effect |
 |---|---|---|
 | `INN_WEB_SUSPEND` | `ASYNCIFY` | How lifted code that waits inside a frame yields to the browser. `JSPI` (Chromium-based browsers: Edge, Chrome) suspends without instrumentation and leaves about 1.5x more headroom; `ASYNCIFY` works in every browser. |
@@ -112,6 +126,10 @@ app bar shows the COM1 state (taken from the runtime's `uart: websocket ...` log
 SDL's `AudioContext`), full screen, and a settings drawer with the display mode, storage, and the log.
 When the client exits, an overlay offers to start again. Light and dark follow the system setting.
 
+Native music is `adl.drv`. If `LSCI.CFG` names another music driver, the page shows a notice and
+rewrites that line to `adl.drv` in the browser's copy of the file. Sound Blaster digital audio is
+not played.
+
 ## Keyboard and screen
 
 SDL listens for keys on `#canvas` only (`SDL_HINT_EMSCRIPTEN_KEYBOARD_ELEMENT`), so the page's own fields
@@ -141,6 +159,11 @@ With `--perf`, a frame over 100 ms also logs `long frame`: its emulated time and
 waits in lifted code slept. A frame that waits inside lifted code keeps pace with the wall clock and
 keeps presenting and feeding audio; the frame clock does not owe that time back afterwards.
 
+The native loop does not go through that frame clock. `--perf` there is the same line, taken at each
+platform sleep: host time since the previous sleep returned is the busy slice, and a slice over 100 ms
+logs `long frame`. `executed` counts guest instructions, so it stays near 0 while INN itself is native
+and rises while a game runs on the emulator.
+
 Measured 2026-10-14 in headless Chromium (Playwright build 1243, SwiftShader GL) on a Ryzen 9 9950X3D,
 boot, dial, logon and town map, guest clock 20 MIPS: speed 1.000 throughout, host busy 22 to 44%,
 capacity 45 to 91 MIPS across runs (2x to 4x headroom; the lower end with OPL synthesis running).
@@ -152,3 +175,11 @@ Playwright drives Chromium against the build: pick the zip with `setInputFiles('
 open `?autostart=1` on a preload build, click Start, wait, then click Play at frame pixel (285, 59) of
 the 320x200 frame scaled to the canvas box. The server log shows the Hayes dial, the PAD call, the Login
 and the land directory; the canvas reaches the town map at about 40 s.
+
+A click while a game is on the emulator needs a delay between button down and button up (about 200 ms).
+A click that is released inside one frame is missed. At real speed the headless scenario's emulated
+times are wall times, so the same script can drive the page.
+
+Checked 2026-10-16 against the native JSPI build in headless Chromium: the land directory at 25 s, the
+town map at the 50 s shot, the Yserbius gallery at 90 s and the map again at 135 s. After logon, `perf:`
+speed stayed between 0.998 and 1.003, and no `long frame` line was logged.
