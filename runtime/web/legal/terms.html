@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<meta name="robots" content="noindex">
+<title>Terms of Use · Online world</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' shape-rendering='crispEdges'%3E%3Crect width='16' height='16' fill='%2368aeea'/%3E%3Crect x='10' y='2' width='3' height='3' fill='%23ffe45c'/%3E%3Cpath d='M0 16V11l4-2 4 2 4-3 4 2v6z' fill='%237a9a34'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=VT323&amp;display=swap">
+<style>
+  :root {
+    --bg: #17151d; --surface: #1d1838; --surface-2: #2a2250; --border: #0c0a20; --edge: #6c58b0;
+    --text: #f0e8ff; --muted: #b8acd8; --accent: #ffb23c; --accent-ink: #231a10; --link: #ffc863;
+    --warn-bg: #3a2a0c; --warn-edge: #ffb23c; --miss-bg: #5a1f28; --miss-ink: #ffd9dc;
+    --pixel: "VT323", ui-monospace, "Cascadia Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f4f1ea; --surface: #fff6dc; --surface-2: #f6e8c0; --border: #3a2a1a; --edge: #fffbea;
+      --text: #2a1e12; --muted: #5c4c36; --accent: #e8741c; --accent-ink: #fff8ec; --link: #8a3c00;
+      --warn-bg: #fdecc4; --warn-edge: #b36a10; --miss-bg: #ffd6d6; --miss-ink: #7a1010;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { color-scheme: dark light; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 17px/1.65 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 18px; padding: 8px 16px;
+         background: var(--surface); border-bottom: 3px solid var(--border); box-shadow: inset 0 -2px 0 var(--edge);
+         font: 400 23px/1.1 var(--pixel); letter-spacing: .04em; }
+  .top .brand { color: var(--text); }
+  .top nav { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+  .top a { color: var(--text); text-decoration: none; padding: 2px 4px; }
+  .top a:hover, .top a[aria-current] { background: var(--accent); color: var(--accent-ink); }
+  main { max-width: 44rem; margin: 0 auto; padding: 24px 18px 56px; }
+  h1 { margin: 8px 0 4px; font: 400 44px/1.05 var(--pixel); letter-spacing: .02em; }
+  h2 { margin: 2em 0 .4em; font: 600 1.2rem/1.3 ui-sans-serif, system-ui, sans-serif; }
+  h3 { margin: 1.4em 0 .3em; font-size: 1rem; }
+  p, li { margin: .6em 0; }
+  ul, ol { padding-left: 1.4em; }
+  a { color: var(--link); text-underline-offset: 2px; }
+  a:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .meta { color: var(--muted); font-size: .95rem; margin: 0 0 18px; }
+  .notice, .banner, .shout { padding: 10px 14px; border: 2px solid var(--warn-edge); background: var(--warn-bg); margin: 14px 0; }
+  .banner { border-color: #d03a4a; background: var(--miss-bg); color: var(--miss-ink); font-weight: 600; }
+  .banner[hidden] { display: none; }
+  .banner ul { font-weight: 400; margin: .3em 0 0; }
+  .shout { text-transform: uppercase; font-size: .95rem; letter-spacing: .01em; font-weight: 600; }
+  .missing { background: var(--miss-bg); color: var(--miss-ink); outline: 1px dashed #d03a4a; padding: 0 3px; font-weight: 600; }
+  table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: .95rem; }
+  th, td { text-align: left; vertical-align: top; padding: 6px 10px; border: 1px solid var(--edge); }
+  th { background: var(--surface); }
+  address { font-style: normal; border-left: 4px solid var(--edge); padding: 4px 14px; margin: 12px 0; background: var(--surface); }
+  footer { max-width: 44rem; margin: 0 auto; padding: 0 18px 40px; color: var(--muted); font-size: .9rem; }
+  @media (max-width: 520px) { body { font-size: 16px; } h1 { font-size: 36px; } }
+</style>
+</head>
+<body>
+<header class="top"><span class="brand" id="brand">Online world</span><nav aria-label="Legal pages"><a href="terms.html" aria-current="page">Terms of Use</a><a href="privacy.html">Privacy Notice</a><a href="copyright.html">Copyright &amp; takedown</a></nav></header>
+<main>
+<div class="banner" id="banner" role="alert" hidden></div>
+<h1>Terms of Use</h1>
+<p class="meta">Effective <span data-f="effectiveDate"></span> · Version <span data-f="termsVersion"></span></p>
+<div class="notice"><strong>Not legal advice.</strong> This is a plain-English document written by a volunteer, not a lawyer. It should be reviewed by a qualified lawyer before this service is opened to the public.</div>
+
+<p>These terms are the rules for using this online service, run by <span data-f="operatorName"></span> (&ldquo;we&rdquo;, &ldquo;us&rdquo;). It is a free, volunteer-run hobby service: a web page and a game server. Please read them. If you do not agree, please do not use the service.</p>
+
+<h2>1. Who may use it</h2>
+<p>The service is for adults. You must be <strong><span data-f="minimumAge"></span> or older</strong>. When you continue past the age notice you declare that you are. We do not check this; it is your word, and it is a condition of using the service. If you are younger, you must not use it, and we may delete any account we believe belongs to someone under that age. You must also be old enough, and legally able, to agree to these terms where you live.</p>
+
+<h2>2. Accounts and passwords</h2>
+<p>You sign in with a third-party provider, and you then get one or more game accounts (an account number and a persona name). You are responsible for what happens under your accounts.</p>
+<p><strong>The game&rsquo;s own password is weak by design.</strong> The original client software limits it to 6 to 10 letters and digits, and it is stored in the simple encoded form that software uses. Do not reuse a real password from anywhere else. Treat it as a ticket for a game, not a bank vault.</p>
+<p>Tell us if you think someone is using your account. We may change or remove a persona name that breaks these terms.</p>
+
+<h2>3. Acceptable use and conduct</h2>
+<p>Do not use the service to:</p>
+<ul>
+<li>harass, bully, stalk or abuse anyone, or post hate speech or content that attacks people for who they are;</li>
+<li>make threats of violence against anyone;</li>
+<li>post or share sexual content involving minors, or any sexual content aimed at minors;</li>
+<li>post or share anything illegal, or anything that infringes someone else&rsquo;s rights;</li>
+<li>send spam, advertising or chain messages, or run scams;</li>
+<li>pretend to be another person, or a member of the operator&rsquo;s team;</li>
+<li>cheat, or exploit bugs, in ways that harm other players or the service;</li>
+<li>attack, probe, overload or break into the service, its servers or other players, or interfere with how it works.</li>
+</ul>
+<p><strong>Zero tolerance.</strong> We have no tolerance at all for child sexual exploitation material or for credible threats of violence. Such content is reported to the authorities, the accounts involved are closed, and we cooperate with lawful requests for information about it.</p>
+
+<h2>4. Your content</h2>
+<p>You keep whatever rights you have in the things you create here: mail, bulletin posts, character saves, and the like. To run the service we need your permission to use them, so you give us a limited, non-exclusive, royalty-free licence to store, copy, back up and display your content, and to pass it to the other players you send it to or share it with, only as needed to operate the service. The licence ends when the content is deleted, except for backups and for copies already delivered to others.</p>
+<p>You promise that you have the right to post what you post. We may remove any content, and suspend or end any account, at our discretion, with or without notice, for example for breaking these terms.</p>
+
+<h2>5. Reporting abuse</h2>
+<p>To report abuse or a problem account, email <a data-f="contactEmail" data-mail></a>. Copyright complaints should follow the <a href="copyright.html">Copyright &amp; takedown policy</a>.</p>
+
+<h2>6. A free service with no promises</h2>
+<p>The service is free. It has no promised uptime and no support. We may change it, pause it, or shut it down at any time, for any reason. <strong>Data may be lost</strong>: accounts, mail, posts and saves can disappear. Keep your own copies of anything you care about.</p>
+
+<h2>7. The game files are yours to bring</h2>
+<p>The service does not include or distribute the original client software. You supply your own copy, and you must have the right to use it. The page reads those files in your browser and keeps them on your device. If you turn on save sync, only the listed game save files are uploaded. Do not ask us for the software.</p>
+
+<h2>8. No affiliation</h2>
+<p>This service is an independent project. It is not affiliated with, endorsed by, or sponsored by the owners of the original software or of any trademarks it may use. Any such names belong to their owners and are used only to describe what the page is compatible with, if at all.</p>
+
+<h2>9. Third-party sign-in</h2>
+<p>Signing in happens at a provider you choose. Their own terms and privacy policy govern that relationship, not ours. We ask the provider only for a sign-in identifier (the &ldquo;openid&rdquo; scope), nothing else. Details are in the <a href="privacy.html">Privacy Notice</a>.</p>
+
+<h2>10. Open source</h2>
+<p>The code that runs this service is free software under GPL-3.0-or-later. These terms are about the hosted service. They do not limit any rights the licence gives you over the code.</p>
+
+<h2>11. Disclaimer of warranties</h2>
+<p class="shout">The service is provided &ldquo;as is&rdquo; and &ldquo;as available&rdquo;, without warranties of any kind, express or implied, including merchantability, fitness for a particular purpose, non-infringement, availability, accuracy or that it will be free of errors, interruptions, or harmful components. You use it at your own risk.</p>
+
+<h2>12. Limitation of liability</h2>
+<p class="shout">To the fullest extent permitted by law, we and anyone who contributes to or helps run the service are not liable for any indirect, incidental, special, consequential or punitive damages, or for lost data, lost profits or lost goodwill, arising from your use of, or inability to use, the service, even if we were told it could happen. Where the law does not allow a limit to be excluded, our total liability for all claims is limited to the greatest extent the law allows, and in any case to the amount you paid us to use the service, which is zero.</p>
+<p>Nothing in these terms limits liability that cannot be limited by law, or any rights you have as a consumer that cannot be waived.</p>
+
+<h2>13. Indemnity</h2>
+<p>If your content or your breach of these terms leads to a claim against us, you agree to cover our reasonable costs and losses from that claim, to the extent the law allows.</p>
+
+<h2>14. Governing law</h2>
+<p>These terms are governed by the laws of <span data-f="governingLaw"></span>, without regard to its conflict-of-laws rules, and any dispute will be decided in the courts there, except where mandatory local law gives you the right to go elsewhere.</p>
+
+<h2>15. Changes to these terms</h2>
+<p>We may update these terms. They carry a version number (currently <strong><span data-f="termsVersion"></span></strong>). When a change matters, the version number goes up, and the page asks you again to confirm your age and accept the terms before you continue. Using the service after that means you accept the new terms.</p>
+
+<h2>16. Ending your use</h2>
+<p>You may stop using the service at any time. To have your data deleted, see the <a href="privacy.html">Privacy Notice</a>.</p>
+
+<h2>17. Everything else</h2>
+<p>If a part of these terms is found to be unenforceable, the rest still applies. If we do not enforce a term once, we have not given it up. These terms, with the Privacy Notice and the Copyright &amp; takedown policy, are the whole agreement between you and us about the service.</p>
+
+<h2>18. Contact</h2>
+<p><span data-f="operatorName"></span><br>Email: <a data-f="contactEmail" data-mail></a></p>
+
+</main>
+<footer><p>These pages are part of the free software project that runs this service (GPL-3.0-or-later). They are a template for the operator to review and adapt; they are not legal advice.</p></footer>
+<script src="legal.js"></script>
+</body>
+</html>

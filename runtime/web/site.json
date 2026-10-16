@@ -1,0 +1,12 @@
+{
+  "siteName": "",
+  "operatorName": "",
+  "contactEmail": "",
+  "privacyEmail": "",
+  "dmcaAgent": { "name": "", "address": "", "email": "", "phone": "" },
+  "governingLaw": "",
+  "serverLocation": "",
+  "effectiveDate": "",
+  "termsVersion": 1,
+  "minimumAge": 18
+}

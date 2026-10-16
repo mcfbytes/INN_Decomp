@@ -57,10 +57,12 @@ function layoutFrame() {
   $('frame').style.setProperty('--fh', `${width * 3 / 4}px`);
 }
 
+// site.json's siteName wins over the constant above when it is set.
 function showName() {
-  if (!SITE_NAME) { document.title = NEUTRAL_TITLE; return; }
-  document.title = SITE_NAME;
-  $('wordmark').textContent = SITE_NAME;
+  const name = Site.cfg.siteName || SITE_NAME;
+  if (!name) { document.title = NEUTRAL_TITLE; return; }
+  document.title = name;
+  $('wordmark').textContent = name;
   $('wordmark').hidden = false;
 }
 
@@ -141,9 +143,10 @@ function httpBase(server) {
 
 async function loadProviders() {
   const list = $('provider-list');
+  await Site.ready;
   // Only a server that has sign-in is asked (innkeeper PLAN Phase 7): innkeeperd's WebSocket port does
   // not answer HTTP, so probing it on every load only fills both consoles with errors.
-  const configured = new URLSearchParams(location.search).get('auth') ?? AUTH_SERVER;
+  const configured = new URLSearchParams(location.search).get('auth') ?? (Site.cfg.authServer || AUTH_SERVER);
   const base = configured === '' ? '' : httpBase(configured) || httpBase($('com1').value.trim() || defaultServer());
   let found = [];
   try {
@@ -164,6 +167,8 @@ async function loadProviders() {
     const a = document.createElement('a');
     a.className = 'btn';
     a.href = InnAuth.loginUrl(href, 'redirect');
+    // The attestation is added when the age notice has been answered, so refresh the address on use.
+    a.addEventListener('click', () => { a.href = InnAuth.loginUrl(href, 'redirect'); });
     a.textContent = `Sign in with ${p.name}`;
     list.append(a);
     usable.push({ id: typeof p.id === 'string' ? p.id : p.name, name: p.name, href });
@@ -418,7 +423,7 @@ function onDrop(e) {
   e.preventDefault();
   $('drop').classList.remove('over');
   document.body.classList.remove('dropping');
-  if (page.started) return;
+  if (page.started || Site.blocking()) return;
   const entries = [...e.dataTransfer.items].map((item) => item.webkitGetAsEntry && item.webkitGetAsEntry()).filter(Boolean);
   const zip = [...e.dataTransfer.files].find((f) => /\.zip$/i.test(f.name));
   if (entries.some((entry) => entry.isDirectory)) pick(filesFromDrop, entries);
@@ -431,7 +436,7 @@ function wireDrop() {
   const zone = $('drop');
   window.addEventListener('dragover', (e) => {
     e.preventDefault();
-    if (!page.started) { zone.classList.add('over'); document.body.classList.add('dropping'); }
+    if (!page.started && !Site.blocking()) { zone.classList.add('over'); document.body.classList.add('dropping'); }
   });
   window.addEventListener('dragleave', (e) => { if (!e.relatedTarget) { zone.classList.remove('over'); document.body.classList.remove('dropping'); } });
   window.addEventListener('drop', onDrop);
@@ -611,7 +616,7 @@ function keepServerSaves() {
 }
 
 function start(session) {
-  if (page.started || page.drive === 'none') return;
+  if (page.started || page.drive === 'none' || Site.blocking()) return;
   page.started = true;
   const server = $('com1').value.trim() || defaultServer();
   page.server = server;
@@ -639,7 +644,7 @@ async function onRuntimeReady() {
   await mountDrive();
   showDriveState();
   adv('ready');
-  if (params.get('autostart') && page.drive !== 'none') start();
+  if (params.get('autostart') && page.drive !== 'none') Site.whenClear().then(() => start());
 }
 
 function wirePage() {
@@ -663,7 +668,9 @@ function wirePage() {
     if (page.started) $('canvas').focus();
   });
   wireStrip();
+  InnAuth.setAttest(() => Site.attest());
   showName();
+  Site.ready.then(showName);
   loadProviders();
   $('open-settings').addEventListener('click', () => openSettings(true));
   $('close-settings').addEventListener('click', () => openSettings(false));

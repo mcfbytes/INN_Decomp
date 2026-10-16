@@ -58,7 +58,7 @@ const InnAuth = (() => {
 
   // ---------- the session ----------
 
-  const st = { base: '', origin: '', token: '', identity: null, provider: '', pending: false, fragmentError: '' };
+  const st = { base: '', origin: '', token: '', attest: null, identity: null, provider: '', pending: false, fragmentError: '' };
 
   // A redirect login comes back with the result in the address fragment. Take it and clean the address.
   function readFragment() {
@@ -104,6 +104,9 @@ const InnAuth = (() => {
     const url = new URL(href);
     url.searchParams.set('return', returnUrl());
     if (mode) url.searchParams.set('mode', mode);
+    // "<age>+v<terms>": the player's answer to the age and terms notice (docs/web.md, Sign-in).
+    const attest = st.attest && st.attest();
+    if (attest) url.searchParams.set('attest', attest);
     return url.href;
   }
 
@@ -137,16 +140,20 @@ const InnAuth = (() => {
 
   async function fetchSession() {
     const s = await call('GET', '/auth/session');
-    if (!s || !s.identity || !Array.isArray(s.accounts)) throw new AuthError('server', 'The session answer was not understood.', 200);
+    if (!s || !s.identity || typeof s.identity.handle !== 'string' || !Array.isArray(s.accounts)) throw new AuthError('server', 'The session answer was not understood.', 200);
     st.identity = s.identity;
     st.provider = s.identity.provider || '';
+    const at = s.attested;
     return {
       identity: s.identity,
+      attested: at && Number.isInteger(at.age) && Number.isInteger(at.terms) ? { age: at.age, terms: at.terms } : null,
       accounts: s.accounts.filter((a) => a && Number.isInteger(a.id) && typeof a.persona === 'string'),
       canCreate: !!s.canCreate,
     };
   }
 
+  // Records the player's answer on the identity when the server holds an older (or no) attestation.
+  const attestNow = (value) => call('POST', '/auth/attest', { attest: value });
   const createAccount = (persona) => call('POST', '/auth/accounts', { persona });
   const credential = (id) => call('POST', `/auth/accounts/${id}/credential`);
 
@@ -196,7 +203,7 @@ const InnAuth = (() => {
 
   const api = {
     encodePassword, passwordFile, setCfgId, personaProblem, PERSONA_RE,
-    configure, loadToken, saveToken, forget, loginUrl, call, fetchSession, createAccount, credential, logout,
+    configure, setAttest: (fn) => { st.attest = fn; }, attestNow, loadToken, saveToken, forget, loginUrl, call, fetchSession, createAccount, credential, logout,
     popupLogin, redirectLogin, AuthError,
     state: st,
     token: () => st.token || loadToken(),
