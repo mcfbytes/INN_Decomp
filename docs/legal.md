@@ -69,26 +69,40 @@ if you change them, change the notice and raise `termsVersion`.
 ## 5. Law-enforcement requests and reporting
 
 *Not legal advice.* The server keeps a sealed record per connection (start and end time, account number, hashed
-identity key, IP address), encrypted with `age` to an operator public key. The private key is kept offline, so the
-server cannot read the records. The raw sign-in identifier is also kept sealed, so you can answer "which provider
+identity key, IP address), sealed with envelope encryption: AES-256-GCM per record, with the data key wrapped by an
+RSA public key. The matching private key is a non-exportable key in a separate **escrow** Azure Key Vault that the
+server's identity cannot access. The server cannot read the records, and every decryption is logged by Key Vault. The raw sign-in identifier is also kept sealed, so you can answer "which provider
 account is this?" for one account under legal process. Records are purged after the retention period.
 
 - **Verify the request is genuine** (a real agency, a real case, a proper legal document) and **get a lawyer**
   before disclosing anything. Be polite and slow; fake emergency and fake subpoena requests exist.
 - **Preservation requests** (18 U.S.C. section 2703(f)): place a hold on the named account with the hold command
-  (`innkeeperd audit hold`, or `innkeeperd hold --account N --until DATE`), so its records survive the purge. Hold
+  (`innkeeperd hold --account N --until DATE`; `innkeeperd audit hold` is an alias), so its records survive the
+  purge. Hold
   only what is named.
-- **Decrypt only the named accounts' records**, offline, on a machine that is not the server, with the age key:
-  `age -d -i key.txt`. Export just those records with `innkeeperd audit export`. Never decrypt casually, and
-  never decrypt to look around.
+- **Decrypt only the named accounts' records**, on your own machine, not the server:
+  1. Export just those records with `innkeeperd audit export --account N`.
+  2. Unwrap their data keys through the escrow vault with your own Azure login (`tools/audit_unwrap.sh`, which
+     uses `az keyvault key decrypt`).
+  3. Open the records with `innkeeperd audit open`.
+
+  Never decrypt casually, and never decrypt to look around. Key Vault's logs show every unwrap.
 - **Keep a log of disclosures:** date, requester, the legal document, what was handed over, and who approved it.
 - **Reporting apparent child sexual abuse material:** if you gain actual knowledge of apparent CSAM, US providers
   must report it to the NCMEC CyberTipline (18 U.S.C. section 2258A) and preserve the reported content. Check the
   current preservation period: it was extended to one year in 2024 (the REPORT Act). Do not view, copy or
   forward the material beyond what you are advised to do; ask a lawyer first.
-- **Key handling:** generate the age private key off the server, keep it offline, and keep a backup of it (a
-  lost key means sealed records can never be opened, and the retention period still applies). Give the server the
-  public key only (`--audit-recipient`).
+- **Key handling:** two vaults.
+  - The **server vault**, readable by the server's managed identity (or its service principal when
+    self-hosted), holds the identity hashing key, the sign-in client secrets and a copy of the audit public key.
+  - The **escrow vault** holds the audit private key and grants the server nothing. Use only your own account,
+    ideally with just-in-time elevation.
+  - Infrastructure as code creates the key inside the escrow vault and copies its public half to the server
+    vault. `tools/audit_roundtrip.sh` then checks that a record sealed with the server's copy opens with the
+    escrow key.
+  - Keep soft delete and purge protection on for both vaults. A deleted key means sealed records can never be
+    opened.
+  - For local development there is no vault: `innkeeperd audit dev-keygen` makes a local key pair.
 
 ## 6. Beyond the site
 
