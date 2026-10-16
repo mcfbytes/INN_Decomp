@@ -288,7 +288,7 @@ Setup is a small point-and-click game (`adv.js`; `page.js` calls its hooks):
 The menu bar slides down when the pointer touches the top edge (always visible on touch screens and narrow windows, and
 while a menu is open). F10 or Alt opens it; the arrow keys move, Enter picks, Esc closes. It carries the ARIA menubar
 roles and does everything the picture does: Game (Load disks..., Load disk image (.zip)..., Dial, Hang up, and with
-sign-in configured "Sign in..." or, once signed in, "Choose line..." and "Sign out"), Options (Server address..., Remember on this device, Animation), Scene (the five
+sign-in configured "Sign in..." or, once signed in, "Who's playing..." and "Sign out"), Options (Server address..., Remember on this device, Animation), Scene (the five
 scenes) and Help (How do I play?, About). Server address opens a small dialog with the field the card's Advanced section
 had; it accepts only `ws://` or `wss://` addresses (empty means the default) and uses the same `inn.com1` key, stored
 when you dial. "Remember" is the same `inn.remember` checkbox. A playful score on the right ("Score: 0 of 1993") is kept
@@ -314,11 +314,12 @@ list) nothing changes: phone, then dial. With providers, the flow below runs (co
 2. *On hold.* A card opens the login in a popup (`window.open` straight from the click) and the narrator says the
    operator has put you on hold (tiny hold-music notes; "Hang up on the operator" closes the popup). If the popup
    is blocked, the page redirects in the same window instead and takes the result from the address fragment.
-3. *The card.* On success a calling-card icon joins the disk icon in the inventory and the score gains 5. One
-   account is used straight away; several give "Which line, please?" with a button per persona; when the server
-   says `canCreate`, "A new line, please" opens a dialog for a persona name (1 to 10 of A-Z, a-z, 0-9: the
-   innkeeper docs set no persona rule, so this is the page's own, and the server may be stricter). "My own
-   number" is always in the list too.
+3. *The card.* On success a calling-card icon joins the disk icon in the inventory and the score gains 5. Each
+   INN account a sign-in owns is one persona (the account number and its name in town). A first sign-in has none,
+   so the narrator asks for a name straight away ("Your name in town": 1 to 10 of A-Z, a-z, 0-9; the innkeeper
+   docs set no persona rule, so this is the page's own, and the server may be stricter); cancelling offers
+   "Pick a name" or "My own number". One account is used straight away; several give "And who's playing today?"
+   with a button per persona, plus "Someone new, please" when the server says `canCreate`, and "My own number".
 4. *Credentials, then dial.* The page fetches the account's credential and writes it into the browser's copy of
    the install (below), then dials with the session token on the WebSocket address. The modem box gains an
    `AT+CARD=<provider id>` line before `ATDT`.

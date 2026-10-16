@@ -316,7 +316,7 @@ const Adv = (() => {
       network: `Could not reach the sign-in server at ${InnAuth.state.base}. Check that it is running and that the ?auth= address is right.`,
       closed: 'The server is not taking new accounts: enrolment is closed. Existing lines still work.',
       server: busy ? 'The switchboard is busy (the server answered 503). Try again in a moment.' : `The sign-in server had a problem (it answered ${e.status}). Try again in a moment.`,
-      limit: 'This card has opened as many new lines as it may in a day (the server answered 429). Use a line you already have, or try again tomorrow.',
+      limit: 'This card has signed up as many new names as it may in a day (the server answered 429). Play as a name you already have, or try again tomorrow.',
       attest: 'The server has no current answer to the age and terms notice for this sign-in (it answered 403), and it would not take one. You are not signed in for new lines.',
       refused: e.code === 'no_such_account' ? 'That line is not on this card (the server answered 404).' : `${e.message}`,
     }[kind] || `Sign-in failed: ${e && e.message ? e.message : e}.`;
@@ -375,23 +375,28 @@ const Adv = (() => {
     if (page.started) return;
     if (!s.accounts.length) {
       if (!s.canCreate) return signFail(new InnAuth.AuthError('closed', 'No lines on this card.'));
-      return say(`${intro}Hello, ${name}. This card has no lines yet. A new one, then.`, { actions: [{ label: 'Continue', fn: openPersonaDialog }], focus: true });
+      if (sign.pick) {
+        sign.pick = false;
+        return say(`${intro}No name, no service, I'm afraid. The town directory is very strict about that.`, { actions: [{ label: 'Pick a name', fn: openPersonaDialog }, { label: 'My own number', fn: ownNumber }], focus: true });
+      }
+      say(`${intro}Hello, ${name}. New in town? Then you'll need a name for the directory. Pencil ready.`, { sticky: true });
+      return openPersonaDialog();
     }
     if (s.accounts.length === 1 && !sign.pick) {
       const a = s.accounts[0];
-      say(`${intro}Hello, ${name}. Line ${a.persona}, then.`, { sticky: true });
+      say(`${intro}Hello, ${name}. Ah, it's ${a.persona}. Putting you through.`, { sticky: true });
       return setTimeout(() => connectAs(a), lead ? (reduced() ? 1600 : 2600) : 0);
     }
     sign.pick = false;
     const actions = s.accounts.map((a) => ({ label: `${a.persona} (${a.id})`, fn: () => connectAs(a) }));
-    if (s.canCreate) actions.push({ label: 'A new line, please', fn: openPersonaDialog });
+    if (s.canCreate) actions.push({ label: 'Someone new, please', fn: openPersonaDialog });
     actions.push({ label: 'My own number', fn: ownNumber });
-    say(`${intro}Hello, ${name}. Which line, please?`, { actions, focus: true, near: sparkX('phone') });
+    say(`${intro}Hello, ${name}. And who's playing today?`, { actions, focus: true, near: sparkX('phone') });
   }
 
   async function connectAs(a) {
     if (!canDial()) return;
-    say(`Putting you through on the ${a.persona} line…`, { sticky: true });
+    say(`Putting ${a.persona} through…`, { sticky: true });
     try {
       const c = await attested(() => InnAuth.credential(a.id));
       if (!c || c.account !== a.id || typeof c.password !== 'string') throw new InnAuth.AuthError('server', 'The credential answer was not understood.', 200);
@@ -424,7 +429,7 @@ const Adv = (() => {
     withSession((s) => chooseLine(s, ''));
   }
 
-  // ---- the new-line dialog (the same period dialog as the server address) ----
+  // ---- the new-name dialog (the same period dialog as the server address) ----
 
   function openPersonaDialog() {
     sign.pdlgReturn = document.activeElement;
@@ -457,7 +462,7 @@ const Adv = (() => {
       if (e.kind === 'limit' && sign.last && sign.last.accounts.length) {
         sign.last.canCreate = false;
         sign.pick = true;
-        return chooseLine(sign.last, 'No new line today: this card has opened its limit (the server answered 429).');
+        return chooseLine(sign.last, 'No new names today: this card has reached its limit (the server answered 429).');
       }
       return signFail(e);
     } finally { ui.persOk.disabled = false; }
@@ -572,7 +577,7 @@ const Adv = (() => {
     if (providers.length) {
       game.push({ sep: true });
       if (signedIn()) {
-        game.push({ label: 'Choose line…', fn: menuLine, off: () => page.started });
+        game.push({ label: 'Who\'s playing…', fn: menuLine, off: () => page.started });
         game.push({ label: 'Sign out', fn: signOut, off: () => page.started });
       } else game.push({ label: 'Sign in…', fn: () => (sign.busy ? say('The operator already has you on hold.') : askWho({ own: false })), off: () => page.started });
     }
@@ -1015,8 +1020,8 @@ const Adv = (() => {
     ui.persCancel = el('button', { type: 'button', className: 'abtn', textContent: 'Cancel' });
     ui.pdlg = el('div', { id: 'pdlg', className: 'adv dlg', hidden: true },
       el('div', { role: 'dialog', ariaModal: 'true', className: 'box' },
-        el('h2', { id: 'pdlg-title', textContent: 'A new line, please' }),
-        el('p', { className: 'hint', textContent: 'Name for the new line: 1 to 10 letters or digits.' }),
+        el('h2', { id: 'pdlg-title', textContent: 'Your name in town' }),
+        el('p', { className: 'hint', textContent: 'The name other players will see, and the one on your player card: 1 to 10 letters or digits.' }),
         ui.pers, ui.persErr, el('div', { className: 'acts' }, ui.persOk, ui.persCancel)));
     ui.pdlg.firstChild.setAttribute('aria-labelledby', 'pdlg-title');
     ui.iris = el('div', { id: 'iris', hidden: true });
