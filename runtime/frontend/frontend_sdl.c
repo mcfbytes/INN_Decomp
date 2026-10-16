@@ -26,7 +26,9 @@
 #include "host_input.h"
 #include "host_platform.h"
 #include "host_video.h"
+#include "lift_internal.h"
 #include "native.h"
+#include "native_exec.h"
 #endif
 
 enum {
@@ -517,34 +519,67 @@ static bool platform_quit_requested(void *ctx)
     return ((Frontend *)ctx)->quit;
 }
 
-/* M9 stand-in until package 10a (native_run_top): enters the top program at its native start and
- * returns its exit code once it terminates, or NATIVE_NO_START when it has none. */
-static jmp_buf top_terminated_jmp;
-
-static void top_terminated(Machine *m, uint8_t code)
+/* The native start CS:IP is at: a hooked native-control entry whose bytes are in place. */
+static bool at_native_start(Machine *m)
 {
-    if (m->exit_requested)
-        longjmp(top_terminated_jmp, 1);
+    uint32_t linear = m->cpu.seg_base[S_CS] + (m->cpu.eip & 0xFFFF);
+    if (!lift_hooked(m, linear))
+        return false;
+    LiftState *s = lift_state(m);
+    for (int i = 0; i < s->active_count; i++)
+        if (s->active[i].linear == linear)
+            return s->active[i].entry->native_only && lift_entry_bytes_match(m, &s->active[i]);
+    return false;
 }
 
-static int native_run_top(Machine *m)
+/* The EXEs on the drive are packed (LZEXE): the unpacker at the EXE entry runs on the CPU, with
+ * interrupts held so that none goes to a device, until it jumps to the program's native start. False
+ * when it stops anywhere else first (another lifted entry, a halt, the budget). */
+enum { UNPACK_INSNS = 100000000 };
+
+static bool unpack_to_native_start(Machine *m)
 {
-    uint32_t start = m->cpu.seg_base[S_CS] + (m->cpu.eip & 0xFFFF);
-    if (!lift_hooked(m, start)) {
-        native_set_active(m, false);
-        return NATIVE_NO_START;
+    for (uint64_t left = UNPACK_INSNS; !m->exit_requested;) {
+        if (at_native_start(m))
+            return true;
+        m->cpu.hook_pending = false;
+        uint64_t done = cpu_run(m, left);
+        if (m->cpu.hook_pending) {
+            m->cpu.hook_pending = false;
+            return at_native_start(m);
+        }
+        if (done == 0 || done >= left || m->cpu.halted)
+            return false;
+        left -= done;
     }
-    native_set_active(m, true);
-#ifdef HAVE_DOS
-    dos_set_terminate_hook(m, top_terminated);
-#endif
-    if (!setjmp(top_terminated_jmp))
-        lift_dispatch_far_at(m, m->cpu.seg[S_CS], (uint16_t)m->cpu.eip);
-#ifdef HAVE_DOS
-    dos_set_terminate_hook(m, NULL);
-#endif
-    native_set_active(m, false);
-    return m->exit_code;
+    return false;
+}
+
+/* The top program was loaded before native mode was on, so the native-only entries of its module are
+ * not armed yet: arm them now, and those of every module loaded later. */
+enum { PSP_PARAS = 0x10, MCB_SIZE_WORD = 3 };
+
+static void arm_native_control(Machine *m)
+{
+    lift_state(m)->native_control = true;
+    uint16_t load_seg = 0;
+    const char *module = lift_module_owning(m, m->cpu.seg[S_CS], &load_seg);
+    if (!module)
+        return;
+    char name[sizeof lift_state(m)->modules[0].name];
+    snprintf(name, sizeof name, "%s", module);
+    uint16_t paras = mem_rd16(m, real_addr((uint16_t)(load_seg - PSP_PARAS - 1), MCB_SIZE_WORD));
+    lift_module_loaded(m, name, load_seg, (uint32_t)(paras - PSP_PARAS) * 16);
+}
+
+static bool run_to_native_start(Machine *m)
+{
+    arm_native_control(m);
+    bool hold = m->irq_hold;
+    m->irq_hold = true;
+    bool found = unpack_to_native_start(m);
+    m->irq_hold = hold;
+    return found;
 }
 
 /* Runs the program natively; without a native start it runs on the emulator as in the hybrid build. */
@@ -563,7 +598,10 @@ static int run_native(Frontend *f)
         g_frontend = f;
         native_set_platform(m, &platform);
     }
-    if (native_run_top(m) != NATIVE_NO_START) {
+    if (run_to_native_start(m)) {
+        native_set_active(m, true);
+        native_run_top(m);
+        native_set_active(m, false);
         if (!f->o->headless)
             end_windowed(f);
         return 0;
