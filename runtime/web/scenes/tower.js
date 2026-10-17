@@ -373,6 +373,9 @@ InnScenes.register((() => {
     { id: 'switchboard', x: 200, y: 84, w: 36, h: 26, say: [
       '"Please hold," says a voice inside. "I will transfer you to a newt."',
       'Rows of little lights blink. Each one is somebody being put through to somebody else\'s problem.'] },
+    { id: 'tree', x: 282, y: 10, w: 40, h: 140, say: [
+      'The tree is listening. Trees are notorious for it.',
+      'It has a knot like a face. It would rather you did not mention it.'] },
     { id: 'owl', x: 278, y: 134, w: 26, h: 22, say: [
       'An owl. It has been hauling cable for six hours and has asked for a raise in mice.',
       'The owl gives you a look. It is the look of a bird with a very long cable.'] },
@@ -387,9 +390,6 @@ InnScenes.register((() => {
       'Do not eat the mushrooms. They are on a call.'] },
     { id: 'cable', x: 36, y: 150, w: 100, h: 20, say: [
       'A very thick cable. It goes on into the forest with an air of purpose.'] },
-    { id: 'tree', x: 282, y: 10, w: 40, h: 140, say: [
-      'The tree is listening. Trees are notorious for it.',
-      'It has a knot like a face. It would rather you did not mention it.'] },
   ];
 
   hotspots.push(

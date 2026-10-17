@@ -340,7 +340,14 @@ InnScenes.register((() => {
 
   const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
 
+  // Later entries win a click, so the big backdrops come first and the small objects on them after.
   const hotspots = [
+    { id: 'clouds', x: 0, y: 0, w: 200, h: 80, say: [
+      'A cloud drifts past. It does not have the right of way, but it has the confidence.'] },
+    { id: 'volcano', x: 205, y: 6, w: 100, h: 112, say: [
+      'The volcano is puffing little @ signs. It has a lot of mail to get through.',
+      'It rumbles politely, like someone clearing their throat at a dinner party.',
+      'No, you may not toast anything over it. There is a sign.'] },
     { id: 'repairman', role: 'phone', x: 250, y: 66, w: 26, h: 42, say: [
       'A repairman is stuck at the top of the pole. He says he is "just inspecting the line."',
       'The repairman has been up there since Tuesday. Nobody has told him which Tuesday.',
@@ -352,10 +359,6 @@ InnScenes.register((() => {
       'The mailbox has sprouted legs. It looks like it is late for something.',
       'You offer it a letter. It takes a step back and checks its flag.',
       'It is a very nervous mailbox. Think of the post it has seen.'] },
-    { id: 'volcano', x: 205, y: 6, w: 100, h: 112, say: [
-      'The volcano is puffing little @ signs. It has a lot of mail to get through.',
-      'It rumbles politely, like someone clearing their throat at a dinner party.',
-      'No, you may not toast anything over it. There is a sign.'] },
     { id: 'church', x: 160, y: 54, w: 28, h: 82, say: [
       'The church clock reads a quarter past something. The bell reads the clock.',
       'The weathervane points at you. It always does. It is very rude.'] },
@@ -365,8 +368,6 @@ InnScenes.register((() => {
     { id: 'trees', x: 226, y: 122, w: 28, h: 30, say: [
       'An autumn tree. It is showing off, and the other trees are letting it.',
       'A leaf falls on your head. This is the full extent of the excitement here.'] },
-    { id: 'clouds', x: 0, y: 0, w: 200, h: 80, say: [
-      'A cloud drifts past. It does not have the right of way, but it has the confidence.'] },
   ];
 
   // The two objects that run the game: where the disks live and the telephone (adv.js).
