@@ -397,15 +397,15 @@ const InnScenes = (() => {
   // ---------- turning a painting into an indexed 256-colour picture ----------
 
   // Paper and wash: broad blotches of pigment, fine fibre, grain and a faint vignette.
-  function texture(rgba, dark) {
+  function texture(rgba, dark, w = W, h = H) {
     const warm = dark ? [0.96, 0.98, 1.04] : [1.02, 1.0, 0.95];
-    for (let y = 0; y < H; y++) {
-      for (let x = 0; x < W; x++) {
-        const i = (y * W + x) * 4;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const i = (y * w + x) * 4;
         const n1 = noise(x * 0.035, y * 0.05, 3) - 0.5;
         const n2 = noise(x * 0.25, y * 0.09, 5) - 0.5;
         const gr = hash2(x, y, 9) - 0.5;
-        const vx = (x / W - 0.5) * 2, vy = (y / H - 0.5) * 2;
+        const vx = (x / w - 0.5) * 2, vy = (y / h - 0.5) * 2;
         const vig = 1 - 0.07 * (vx * vx + vy * vy * 0.6);
         const f = (1 + n1 * 0.13 + n2 * 0.05 + gr * 0.05) * vig;
         const wr = 1 + (warm[0] - 1) * (0.5 + n1), wg = 1 + (warm[1] - 1) * (0.5 + n1), wb = 1 + (warm[2] - 1) * (0.5 + n1);
@@ -488,16 +488,16 @@ const InnScenes = (() => {
     for (let i = 0; i < 64; i++) offs[i] = Math.round(((BAYER8[i] + 0.5) / 64 - 0.5) * DITHER);
     return {
       pal32,
-      // Dither and map the rectangle (x,y,w,h) of an RGBA source into the 32-bit output.
-      run(src, out32, x0, y0, w, h) {
+      // Dither and map the rectangle (x,y,w,h) of an RGBA source (sw pixels wide) into the 32-bit output.
+      run(src, out32, x0, y0, w, h, sw = W) {
         for (let y = y0; y < y0 + h; y++) {
           for (let x = x0; x < x0 + w; x++) {
-            const i = (y * W + x) * 4, o = offs[((y & 7) << 3) | (x & 7)];
+            const i = (y * sw + x) * 4, o = offs[((y & 7) << 3) | (x & 7)];
             const r = src[i] + o, g = src[i + 1] + o, b = src[i + 2] + o;
             const key = ((r < 0 ? 0 : r > 255 ? 255 : r) >> 3 << 10) | ((g < 0 ? 0 : g > 255 ? 255 : g) >> 3 << 5) | ((b < 0 ? 0 : b > 255 ? 255 : b) >> 3);
             let idx = lut[key];
             if (idx < 0) idx = lut[key] = nearest(key);
-            out32[y * W + x] = pal32[idx];
+            out32[y * sw + x] = pal32[idx];
           }
         }
       },
@@ -542,6 +542,23 @@ const InnScenes = (() => {
     void baseCv;
     const ms = performance.now() - t0;
     return { P, base, anims, quant, display, imageData, out32, work: new Uint8ClampedArray(base), sprite, ms, dark };
+  }
+
+  // A small picture (a calling card, adv.js) in the scenes' look: fn(g, P) paints with the kit, then the
+  // same paper texture, a palette of its own and the same ordered dither. The kit is the day one (colours
+  // as given, P.dusk still says the mode): a card is grading its own dusk so its lettering stays readable.
+  function paintSmall(w, h, dark, fn, colours = 40) {
+    const P = makeKit(false);
+    P.dusk = dark;
+    const { c, g } = canvas2d(w, h);
+    fn(g, P);
+    const img = g.getImageData(0, 0, w, h);
+    texture(img.data, dark, w, h);
+    const hist = new Map();
+    addHist(hist, img.data, 1, false);
+    makeQuantiser(medianCut(hist, colours)).run(img.data, new Uint32Array(img.data.buffer), 0, 0, w, h, w);
+    g.putImageData(img, 0, 0);
+    return c;
   }
 
   // ---------- the animation loop ----------
@@ -819,6 +836,7 @@ const InnScenes = (() => {
     performance.mark('inn-scene-painted');   // the first one is the landing's first paint (measured in docs/web.md)
     console.log(`scene ${state.id}: painted in ${b.ms.toFixed(1)} ms`);
     syncRunning();
+    if (typeof Adv !== 'undefined' && Adv.scenePainted) Adv.scenePainted();   // calling cards follow the scene and its mode
   }
 
   async function setScene(id, push) {
@@ -894,7 +912,8 @@ const InnScenes = (() => {
   return {
     register(def) { registry[def.id] = def; },
     init, setScene, setSpark, setAnimation, reduced, panTo, screenRect, nextQuip, hotAt,
-    scene: () => state.scene, id: () => state.id, view: () => view,
+    scene: () => state.scene, id: () => state.id, view: () => view, paintSmall,
+    dark: () => (state.built ? state.built.dark : isDark()),
     classic: CLASSIC, lastPaintMs: 0, ids: IDS,
   };
 })();
