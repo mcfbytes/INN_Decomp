@@ -91,6 +91,7 @@ struct Machine {
     TickFn tickers[16];
     int ticker_count;
     uint64_t slice_left; /* instructions left in the current time slice */
+    uint64_t string_budget; /* instruction slots the current REP string instruction may use (cpu.c) */
 
     uint8_t *exec_hooks; /* one bit per linear address: a lifted function starts here */
     IoMode io_mode;      /* shadow verification records or replays port I/O */

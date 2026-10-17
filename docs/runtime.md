@@ -24,7 +24,16 @@ the stub and ends the slice, so no host thread ever blocks. That is required for
 
 `machine_run_for(m, us)` runs the CPU in `TICK_SLICE_US` slices of `ips * slice` instructions,
 advancing `virtual_us` and calling every registered ticker (PIT, UART pacing, VGA retrace) after
-each slice. `HLT` and `CB_RETRY` end a slice early. The frontend's `FrameClock`
+each slice. `HLT` and `CB_RETRY` end a slice early.
+
+A repeated string instruction (`REP MOVS`, `STOS`, `SCAS`, ...) costs one instruction slot per
+element, as it costs a real CPU clocks per element, and is interruptible like on hardware: when the
+slice's slots run out it stops with CX, SI and DI current and EIP back on its first prefix, and resumes
+in the next slice or after an interrupt. Before 2026-10-16 a whole `REP` cost one slot, so a frame loop
+built on block copies (the Yserbius tavern copies its 64000-byte frame to the VGA window about 450 times
+per emulated second that way) ran far faster than any 386 and starved the host. 16-bit `MOVS`, `STOS`,
+`SCAS` and `CMPS` over conventional memory (and `MOVS`/`STOS` into the VGA window) take a fast path that
+does the same element-by-element work without per-byte address decoding (`runtime/tests/test_string.c`). The frontend's `FrameClock`
 (`runtime/frontend/frame_clock.c`) calls `machine_run_for` once per frame with the wall-clock time owed,
 capped at 50 ms, from `frame_step`, which Emscripten's main loop drives ([web.md](web.md)).
 
