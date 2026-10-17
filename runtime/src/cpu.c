@@ -577,63 +577,194 @@ static void set_count_reg(Machine *m, const Insn *in, uint32_t v)
         m->cpu.r[R_CX].w = (uint16_t)v;
 }
 
+/* One element of a string instruction; true for the compares, whose flags end a REPE/REPNE. */
+static bool string_once(Machine *m, const Insn *in, uint8_t opcode, int size)
+{
+    Cpu *c = &m->cpu;
+    uint32_t src_base = seg_base_for(m, in, S_DS), dst_base = c->seg_base[S_ES];
+    uint32_t a, b;
+    switch (opcode & 0xFE) {
+    case 0x6C: /* ins */
+        write_mem(m, size, dst_base + string_index(m, in, R_DI), port_in(m, c->r[R_DX].w, size));
+        string_step(m, in, R_DI, size);
+        return false;
+    case 0x6E: /* outs */
+        port_out(m, c->r[R_DX].w, read_mem(m, size, src_base + string_index(m, in, R_SI)), size);
+        string_step(m, in, R_SI, size);
+        return false;
+    case 0xA4: /* movs */
+        write_mem(m, size, dst_base + string_index(m, in, R_DI),
+                  read_mem(m, size, src_base + string_index(m, in, R_SI)));
+        string_step(m, in, R_SI, size);
+        string_step(m, in, R_DI, size);
+        return false;
+    case 0xA6: /* cmps */
+        a = read_mem(m, size, src_base + string_index(m, in, R_SI));
+        b = read_mem(m, size, dst_base + string_index(m, in, R_DI));
+        alu(m, ALU_CMP, size, a, b);
+        string_step(m, in, R_SI, size);
+        string_step(m, in, R_DI, size);
+        return true;
+    case 0xAA: /* stos */
+        write_mem(m, size, dst_base + string_index(m, in, R_DI), get_reg(m, size, R_AX));
+        string_step(m, in, R_DI, size);
+        return false;
+    case 0xAC: /* lods */
+        set_reg(m, size, R_AX, read_mem(m, size, src_base + string_index(m, in, R_SI)));
+        string_step(m, in, R_SI, size);
+        return false;
+    default: /* 0xAE, scas */
+        b = read_mem(m, size, dst_base + string_index(m, in, R_DI));
+        alu(m, ALU_CMP, size, get_reg(m, size, R_AX), b);
+        string_step(m, in, R_DI, size);
+        return true;
+    }
+}
+
+/* How many of n elements from 16-bit offset idx stay inside the segment, and the linear range they
+ * cover: [*lo, *hi). */
+static uint32_t string_span(uint32_t base, uint16_t idx, int size, bool down, uint32_t n, uint32_t *lo, uint32_t *hi)
+{
+    uint32_t fit = down ? (idx + (uint32_t)size <= 0x10000 ? idx / (uint32_t)size + 1 : 0)
+                        : (0x10000 - idx) / (uint32_t)size;
+    if (n > fit)
+        n = fit;
+    uint32_t first = down ? idx - (n - 1) * (uint32_t)size : idx;
+    *lo = base + first;
+    *hi = base + first + n * (uint32_t)size;
+    return n;
+}
+
+static bool plain_ram(uint32_t lo, uint32_t hi) { return hi <= MEM_CONVENTIONAL_END && lo < hi; }
+
+static uint32_t element(const uint8_t *p, int size)
+{
+    return size == 1 ? p[0] : size == 2 ? (uint32_t)(p[0] | p[1] << 8)
+                                        : (uint32_t)(p[0] | p[1] << 8 | p[2] << 16 | (uint32_t)p[3] << 24);
+}
+
+/* Up to n iterations of a 16-bit-addressed REP MOVS, STOS, SCAS or CMPS whose elements all lie in
+ * conventional memory (MOVS and STOS may also write the VGA window), element by element in the
+ * order the CPU takes them, without the per-byte address decoding. Returns the iterations done (0:
+ * not applicable, take the general path); *stop when a compare ended the repeat. */
+static uint32_t string_fast(Machine *m, const Insn *in, uint8_t opcode, int size, uint32_t n, bool *stop)
+{
+    Cpu *c = &m->cpu;
+    *stop = false;
+    if (in->addr32)
+        return 0;
+    bool down = (c->flags & F_DF) != 0;
+    int32_t step = down ? -size : size;
+    uint32_t src_base = seg_base_for(m, in, S_DS), dst_base = c->seg_base[S_ES];
+    uint32_t slo = 0, shi = 0, dlo, dhi;
+    uint8_t op = opcode & 0xFE;
+    bool reads_src = op == 0xA4 || op == 0xA6;
+    if (reads_src)
+        n = string_span(src_base, c->r[R_SI].w, size, down, n, &slo, &shi);
+    n = string_span(dst_base, c->r[R_DI].w, size, down, n, &dlo, &dhi);
+    if (n == 0 || (reads_src && (n = string_span(src_base, c->r[R_SI].w, size, down, n, &slo, &shi)) == 0))
+        return 0;
+    if (reads_src && !plain_ram(slo, shi))
+        return 0;
+    bool dst_ram = plain_ram(dlo, dhi);
+    bool dst_vga = !dst_ram && dlo >= MEM_VGA_BASE && dhi <= MEM_VGA_BASE + 0x20000;
+    if (!dst_ram && !(dst_vga && (op == 0xA4 || op == 0xAA)))
+        return 0;
+    uint8_t *mem = m->mem;
+    uint32_t s = src_base + c->r[R_SI].w, d = dst_base + c->r[R_DI].w;
+    uint32_t i = 0;
+    switch (op) {
+    case 0xA4: /* movs */
+        if (dst_ram) {
+            for (; i < n; i++, s += (uint32_t)step, d += (uint32_t)step)
+                for (int k = 0; k < size; k++)
+                    mem[d + (uint32_t)k] = mem[s + (uint32_t)k];
+        } else {
+            uint8_t tmp[4];
+            for (; i < n; i++, s += (uint32_t)step, d += (uint32_t)step) {
+                memcpy(tmp, mem + s, (size_t)size);
+                for (int k = 0; k < size; k++)
+                    mem_wr8_slow(m, d + (uint32_t)k, tmp[k]);
+            }
+        }
+        break;
+    case 0xAA: { /* stos */
+        uint32_t v = get_reg(m, size, R_AX);
+        for (; i < n; i++, d += (uint32_t)step)
+            for (int k = 0; k < size; k++) {
+                if (dst_ram)
+                    mem[d + (uint32_t)k] = (uint8_t)(v >> 8 * k);
+                else
+                    mem_wr8_slow(m, d + (uint32_t)k, (uint8_t)(v >> 8 * k));
+            }
+        break;
+    }
+    case 0xAE: case 0xA6: { /* scas, cmps: the flags are those of the last compare made */
+        bool want_equal = in->rep == 0xF3;
+        uint32_t acc = get_reg(m, size, R_AX), a = 0, b = 0;
+        while (i < n) {
+            a = op == 0xAE ? acc : element(mem + s, size);
+            b = element(mem + d, size);
+            i++, s += (uint32_t)step, d += (uint32_t)step;
+            if ((a == b) != want_equal) {
+                *stop = true;
+                break;
+            }
+        }
+        alu(m, ALU_CMP, size, a, b);
+        break;
+    }
+    default:
+        return 0;
+    }
+    if (reads_src)
+        c->r[R_SI].w = (uint16_t)(c->r[R_SI].w + (int32_t)i * step);
+    c->r[R_DI].w = (uint16_t)(c->r[R_DI].w + (int32_t)i * step);
+    return i;
+}
+
+/* A repeated string instruction costs one instruction slot per iteration, as it costs a real CPU
+ * clocks per element, and stops once the slots cpu_run has left are used up: CX, SI and DI are
+ * current and EIP points at its first prefix again, so it resumes after the slice or an interrupt,
+ * as an interrupted REP does on hardware. */
 static void string_op(Machine *m, const Insn *in, uint8_t opcode)
 {
     Cpu *c = &m->cpu;
     int size = (opcode & 1) ? (in->op32 ? 4 : 2) : 1;
-    uint32_t src_base = seg_base_for(m, in, S_DS), dst_base = c->seg_base[S_ES];
-    bool repeated = in->rep != 0;
-    uint32_t count = repeated ? count_reg(m, in) : 1;
-    for (; count != 0; count--) {
-        uint32_t a, b;
-        bool compare = false;
-        switch (opcode & 0xFE) {
-        case 0x6C: /* ins */
-            write_mem(m, size, dst_base + string_index(m, in, R_DI), port_in(m, c->r[R_DX].w, size));
-            string_step(m, in, R_DI, size);
-            break;
-        case 0x6E: /* outs */
-            port_out(m, c->r[R_DX].w, read_mem(m, size, src_base + string_index(m, in, R_SI)), size);
-            string_step(m, in, R_SI, size);
-            break;
-        case 0xA4: /* movs */
-            write_mem(m, size, dst_base + string_index(m, in, R_DI),
-                      read_mem(m, size, src_base + string_index(m, in, R_SI)));
-            string_step(m, in, R_SI, size);
-            string_step(m, in, R_DI, size);
-            break;
-        case 0xA6: /* cmps */
-            a = read_mem(m, size, src_base + string_index(m, in, R_SI));
-            b = read_mem(m, size, dst_base + string_index(m, in, R_DI));
-            alu(m, ALU_CMP, size, a, b);
-            string_step(m, in, R_SI, size);
-            string_step(m, in, R_DI, size);
-            compare = true;
-            break;
-        case 0xAA: /* stos */
-            write_mem(m, size, dst_base + string_index(m, in, R_DI), get_reg(m, size, R_AX));
-            string_step(m, in, R_DI, size);
-            break;
-        case 0xAC: /* lods */
-            set_reg(m, size, R_AX, read_mem(m, size, src_base + string_index(m, in, R_SI)));
-            string_step(m, in, R_SI, size);
-            break;
-        case 0xAE: /* scas */
-            b = read_mem(m, size, dst_base + string_index(m, in, R_DI));
-            alu(m, ALU_CMP, size, get_reg(m, size, R_AX), b);
-            string_step(m, in, R_DI, size);
-            compare = true;
-            break;
-        }
-        if (!repeated)
-            return;
-        set_count_reg(m, in, count - 1);
-        if (compare) {
-            bool zf = (c->flags & F_ZF) != 0;
-            if ((in->rep == 0xF3 && !zf) || (in->rep == 0xF2 && zf))
-                return;
-        }
+    if (!in->rep) {
+        string_once(m, in, opcode, size);
+        return;
     }
+    uint32_t count = count_reg(m, in);
+    uint64_t done = 0, budget = m->string_budget ? m->string_budget : 1;
+    bool fast = (opcode & 0xFE) != 0x6C && (opcode & 0xFE) != 0x6E && (opcode & 0xFE) != 0xAC;
+    while (count != 0) {
+        uint64_t used = done + c->stall;
+        if (done && used >= budget) {
+            c->eip = in->start_eip;
+            c->hook_skip = c->seg_base[S_CS] + (in->start_eip & 0xFFFF); /* a resumed REP is not a call */
+            break;
+        }
+        bool stop = false;
+        uint32_t n = 0;
+        if (fast && count > 1) {
+            uint64_t room = budget > used ? budget - used : 1;
+            n = string_fast(m, in, opcode, size, count < room ? count : (uint32_t)room, &stop);
+        }
+        if (n) {
+            count -= n, done += n;
+        } else {
+            bool compare = string_once(m, in, opcode, size);
+            count--, done++;
+            bool zf = (c->flags & F_ZF) != 0;
+            stop = compare && ((in->rep == 0xF3 && !zf) || (in->rep == 0xF2 && zf));
+        }
+        set_count_reg(m, in, count);
+        if (stop)
+            break;
+    }
+    if (done > 1) /* cpu_run counts the first slot */
+        c->stall += (uint32_t)(done - 1);
 }
 
 /* ---- BCD ---- */
@@ -932,7 +1063,11 @@ static void group_fe(Machine *m, Insn *in)
             log_msg("cpu: unknown callback %u", id);
             return;
         }
-        if (fn(m) == CB_RETRY) {
+        m->idle.polled = false;
+        CallbackResult result = fn(m);
+        if (!m->idle.polled) /* any other service is activity (machine_idle_poll) */
+            m->idle.activity = true;
+        if (result == CB_RETRY) {
             c->eip = in->start_eip;
             c->yielded = true;
         } else if (m->io_mode != IO_LIVE) {
@@ -1444,6 +1579,7 @@ uint64_t cpu_run(Machine *m, uint64_t budget)
             trace_insn(m);
         if (__builtin_expect(dosrt_interp_profile != NULL, 0))
             dosrt_interp_profile[(linear & 0xFFFFF) >> 4]++;
+        m->string_budget = budget - done;
         exec_one(m);
         done += 1 + c->stall;
         c->instructions += 1 + c->stall; /* kept current: machine_now_ns reads it mid-slice */

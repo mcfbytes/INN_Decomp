@@ -60,7 +60,7 @@ typedef struct Options {
     const char *script;
     const char *wav;
     unsigned conv_kb;
-    bool no_fpu;
+    bool no_fpu, no_idle_skip;
     const char *host_rules;
     const char *c_dir, *program;
     char args[ARGS_MAX];
@@ -88,7 +88,7 @@ typedef struct Frontend {
      * host time since the previous sleep returned is the busy slice, and a 5 s wall window
      * prints the same line frame_clock_run prints. */
     uint64_t perf_mark_us, perf_mark_virtual_us;
-    uint64_t perf_window_us, perf_virtual_us, perf_instructions, perf_busy_us, perf_longest_us;
+    uint64_t perf_window_us, perf_virtual_us, perf_instructions, perf_busy_us, perf_longest_us, perf_skipped_us;
     bool quit;
 } Frontend;
 
@@ -475,6 +475,7 @@ static void perf_before_sleep(Frontend *f)
         f->perf_mark_us = f->perf_window_us = now;
         f->perf_mark_virtual_us = f->perf_virtual_us = f->m->virtual_us;
         f->perf_instructions = f->m->cpu.instructions;
+        f->perf_skipped_us = f->m->idle.skipped_us;
         return;
     }
     uint64_t busy = now - f->perf_mark_us;
@@ -492,15 +493,17 @@ static void perf_before_sleep(Frontend *f)
     uint64_t instructions = f->m->cpu.instructions - f->perf_instructions;
     double busy_d = f->perf_busy_us ? (double)f->perf_busy_us : 1.0;
     AudioStats audio = audio_take_stats(f->m);
+    double idle = advanced ? 100.0 * (double)(f->m->idle.skipped_us - f->perf_skipped_us) / (double)advanced : 0.0;
     log_msg("perf: speed %.3fx real, host busy %.1f%%, executed %.2f MIPS, capacity %.1f MIPS "
             "(guest clock %.0f MIPS), dropped %.0f ms, longest frame %.0f ms, "
-            "audio underruns %u, resyncs %u, discarded %.0f ms",
+            "audio underruns %u, resyncs %u, discarded %.0f ms, idle %.0f%%",
             (double)advanced / (double)wall, 100.0 * (double)f->perf_busy_us / (double)wall,
             (double)instructions / (double)wall, (double)instructions / busy_d,
             (double)f->m->ips / 1e6, wall > advanced ? (wall - advanced) / 1000.0 : 0.0,
             f->perf_longest_us / 1000.0, audio.underruns, audio.resyncs,
-            audio_rate(f->m) ? audio.dropped_frames * 1000.0 / audio_rate(f->m) : 0.0);
+            audio_rate(f->m) ? audio.dropped_frames * 1000.0 / audio_rate(f->m) : 0.0, idle > 100.0 ? 100.0 : idle);
     f->perf_window_us = now;
+    f->perf_skipped_us = f->m->idle.skipped_us;
     f->perf_virtual_us = f->m->virtual_us;
     f->perf_instructions = f->m->cpu.instructions;
     f->perf_busy_us = 0;
@@ -655,7 +658,7 @@ static int run_native(Frontend *f)
 
 static void usage(void)
 {
-    fprintf(stderr, "usage: inn [--trace N] [--ips N] [--com1 host:port|ws://host:port] [--perf] [--wav out.wav] [--conv-kb N] [--no-fpu] [--tsn-host rules.txt] "
+    fprintf(stderr, "usage: inn [--trace N] [--ips N] [--com1 host:port|ws://host:port] [--perf] [--wav out.wav] [--conv-kb N] [--no-fpu] [--no-idle-skip] [--tsn-host rules.txt] "
                     "[--headless --run-ms N --screenshot out.ppm --script input.txt] <c-drive-dir> <program> [args]\n");
 }
 
@@ -668,6 +671,7 @@ static int parse_args(int argc, char **argv, Options *o)
         if (!strcmp(a, "--headless")) { o->headless = true; continue; }
         if (!strcmp(a, "--perf")) { o->perf = true; continue; }
         if (!strcmp(a, "--no-fpu")) { o->no_fpu = true; continue; }
+        if (!strcmp(a, "--no-idle-skip")) { o->no_idle_skip = true; continue; }
         if (!next)
             return -1;
         if (!strcmp(a, "--trace")) o->trace = atoi(next);
@@ -804,6 +808,7 @@ int main(int argc, char **argv)
     if (o.ips)
         f.m->ips = o.ips;
     f.m->fpu_present = !o.no_fpu;
+    f.m->idle.off = o.no_idle_skip;
     int rc = boot(f.m, &o);
     if (rc == 0)
         rc = o.headless ? start_headless(&f, &o) : start_windowed(&f, &o);

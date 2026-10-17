@@ -58,6 +58,7 @@ The page asks for the install (unless `inn.data` provides one), then runs
 | `classic=1` | The old layout for debugging: the setup card (picker, drop zone, Advanced, Connect, modem panel) over the scene, with no menu bar, score or narrator box. |
 | `perf=1` | Pass `--perf`: a timing line in the log every 5 s (see Performance). |
 | `ips=N` | Guest instruction rate (`--ips`), default 20000000. |
+| `idle=0` | Pass `--no-idle-skip`: the guest's input polls never let time skip ahead (docs/runtime.md, "Idle polls"). |
 
 ## Landing scenes
 
@@ -387,8 +388,8 @@ itself on the new load when the disks are still there (kept with Remember).
 
 **Play.** There is no app bar. The game fills the viewport at 4:3 on a dark letterbox. Controls are a
 translucent strip that slides in when the pointer is within 8 px of the top edge (it stays while hovered
-or focused and hides 1.5 s after the pointer leaves): COM1 state, save-sync state, mute (suspends SDL's
-`AudioContext`), display mode (cycles Sharp, Smooth, CRT), full screen and the settings drawer (display
+or focused and hides 1.5 s after the pointer leaves): COM1 state, save-sync state, mute (suspends the sound's
+`AudioContext`, see "Sound"), display mode (cycles Sharp, Smooth, CRT), full screen and the settings drawer (display
 mode, server, storage, log, Forget). Toasts stay over the game. When the client exits, an overlay offers
 to start again.
 
@@ -681,6 +682,25 @@ The system cursor is hidden over the canvas (CSS `cursor: none`, and `SDL_ShowCu
 Emscripten branch of `frontend_sdl.c`, since SDL writes the canvas cursor style); only the game's own
 cursor shows. It is back over the letterbox, the strip and the drawer.
 
+## Sound
+
+The guest's sound leaves through an AudioWorklet, not SDL: SDL2's Emscripten audio is a `ScriptProcessorNode`,
+which runs on the main thread (so every long frame starved it) and which Chrome reports as deprecated. In the
+browser branch of `runtime/frontend/audio_sdl.c`, `main` creates an `AudioContext` at 48 kHz and loads
+`audio-worklet.js` (`innAsset('audio-worklet.js')`: a hashed same-origin file in a package, so
+`script-src 'self'` covers `addModule`). After each frame the main loop takes what `audio_read_paced` hands
+out, as before, and posts it to the worklet as a transferred `Int16Array`; the worklet keeps up to 1 s in its
+own ring and plays it on the audio thread. The page has no `SharedArrayBuffer` (no COOP/COEP isolation),
+so it is messages. About every 10 ms the worklet reports the frames that have left its ring; the queued
+level the pacing needs is what was posted less that, less what has played since at the output rate.
+The pacing itself (100 ms target in the browser, stretch of at most 0.5%, underrun and resync counts in
+`--perf`) is unchanged. While the context is not running (before the first click, or muted), the rendered
+frames are dropped rather than posted, so unmuting does not play stale sound.
+
+The page reaches the context as `Module.innAudio.ctx` (`audioContext()` in `page.js`): mute suspends it, unmute
+and the first mouse down on the canvas resume it. A browser without AudioWorklet runs silent and logs
+`audio: this browser has no AudioWorklet; sound is off`.
+
 ## Performance
 
 `runtime/frontend/frame_clock.c` runs the machine once per animation frame for the wall time since the
@@ -696,6 +716,8 @@ game down instead of making it race. `--perf` logs, every 5 s:
 | capacity | guest instructions per second of `machine_run_for` time: the rate the host could sustain |
 | dropped | wall time minus emulated time over the window (time the guest fell behind) |
 | longest frame | longest single frame; audio runs dry if it exceeds the queue without yielding |
+| audio underruns, resyncs, discarded | the output ran dry; queued audio was thrown away to bound latency |
+| idle | share of emulated time skipped while the guest only polled for input (docs/runtime.md, "Idle polls") |
 
 With `--perf`, a frame over 100 ms also logs `long frame`: its emulated time and how long nested
 waits in lifted code slept. A frame that waits inside lifted code keeps pace with the wall clock and
@@ -710,6 +732,31 @@ Measured 2026-10-14 in headless Chromium (Playwright build 1243, SwiftShader GL)
 boot, dial, logon and town map, guest clock 20 MIPS: speed 1.000 throughout, host busy 22 to 44%,
 capacity 45 to 91 MIPS across runs (2x to 4x headroom; the lower end with OPL synthesis running).
 Raising the guest clock: 50 and 70 MIPS stay at 1.000; 90 MIPS falls to 0.84 to 0.99 with no runaway.
+
+Measured 2026-10-16, same setup, through the Yserbius tavern, with Chromium's CPU throttling at 2.5x to stand in
+for a slower browser (host busy, per screen; speed 1.000 unless noted). The tavern redraws its whole frame with
+`REP MOVSW` between input polls; while a REP cost one instruction slot it did so about 450 times per emulated
+second and starved the host (docs/runtime.md, "Time"). Its own Options dialog stops that loop, which is why
+opening it stopped the warble.
+
+| Build | INN map | Yserbius gallery and town | Tavern | Tavern's Options |
+|---|---|---|---|---|
+| before | 86%, speed 0.965 | 82% | 93%, speed 0.61, 29 underruns per 5 s | 80% |
+| REP costs a slot per element | 78% | 73% | 49%, no underruns | 75% |
+| AudioWorklet alone | 76% | 70% | 93%, speed 0.70, 22 underruns per 5 s | 71% |
+| all (with idle polls) | 44% | 17% | 49% | 9% |
+| all, no throttling | 18% | 6% | 19% | 3% |
+
+With idle polls, `capacity` counts only the slices that ran instructions, so on waiting screens it reads lower
+than the host could do; `host busy` is the figure to watch.
+
+Guest clock (`ips=`): 20 MIPS stays the default. Natively at 10 MIPS the scripted path (logon, map, Yserbius
+gallery, town, tavern) reaches every screen at the same times as at 20 MIPS; at 6 MIPS logon falls behind the
+script. What scales with the clock: the tavern's redraw rate (about 176 per second at 20 MIPS), Red Baron's frame
+rate (about 23 page flips per second at 20 MIPS, 14.5 at 10; its game time follows its 236.7 Hz timer either way)
+and how fast screens load. Idle time does not need clock: the map is 64% idle polls at 20 MIPS, the Yserbius
+gallery 90%, the town 84%. Drivers that count polls (`MODEM.DRV`) count bus time, not instructions, so they do
+not depend on the clock.
 
 ## Packaging and deployment
 

@@ -63,6 +63,23 @@ typedef void (*TickFn)(Machine *m);
 
 typedef enum IoMode { IO_LIVE, IO_RECORD, IO_REPLAY } IoMode;
 
+/* Polls an idle guest spins on (machine_idle_poll). */
+typedef enum IdlePoll { IDLE_POLL_KEYBOARD, IDLE_POLL_SHIFT, IDLE_POLL_CONSOLE, IDLE_POLL_MOUSE, IDLE_POLL_KINDS } IdlePoll;
+
+/* Idle polls (docs/runtime.md, "Idle polls"): a guest that spins on input polls that find nothing new,
+ * with nothing else going on, lets emulated time pass to the next interrupt. */
+typedef struct IdleState {
+    bool off;          /* --no-idle-skip */
+    bool polled;       /* the service that just ran was such a poll */
+    bool activity;     /* port I/O, a VGA write or another service since the previous poll */
+    uint32_t streak;   /* polls in a row that found nothing new, close together, with no activity */
+    uint64_t last_poll_insn;
+    uint32_t result[IDLE_POLL_KINDS];
+    bool seen[IDLE_POLL_KINDS];
+    uint64_t until_us; /* skipping: no instructions until then or until an interrupt can be taken */
+    uint64_t skipped_us; /* emulated time skipped so far (--perf) */
+} IdleState;
+
 typedef uint32_t (*PortInFn)(Machine *m, uint16_t port, int size);
 typedef void (*PortOutFn)(Machine *m, uint16_t port, uint32_t value, int size);
 
@@ -91,6 +108,7 @@ struct Machine {
     TickFn tickers[16];
     int ticker_count;
     uint64_t slice_left; /* instructions left in the current time slice */
+    uint64_t string_budget; /* instruction slots the current REP string instruction may use (cpu.c) */
 
     uint8_t *exec_hooks; /* one bit per linear address: a lifted function starts here */
     IoMode io_mode;      /* shadow verification records or replays port I/O */
@@ -111,6 +129,7 @@ struct Machine {
     bool exit_requested;
     int exit_code;
     int trace; /* 0 off, 1 interrupts and DOS calls, 2 every instruction */
+    IdleState idle;
     bool fpu_present; /* a 387 answers escape opcodes; otherwise they decode and do nothing */
 };
 
@@ -255,6 +274,12 @@ enum { TICK_SLICE_US = 100 };
 /* Emulated time in ns, refined inside a slice by the instructions already run, so devices that
  * are polled in tight loops (OPL timers) and sample-accurate audio see time pass. */
 uint64_t machine_now_ns(const Machine *m);
+/* An HLE poll found what it found the previous time (no key, the same shift state or mouse state);
+ * result is what it returned. Enough such polls in a row, a few hundred instructions apart and with no
+ * other activity, end the slice and let time pass to the next interrupt (IDLE_MAX_US at most). */
+void machine_idle_poll(Machine *m, IdlePoll kind, uint32_t result);
+enum { IDLE_STREAK = 8, IDLE_GAP_SLOTS = 5000, IDLE_MAX_US = 1000 };
+
 /* Time passes for work lifted C does without port I/O (a direct guest call, a service called from C):
  * ns of bus time, handled as a port access is. Callers pass m->io_cost_ns. */
 void machine_charge_c(Machine *m, uint32_t ns);

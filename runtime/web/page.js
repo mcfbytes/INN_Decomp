@@ -610,6 +610,7 @@ function runtimeArgs(server) {
   const args = ['--com1', spec];
   if (params.get('perf')) args.push('--perf');
   if (params.get('ips')) args.push('--ips', params.get('ips'));
+  if (params.get('idle') === '0') args.push('--no-idle-skip');
   return args.concat([DRIVE, `${PROGRAM.dir}\\${PROGRAM.exe}`], PROGRAM.args);
 }
 
@@ -617,8 +618,9 @@ function statusRunning() {
   return `Running · COM1 ${page.server}`;
 }
 
+// The runtime's AudioWorklet sink (audio_sdl.c) creates this context when main starts.
 function audioContext() {
-  return Module.SDL2 && Module.SDL2.audioContext;
+  return Module.innAudio ? Module.innAudio.ctx : null;
 }
 
 function setMuted(muted) {

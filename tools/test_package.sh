@@ -42,7 +42,7 @@ if [ -n "${1:-}" ]; then
   b=$1
   if "$here/package_web.sh" "$b" "$tmp/pkg" --game wss://play.example.test:2316 --auth https://auth.example.test >"$tmp/log" 2>&1; then ok "packages the public build"; else bad "packages the public build: $(tail -3 "$tmp/log")"; fi
   # nothing outside the expected list, no game data, hashed names, the config is valid and under SWA's 20 KB limit
-  stray=$(cd "$tmp/pkg" && find . -type f | sed 's|^\./||' | grep -Ev '^(inn\.html|site\.json|staticwebapp\.config\.json|legal/(terms|privacy|copyright)\.html|assets/(app|inn|legal)\.[0-9a-f]{10}\.(js|css|wasm)|assets/(scenes|music)/[a-z]+\.[0-9a-f]{10}\.js)$')
+  stray=$(cd "$tmp/pkg" && find . -type f | sed 's|^\./||' | grep -Ev '^(inn\.html|site\.json|staticwebapp\.config\.json|legal/(terms|privacy|copyright)\.html|assets/(app|inn|legal)\.[0-9a-f]{10}\.(js|css|wasm)|assets/worklet\.[0-9a-f]{10}\.js|assets/(scenes|music)/[a-z]+\.[0-9a-f]{10}\.js)$')
   [ -z "$stray" ] && ok "output holds only expected files" || bad "stray files: $stray"
   [ "$(find "$tmp/pkg" -type f | wc -l)" -ge 20 ] && ok "output file count" || bad "output file count"
   python3 -I - "$tmp/pkg/staticwebapp.config.json" <<'P' && ok "staticwebapp.config.json" || bad "staticwebapp.config.json"
@@ -67,6 +67,17 @@ assert 'data-runtime="lazy"' in h or 'data-runtime=lazy' in h
 m = json.loads(re.search(r'id="inn-assets">([^<]*)<', h).group(1))
 assert re.fullmatch(r'assets/inn\.[0-9a-f]{10}\.js', m['inn.js']) and os.path.exists(os.path.join(d, m['inn.js']))
 assert re.search(r'inn\.[0-9a-f]{10}\.wasm', open(os.path.join(d, m['inn.js'])).read())
+P
+  # the audio worklet module is a hashed same-origin asset in the map (script-src 'self' covers addModule)
+  python3 -I - "$tmp/pkg" <<'P' && ok "the audio worklet is a hashed asset" || bad "the audio worklet is a hashed asset"
+import json, os, re, sys
+d = sys.argv[1]; h = open(os.path.join(d, 'inn.html')).read()
+m = json.loads(re.search(r'id="inn-assets">([^<]*)<', h).group(1))
+w = m['audio-worklet.js']
+assert re.fullmatch(r'assets/worklet\.[0-9a-f]{10}\.js', w)
+src = open(os.path.join(d, w)).read()
+assert 'registerProcessor' in src and 'inn-sink' in src
+assert 'audio-worklet.js' in open(os.path.join(d, m['inn.js'])).read()
 P
   # a page built for a preloaded drive (it loads the runtime at once and its build holds data) is refused
   cp -r "$b" "$tmp/eager" && sed -i 's|data-runtime=\("\?\)lazy|data-runtime=\1eager|' "$tmp/eager/inn.html"

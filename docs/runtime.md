@@ -24,9 +24,37 @@ the stub and ends the slice, so no host thread ever blocks. That is required for
 
 `machine_run_for(m, us)` runs the CPU in `TICK_SLICE_US` slices of `ips * slice` instructions,
 advancing `virtual_us` and calling every registered ticker (PIT, UART pacing, VGA retrace) after
-each slice. `HLT` and `CB_RETRY` end a slice early. The frontend's `FrameClock`
+each slice. `HLT` and `CB_RETRY` end a slice early.
+
+A repeated string instruction (`REP MOVS`, `STOS`, `SCAS`, ...) costs one instruction slot per
+element, as it costs a real CPU clocks per element, and is interruptible like on hardware: when the
+slice's slots run out it stops with CX, SI and DI current and EIP back on its first prefix, and resumes
+in the next slice or after an interrupt. Before 2026-10-16 a whole `REP` cost one slot, so a frame loop
+built on block copies (the Yserbius tavern copies its 64000-byte frame to the VGA window about 450 times
+per emulated second that way) ran far faster than any 386 and starved the host. 16-bit `MOVS`, `STOS`,
+`SCAS` and `CMPS` over conventional memory (and `MOVS`/`STOS` into the VGA window) take a fast path that
+does the same element-by-element work without per-byte address decoding (`runtime/tests/test_string.c`). The frontend's `FrameClock`
 (`runtime/frontend/frame_clock.c`) calls `machine_run_for` once per frame with the wall-clock time owed,
 capped at 50 ms, from `frame_step`, which Emscripten's main loop drives ([web.md](web.md)).
+
+## Idle polls
+
+Waiting screens spin: the INN map asks INT 16h for the shift state about 6300 times per second, the Yserbius
+gallery, town and dialogs alternate INT 21h AH=0Bh and INT 33h AX=3 about 17000 times per second. Each
+of those services reports a poll that found what the previous one found (`machine_idle_poll`: no key, the
+same shift state, no console input, the same mouse position and buttons). After `IDLE_STREAK` (8) such polls
+in a row, each within `IDLE_GAP_SLOTS` (5000) instruction slots of the previous one and with nothing else in
+between (no port I/O except reads that only tell the time: OPL status, VGA input status, the empty game port;
+no VGA memory write; no other service, including interrupt handlers' callbacks), the slice ends after the
+service returns and further slices pass without instructions until an interrupt is pending or
+`IDLE_MAX_US` (1 ms) has passed. Devices tick as usual meanwhile, so the timer, the UART and the keyboard
+raise their interrupts on time and the guest takes them as soon as the skip ends.
+
+To the guest this is a slower CPU while it waits: the polls it would have repeated find the same answer later.
+A key arrives at once (IRQ 1 ends the skip), a mouse move within 1 ms; loops that do any work between polls
+(the tavern redraws its frame between them) are not affected. Shadow verification, lifted C calling a
+service and native mode never skip. `--no-idle-skip` (page: `?idle=0`) turns it off;
+`runtime/tests/test_idle.c` covers the key, mouse and timer wake-ups and the busy loops that must not skip.
 
 ## Memory map
 
@@ -112,7 +140,8 @@ Sinks, in `runtime/frontend/audio_sdl.c`:
 
 | Sink | How it reads |
 |---|---|
-| SDL2 device | queue mode from the main loop, no audio thread (works in the browser). `audio_read_paced` keeps about `AUDIO_TARGET_MS` (50 ms; 100 ms in the browser, whose output and frames share the main thread) queued, plus SDL's 1024-frame device buffer: drift is absorbed by stretching at most 0.5%, an underrun gets silence, a lasting excess (smoothed error over 50%) is skipped, and more than 4x the target is dropped. `--perf` counts underruns and discarded audio |
+| SDL2 device | queue mode from the main loop, no audio thread touching the machine. `audio_read_paced` keeps about `AUDIO_TARGET_MS` (50 ms) queued, plus SDL's 1024-frame device buffer: drift is absorbed by stretching at most 0.5%, an underrun gets silence, a lasting excess (smoothed error over 50%) is skipped, and more than 4x the target is dropped. `--perf` counts underruns and discarded audio |
+| AudioWorklet (browser) | the same pacing with a 100 ms target (frames are posted from the busy main thread); the frames go to `runtime/web/audio-worklet.js` by `postMessage` and play on the audio thread ([web.md](web.md), "Sound") |
 | `--wav out.wav` | every rendered frame, unpaced; with `--headless` this is the test path |
 
 ## Conventional memory

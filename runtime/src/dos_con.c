@@ -188,6 +188,8 @@ CallbackResult dos_buffered_input(Machine *m)
 CallbackResult dos_con_status(Machine *m)
 {
     AL = dos_con_key_ready(m) ? 0xFF : 0;
+    if (!AL)
+        machine_idle_poll(m, IDLE_POLL_CONSOLE, 0);
     return CB_DONE;
 }
 

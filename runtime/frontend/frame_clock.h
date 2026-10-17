@@ -17,7 +17,7 @@ typedef struct FrameClock {
     uint64_t last_us;
     int64_t owed_us; /* emulated time due to catch up with the wall clock; negative after overshoot */
     bool report;
-    uint64_t window_start_us, window_instructions;
+    uint64_t window_start_us, window_instructions, window_skipped_us;
     FramePerf window;
 } FrameClock;
 

@@ -463,10 +463,25 @@ static int check(Machine *m, const Test *t, Suite suite, const char *file, bool 
 }
 
 /* 286/386 tests end once the HLT after the instruction (or at the jump target) has run;
- * a jump back onto the instruction itself runs it again first, as the hardware did. */
-static void run(Machine *m, Suite suite)
+ * a jump back onto the instruction itself runs it again first, as the hardware did. A repeated
+ * string instruction spends one slot per iteration and resumes at its first prefix, so it is run
+ * one slot at a time until it has moved on, as an uninterrupted REP completes. */
+static void run(Machine *m, const Test *t, Suite suite)
 {
-    cpu_run(m, suite == SUITE_8088 ? 1 : 4);
+    int budget = suite == SUITE_8088 ? 1 : 4;
+    Decoded d = decode_bytes(t, suite);
+    bool string = (d.opcode >= 0x6C && d.opcode <= 0x6F) || (d.opcode >= 0xA4 && d.opcode <= 0xAF &&
+                                                             d.opcode != 0xA8 && d.opcode != 0xA9);
+    if (d.rep && string) {
+        uint16_t cs = m->cpu.seg[S_CS];
+        uint32_t ip = m->cpu.eip;
+        cpu_run(m, 1);
+        for (long guard = 0; m->cpu.seg[S_CS] == cs && m->cpu.eip == ip && !m->cpu.halted && guard < 1L << 20; guard++)
+            cpu_run(m, 1);
+        budget--;
+    }
+    if (budget > 0)
+        cpu_run(m, (uint64_t)budget);
 }
 
 /* The 286 and 386 miss some IDIV overflows and return a truncated quotient instead of #DE. */
@@ -522,7 +537,7 @@ static void run_file(const char *dir, const char *stem, Suite suite, Counts *tot
                 c.skip++;
             } else {
                 setup(machine, &t, suite);
-                run(machine, suite);
+                run(machine, &t, suite);
                 if (check(machine, &t, suite, stem, false) && idiv_quirk(machine, &t, suite)) {
                     note_skip("IDIV overflow the CPU did not trap");
                     c.skip++;
@@ -530,7 +545,7 @@ static void run_file(const char *dir, const char *stem, Suite suite, Counts *tot
                     if (c.fail < verbose_limit) {
                         clear_ram(machine, &t);
                         setup(machine, &t, suite);
-                        run(machine, suite);
+                        run(machine, &t, suite);
                         check(machine, &t, suite, stem, true);
                     }
                     c.fail++;
