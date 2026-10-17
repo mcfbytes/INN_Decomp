@@ -176,7 +176,11 @@ To check it without listening, render it: `parse` errors (bars that do not add u
 | saved | IDBFS mounted at `/c` and loaded with `FS.syncfs(true)` |
 
 The directory that holds `TSNEXEC.EXE` becomes `C:\INN`, whatever its name in the zip or folder, because
-`LSCI.CFG` expects that path. Picking an install clears `/c` first. The client writes `VMF\SWAPFILE.*`,
+`LSCI.CFG` expects that path. Picking an install clears `/c` first. Zips and folder pickers drop empty
+folders, so the page creates the `virtualDir` of `LSCI.CFG` (the swap folder, `VMF`) next to each `LSCI.CFG`
+and in every folder that holds a `RESOURCE.MAP`: the 1995 client starts the Clubhouse in `CC\` and each land
+in its own folder, all reading `..\LSCI.CFG`, and stops with "SWAPFILE.DAT file creation failure" when the
+folder is missing. The client writes `VMF\SWAPFILE.*`,
 `PLAYER.DIR`, `LANDADDR` and others; MEMFS takes the writes. With "Remember" ticked (the default), `/c` is
 written back to IndexedDB after install, every 15 s, when the tab is hidden, and when the client exits,
 so the next visit starts from the saved install with its player files. "Forget saved installation" clears

@@ -405,15 +405,33 @@ function ensureAdlib(configPaths) {
   }
 }
 
-// Folder pickers drop empty directories, but the interpreter needs its swap directory to exist.
+// Folder pickers and zip.js drop empty directories, but the interpreter needs its swap directory to exist. The
+// path is relative to the interpreter's working directory: the LSCI.CFG folder in the 1994 client, but every land
+// folder (the ones with a RESOURCE.MAP) in the 1995 one, which starts the Clubhouse in CC\ and reads ..\LSCI.CFG.
 function createVirtualDirs(configPaths) {
+  const landDirs = findResourceDirs(`${DRIVE}/${PROGRAM.dir}`);
   for (const cfg of configPaths) {
     const text = new TextDecoder('latin1').decode(FS.readFile(cfg));
     const match = /^\s*virtualDir\s*=\s*(\S+)/im.exec(text);
     if (!match || match[1].includes('..')) continue;
-    const dir = `${cfg.slice(0, cfg.lastIndexOf('/'))}/${match[1].replace(/\\/g, '/')}`;
-    if (!exists(dir)) FS.mkdirTree(dir);
+    const name = match[1].replace(/\\/g, '/');
+    for (const base of [cfg.slice(0, cfg.lastIndexOf('/')), ...landDirs]) {
+      const dir = `${base}/${name}`;
+      if (!exists(dir)) FS.mkdirTree(dir);
+    }
   }
+}
+
+function findResourceDirs(dir) {
+  if (!exists(dir)) return [];
+  const found = [];
+  for (const name of FS.readdir(dir)) {
+    if (name === '.' || name === '..') continue;
+    const path = `${dir}/${name}`;
+    if (FS.isDir(FS.stat(path).mode)) found.push(...findResourceDirs(path));
+    else if (/^resource\.map$/i.test(name)) found.push(dir);
+  }
+  return found;
 }
 
 function findConfigs(dir) {
