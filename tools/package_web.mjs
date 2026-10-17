@@ -57,6 +57,8 @@ for (const dir of ['scenes', 'music']) {
 
 // The page inserts inn.js itself when the runtime is wanted (page.js, wantRuntime), through innAsset().
 assetMap['inn.js'] = innjsPath;
+// The audio sink's worklet module, which the runtime loads through innAsset() (audio_sdl.c).
+assetMap['audio-worklet.js'] = putHashed('assets', 'worklet', 'js', minify(read('audio-worklet.js'), 'js'));
 
 // ---- HTML pages: styles and scripts move out, hashed; inline scripts are listed for the CSP ----
 const inlineHashes = new Set();
@@ -157,7 +159,7 @@ put('staticwebapp.config.json', JSON.stringify(config, null, 2) + '\n');
 
 // ---- guard: nothing outside the expected list ships, and nothing that looks like game data ----
 const ALLOWED = [/^inn\.html$/, /^site\.json$/, /^staticwebapp\.config\.json$/, /^legal\/(terms|privacy|copyright)\.html$/,
-  /^assets\/(app|inn|legal)\.[0-9a-f]{10}\.(js|css|wasm)$/, /^assets\/(scenes|music)\/\w+\.[0-9a-f]{10}\.js$/];
+  /^assets\/(app|inn|legal)\.[0-9a-f]{10}\.(js|css|wasm)$/, /^assets\/worklet\.[0-9a-f]{10}\.js$/, /^assets\/(scenes|music)\/\w+\.[0-9a-f]{10}\.js$/];
 for (const [p, buf] of emitted) {
   if (!ALLOWED.some((re) => re.test(p))) fail(`unexpected output file ${p}`);
   if (buf.length > 3 && ((buf[0] === 0x4d && buf[1] === 0x5a) || (buf[0] === 0x50 && buf[1] === 0x4b))) fail(`${p} looks like an executable or an archive`);

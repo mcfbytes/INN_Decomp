@@ -121,7 +121,8 @@ Sinks, in `runtime/frontend/audio_sdl.c`:
 
 | Sink | How it reads |
 |---|---|
-| SDL2 device | queue mode from the main loop, no audio thread (works in the browser). `audio_read_paced` keeps about `AUDIO_TARGET_MS` (50 ms; 100 ms in the browser, whose output and frames share the main thread) queued, plus SDL's 1024-frame device buffer: drift is absorbed by stretching at most 0.5%, an underrun gets silence, a lasting excess (smoothed error over 50%) is skipped, and more than 4x the target is dropped. `--perf` counts underruns and discarded audio |
+| SDL2 device | queue mode from the main loop, no audio thread touching the machine. `audio_read_paced` keeps about `AUDIO_TARGET_MS` (50 ms) queued, plus SDL's 1024-frame device buffer: drift is absorbed by stretching at most 0.5%, an underrun gets silence, a lasting excess (smoothed error over 50%) is skipped, and more than 4x the target is dropped. `--perf` counts underruns and discarded audio |
+| AudioWorklet (browser) | the same pacing with a 100 ms target (frames are posted from the busy main thread); the frames go to `runtime/web/audio-worklet.js` by `postMessage` and play on the audio thread ([web.md](web.md), "Sound") |
 | `--wav out.wav` | every rendered frame, unpaced; with `--headless` this is the test path |
 
 ## Conventional memory

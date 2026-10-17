@@ -617,8 +617,9 @@ function statusRunning() {
   return `Running · COM1 ${page.server}`;
 }
 
+// The runtime's AudioWorklet sink (audio_sdl.c) creates this context when main starts.
 function audioContext() {
-  return Module.SDL2 && Module.SDL2.audioContext;
+  return Module.innAudio ? Module.innAudio.ctx : null;
 }
 
 function setMuted(muted) {

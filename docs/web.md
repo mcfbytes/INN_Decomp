@@ -387,8 +387,8 @@ itself on the new load when the disks are still there (kept with Remember).
 
 **Play.** There is no app bar. The game fills the viewport at 4:3 on a dark letterbox. Controls are a
 translucent strip that slides in when the pointer is within 8 px of the top edge (it stays while hovered
-or focused and hides 1.5 s after the pointer leaves): COM1 state, save-sync state, mute (suspends SDL's
-`AudioContext`), display mode (cycles Sharp, Smooth, CRT), full screen and the settings drawer (display
+or focused and hides 1.5 s after the pointer leaves): COM1 state, save-sync state, mute (suspends the sound's
+`AudioContext`, see "Sound"), display mode (cycles Sharp, Smooth, CRT), full screen and the settings drawer (display
 mode, server, storage, log, Forget). Toasts stay over the game. When the client exits, an overlay offers
 to start again.
 
@@ -680,6 +680,25 @@ button, so the context menu is suppressed.
 The system cursor is hidden over the canvas (CSS `cursor: none`, and `SDL_ShowCursor(SDL_DISABLE)` in the
 Emscripten branch of `frontend_sdl.c`, since SDL writes the canvas cursor style); only the game's own
 cursor shows. It is back over the letterbox, the strip and the drawer.
+
+## Sound
+
+The guest's sound leaves through an AudioWorklet, not SDL: SDL2's Emscripten audio is a `ScriptProcessorNode`,
+which runs on the main thread (so every long frame starved it) and which Chrome reports as deprecated. In the
+browser branch of `runtime/frontend/audio_sdl.c`, `main` creates an `AudioContext` at 48 kHz and loads
+`audio-worklet.js` (`innAsset('audio-worklet.js')`: a hashed same-origin file in a package, so
+`script-src 'self'` covers `addModule`). After each frame the main loop takes what `audio_read_paced` hands
+out, as before, and posts it to the worklet as a transferred `Int16Array`; the worklet keeps up to 1 s in its
+own ring and plays it on the audio thread. The page has no `SharedArrayBuffer` (no COOP/COEP isolation),
+so it is messages. About every 10 ms the worklet reports the frames that have left its ring; the queued
+level the pacing needs is what was posted less that, less what has played since at the output rate.
+The pacing itself (100 ms target in the browser, stretch of at most 0.5%, underrun and resync counts in
+`--perf`) is unchanged. While the context is not running (before the first click, or muted), the rendered
+frames are dropped rather than posted, so unmuting does not play stale sound.
+
+The page reaches the context as `Module.innAudio.ctx` (`audioContext()` in `page.js`): mute suspends it, unmute
+and the first mouse down on the canvas resume it. A browser without AudioWorklet runs silent and logs
+`audio: this browser has no AudioWorklet; sound is off`.
 
 ## Performance
 
