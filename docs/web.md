@@ -312,10 +312,11 @@ address with `ws` turned into `http` (same host and port). With no providers (an
 list) nothing changes: phone, then dial. With providers, the flow below runs (contract in the next section).
 
 1. *Who's calling.* Clicking the telephone (or Game, Dial) with the disks loaded makes the operator ask
-   "Who's calling, please?". The narrator box offers a row of calling cards: a small pixel card per provider with
-   its configured name as lettering (no logos or brand marks), plus a dashed "I have my own number" card, which is
-   the classic path: no sign-in, the account already in the install. Game, "Sign in..." offers the provider cards
-   only, and works without disks.
+   "Operator. How can I connect you?". The narrator box offers a row of calling cards: a painted card per provider
+   with its configured name as lettering (no logos or brand marks; see "Calling cards" below), plus a dashed
+   "PRIVATE LINE" card, "I have my own number", which is the classic path: no sign-in, the account already in the
+   install (left out when the server requires sign-in). Game, "Sign in..." offers the provider cards only, and
+   works without disks.
 2. *On hold.* A card opens the login in a popup (`window.open` straight from the click) and the narrator says the
    operator has put you on hold (tiny hold-music notes; "Hang up on the operator" closes the popup). If the popup
    is blocked, the page redirects in the same window instead and takes the result from the address fragment.
@@ -336,6 +337,42 @@ list) nothing changes: phone, then dial. With providers, the flow below runs (co
    answer the server wants again (403 `attest_required`: the notice is shown again and the call repeated once),
    a busy server (503) and an unreachable one. The table in the next section lists each. Everything is reachable by keyboard: F10, Game, "Sign in...", Enter on a card, the
    buttons of the narrator box (Left and Right move between them), the dialog.
+
+**Calling cards.** Each card is a `<button class="ccard">` in `adv.js` (`callingCard`): real lettering over a
+face painted with the scenes' kit (`InnScenes.paintSmall` in `scene.js`: the same brush helpers, paper texture,
+median-cut palette and ordered dither as the backdrops, at 2 CSS pixels a painted pixel). The face has two parts:
+
+- *The provider's design*, the same on every scene, keyed by the provider `id` (the `CARDS` table): a band colour
+  and a made-up series name in the band, a motif at the lower right, and a fine-print gag under the name.
+
+  | id | series (band) | motif | fine print |
+  |---|---|---|---|
+  | `microsoft` | LAMP ROOM EXCHANGE | a lighthouse lamp on its rock | Do not fold, spindle or feed to serpents. |
+  | `google` | PIGEON POST & CO. | a carrier pigeon with a tiny satchel | Delivered by pigeon. Tip in crumbs only. |
+  | `discord` | UP & AWAY PARTY LINE | a hot-air balloon | Altitude may vary. Ballast is not refundable. |
+  | `github` | PATCH CORD SOCIETY | a brass switchboard plug on its way to a jack | Valid for one (1) identity. Pointy end in. |
+  | `dev` | CACTUS JUNCTION | a cactus wearing a headset | Test line. The cactus is not a real operator. |
+  | any other id | one of four, by a stable hash of the id | tin-can telephone, pocket watch, rotary dial, rubber stamp | one each |
+  | own number | PRIVATE LINE (dashed frame) | a latchkey with a luggage tag | Unlisted. The operator pretends not to know you. |
+
+- *The scene's flourish* (the `POST` table): the paper and the postmark ink follow the scene, a postmark (two rings,
+  worn lettering, a 7 x 7 picture: anchor, slice of pie, moon, clock, volcano, and three wavy cancel lines) sits
+  over the motif, and one line goes under the row: harbour "Waterproof to a depth of one (1) small splash.", diner
+  "Good for one call or one slice of pie, not both.", tower "Not redeemable for newts, or by them.", town
+  "Postmarked a quarter past something.", valley "Fireproof up to one (1) polite rumble." At dusk the card grades
+  its own colours (a lamp-lit paper, the motif toned toward the scene's night) so the lettering stays readable.
+
+The faces repaint when a card changes size (a `ResizeObserver`; at 700 px and below the cards are full width), when
+the scene is painted again (another scene, or the Time of day option) and are cached per design, scene, mode and
+size. The canvas is `aria-hidden`; the button keeps the accessible name "Calling card: <name>" and points
+`aria-describedby` at its fine print and the scene's line, both real text. Nothing moves except the hover lift,
+which reduced motion turns off. No image is fetched: everything is drawn in code, so the packaged CSP holds.
+
+*No logos.* A card never shows a provider's logo, mark, mascot or trade dress, not redrawn and not "inspired by",
+and not in its brand colours: the motifs and colours are unrelated to the companies, and the provider is only its
+`name` from `/auth/providers`, as plain text. Providers' brand guidelines forbid altered or re-coloured logos, and
+the name is used nominatively, to say which sign-in a card opens. The humour is about calling cards, operators and
+the scene, never about the companies.
 
 Game, "Sign out" calls `POST /auth/logout`, forgets the token and has the narrator say goodbye; Help, About names
 the signed-in identity. `?classic=1` keeps only the old "Sign in with ..." links (full redirect, `mode=redirect`),
