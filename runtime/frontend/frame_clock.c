@@ -20,6 +20,7 @@ void frame_clock_start(FrameClock *c, const Machine *m, bool report)
     *c = (FrameClock){ .report = report };
     c->last_us = c->window_start_us = frame_clock_now_us();
     c->window_instructions = m->cpu.instructions;
+    c->window_skipped_us = m->idle.skipped_us;
 }
 
 static void report_window(FrameClock *c, const Machine *m, uint64_t now)
@@ -29,17 +30,20 @@ static void report_window(FrameClock *c, const Machine *m, uint64_t now)
     p->instructions = m->cpu.instructions - c->window_instructions;
     p->dropped_us = p->wall_us > p->emulated_us ? p->wall_us - p->emulated_us : 0;
     double busy = p->busy_us ? (double)p->busy_us : 1.0;
+    double idle = p->emulated_us ? 100.0 * (double)(m->idle.skipped_us - c->window_skipped_us) / (double)p->emulated_us : 0.0;
     AudioStats audio = audio_take_stats((Machine *)m);
     log_msg("perf: speed %.3fx real, host busy %.1f%%, executed %.2f MIPS, capacity %.1f MIPS "
             "(guest clock %.0f MIPS), dropped %.0f ms, longest frame %.0f ms, "
-            "audio underruns %u, resyncs %u, discarded %.0f ms",
+            "audio underruns %u, resyncs %u, discarded %.0f ms, idle %.0f%%",
             (double)p->emulated_us / (double)p->wall_us, 100.0 * p->busy_us / (double)p->wall_us,
             (double)p->instructions / (double)p->wall_us, (double)p->instructions / busy,
             (double)m->ips / 1e6, p->dropped_us / 1000.0, p->longest_us / 1000.0, audio.underruns,
-            audio.resyncs, audio_rate((Machine *)m) ? audio.dropped_frames * 1000.0 / audio_rate((Machine *)m) : 0.0);
+            audio.resyncs, audio_rate((Machine *)m) ? audio.dropped_frames * 1000.0 / audio_rate((Machine *)m) : 0.0,
+            idle > 100.0 ? 100.0 : idle);
     c->window = (FramePerf){ 0 };
     c->window_start_us = now;
     c->window_instructions = m->cpu.instructions;
+    c->window_skipped_us = m->idle.skipped_us;
 }
 
 void frame_clock_run(FrameClock *c, Machine *m)

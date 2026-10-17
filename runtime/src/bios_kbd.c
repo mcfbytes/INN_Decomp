@@ -234,13 +234,19 @@ static CallbackResult int16_service(Machine *m)
         bool have = bios_kbd_peek(m, &key);
         if (have)
             AX = AH == 0x01 ? legacy_key(key) : key;
+        else
+            machine_idle_poll(m, IDLE_POLL_KEYBOARD, AH);
         cb_set_zero(m, !have);
         return CB_DONE;
     }
-    case 0x02: AL = bda_rd8(m, BDA_KBD_FLAGS0); return CB_DONE;
+    case 0x02:
+        AL = bda_rd8(m, BDA_KBD_FLAGS0);
+        machine_idle_poll(m, IDLE_POLL_SHIFT, AL);
+        return CB_DONE;
     case 0x12:
         AL = bda_rd8(m, BDA_KBD_FLAGS0);
         AH = extended_shift_flags(m);
+        machine_idle_poll(m, IDLE_POLL_SHIFT, 0x10000u | AX);
         return CB_DONE;
     case 0x05: AL = bios_kbd_push(m, CX) ? 0 : 1; return CB_DONE;
     default: return CB_DONE; /* typematic rate and the rest: accepted, no effect */

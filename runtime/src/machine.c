@@ -20,8 +20,10 @@ void mem_wr8_slow(Machine *m, uint32_t linear, uint8_t v)
 {
     if (mem_is_vga(linear) && m->native_video)
         m->mem[linear] = v;
-    else if (mem_is_vga(linear))
+    else if (mem_is_vga(linear)) {
+        m->idle.activity = true;
         vga_mem_write(m, linear, v);
+    }
     /* Option ROM and BIOS space is read-only. */
 }
 
@@ -160,11 +162,23 @@ static void device_out(Machine *m, uint16_t port, uint32_t value, int size)
         log_msg("io: unhandled out %04X <- %X", port, value);
 }
 
+/* Reads whose answer only depends on emulated time (OPL timers, retrace) or is fixed (the empty game
+ * port): polling them is waiting, like the input polls. */
+static bool time_only_read(uint16_t port)
+{
+    switch (port) {
+    case 0x388: case 0x228: case 0x220: case 0x222: case 0x3DA: case 0x3BA: case 0x201: return true;
+    default: return false;
+    }
+}
+
 uint32_t port_in(Machine *m, uint16_t port, int size)
 {
     if (__builtin_expect(m->native, 0))
         native_port_fatal(m, false, port);
     charge_io(m);
+    if (!time_only_read(port))
+        m->idle.activity = true;
     if (m->io_mode == IO_REPLAY) {
         if (vga_port(port)) /* VGA state is part of the snapshot, so the lifted run drives it too */
             device_in(m, port, size);
@@ -181,6 +195,7 @@ void port_out(Machine *m, uint16_t port, uint32_t value, int size)
     if (__builtin_expect(m->native, 0))
         native_port_fatal(m, true, port);
     charge_io(m);
+    m->idle.activity = true;
     if (m->io_mode == IO_REPLAY) {
         lift_io_replay_out(m, port, value, size);
         if (vga_port(port))
@@ -245,9 +260,50 @@ static void end_slice(Machine *m)
         m->tickers[i](m);
 }
 
+void machine_idle_poll(Machine *m, IdlePoll kind, uint32_t result)
+{
+    IdleState *s = &m->idle;
+    s->polled = true;
+    uint64_t gap = m->cpu.instructions - s->last_poll_insn;
+    s->last_poll_insn = m->cpu.instructions;
+    bool same = s->seen[kind] && s->result[kind] == result;
+    s->seen[kind] = true;
+    s->result[kind] = result;
+    bool quiet = same && gap <= IDLE_GAP_SLOTS && !s->activity;
+    s->activity = false;
+    /* Shadow verification and lifted C calling a service keep their exact paths. */
+    if (!quiet || s->off || m->native || m->io_mode != IO_LIVE || m->irq_hold || m->ticks_frozen || lift_in_c(m)) {
+        s->streak = 0;
+        return;
+    }
+    if (++s->streak < IDLE_STREAK)
+        return;
+    s->until_us = m->virtual_us + IDLE_MAX_US;
+    m->cpu.yielded = true; /* ends this slice after the service returns */
+}
+
+/* While skipping, a slice passes without instructions until an interrupt is pending or the limit is
+ * reached; the devices tick as usual. IF is not consulted: the skip starts inside the poll's service,
+ * where INT cleared it, and its IRET turns it back on. */
+static bool idle_skip(Machine *m)
+{
+    IdleState *s = &m->idle;
+    if (!s->until_us)
+        return false;
+    if ((m->irq_pending && !m->irq_hold) || m->virtual_us >= s->until_us || m->exit_requested) {
+        s->until_us = 0;
+        return false;
+    }
+    end_slice(m);
+    s->skipped_us += TICK_SLICE_US;
+    return true;
+}
+
 /* Time follows instructions executed, so nested guest calls from lifted code cost what they run. */
 void machine_step(Machine *m)
 {
+    if (idle_skip(m))
+        return;
     if (m->slice_left == 0)
         m->slice_left = m->ips * TICK_SLICE_US / 1000000;
     uint64_t done = cpu_run(m, m->slice_left);

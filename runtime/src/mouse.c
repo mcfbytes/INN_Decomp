@@ -273,7 +273,10 @@ static CallbackResult int33_mouse(Machine *m)
     case 0x00: case 0x21: reset_driver(m); AX = RESET_OK; BX = 2; break;
     case 0x01: if (s->show_count < 0) s->show_count++; break;
     case 0x02: s->show_count--; break;
-    case 0x03: BX = s->buttons; CX = (uint16_t)s->x; DX = (uint16_t)s->y; break;
+    case 0x03:
+        BX = s->buttons, CX = (uint16_t)s->x, DX = (uint16_t)s->y;
+        machine_idle_poll(m, IDLE_POLL_MOUSE, (uint32_t)BX << 24 ^ (uint32_t)CX << 12 ^ DX);
+        break;
     case 0x04:
         s->x = clampi((int16_t)CX, s->min_x, s->max_x);
         s->y = clampi((int16_t)DX, s->min_y, s->max_y);

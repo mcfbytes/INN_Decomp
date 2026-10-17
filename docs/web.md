@@ -58,6 +58,7 @@ The page asks for the install (unless `inn.data` provides one), then runs
 | `classic=1` | The old layout for debugging: the setup card (picker, drop zone, Advanced, Connect, modem panel) over the scene, with no menu bar, score or narrator box. |
 | `perf=1` | Pass `--perf`: a timing line in the log every 5 s (see Performance). |
 | `ips=N` | Guest instruction rate (`--ips`), default 20000000. |
+| `idle=0` | Pass `--no-idle-skip`: the guest's input polls never let time skip ahead (docs/runtime.md, "Idle polls"). |
 
 ## Landing scenes
 
@@ -715,6 +716,8 @@ game down instead of making it race. `--perf` logs, every 5 s:
 | capacity | guest instructions per second of `machine_run_for` time: the rate the host could sustain |
 | dropped | wall time minus emulated time over the window (time the guest fell behind) |
 | longest frame | longest single frame; audio runs dry if it exceeds the queue without yielding |
+| audio underruns, resyncs, discarded | the output ran dry; queued audio was thrown away to bound latency |
+| idle | share of emulated time skipped while the guest only polled for input (docs/runtime.md, "Idle polls") |
 
 With `--perf`, a frame over 100 ms also logs `long frame`: its emulated time and how long nested
 waits in lifted code slept. A frame that waits inside lifted code keeps pace with the wall clock and

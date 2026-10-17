@@ -610,6 +610,7 @@ function runtimeArgs(server) {
   const args = ['--com1', spec];
   if (params.get('perf')) args.push('--perf');
   if (params.get('ips')) args.push('--ips', params.get('ips'));
+  if (params.get('idle') === '0') args.push('--no-idle-skip');
   return args.concat([DRIVE, `${PROGRAM.dir}\\${PROGRAM.exe}`], PROGRAM.args);
 }
 

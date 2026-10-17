@@ -1063,7 +1063,11 @@ static void group_fe(Machine *m, Insn *in)
             log_msg("cpu: unknown callback %u", id);
             return;
         }
-        if (fn(m) == CB_RETRY) {
+        m->idle.polled = false;
+        CallbackResult result = fn(m);
+        if (!m->idle.polled) /* any other service is activity (machine_idle_poll) */
+            m->idle.activity = true;
+        if (result == CB_RETRY) {
             c->eip = in->start_eip;
             c->yielded = true;
         } else if (m->io_mode != IO_LIVE) {
