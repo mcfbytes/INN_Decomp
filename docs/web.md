@@ -733,6 +733,31 @@ boot, dial, logon and town map, guest clock 20 MIPS: speed 1.000 throughout, hos
 capacity 45 to 91 MIPS across runs (2x to 4x headroom; the lower end with OPL synthesis running).
 Raising the guest clock: 50 and 70 MIPS stay at 1.000; 90 MIPS falls to 0.84 to 0.99 with no runaway.
 
+Measured 2026-10-16, same setup, through the Yserbius tavern, with Chromium's CPU throttling at 2.5x to stand in
+for a slower browser (host busy, per screen; speed 1.000 unless noted). The tavern redraws its whole frame with
+`REP MOVSW` between input polls; while a REP cost one instruction slot it did so about 450 times per emulated
+second and starved the host (docs/runtime.md, "Time"). Its own Options dialog stops that loop, which is why
+opening it stopped the warble.
+
+| Build | INN map | Yserbius gallery and town | Tavern | Tavern's Options |
+|---|---|---|---|---|
+| before | 86%, speed 0.965 | 82% | 93%, speed 0.61, 29 underruns per 5 s | 80% |
+| REP costs a slot per element | 78% | 73% | 49%, no underruns | 75% |
+| AudioWorklet alone | 76% | 70% | 93%, speed 0.70, 22 underruns per 5 s | 71% |
+| all (with idle polls) | 44% | 17% | 49% | 9% |
+| all, no throttling | 18% | 6% | 19% | 3% |
+
+With idle polls, `capacity` counts only the slices that ran instructions, so on waiting screens it reads lower
+than the host could do; `host busy` is the figure to watch.
+
+Guest clock (`ips=`): 20 MIPS stays the default. Natively at 10 MIPS the scripted path (logon, map, Yserbius
+gallery, town, tavern) reaches every screen at the same times as at 20 MIPS; at 6 MIPS logon falls behind the
+script. What scales with the clock: the tavern's redraw rate (about 176 per second at 20 MIPS), Red Baron's frame
+rate (about 23 page flips per second at 20 MIPS, 14.5 at 10; its game time follows its 236.7 Hz timer either way)
+and how fast screens load. Idle time does not need clock: the map is 64% idle polls at 20 MIPS, the Yserbius
+gallery 90%, the town 84%. Drivers that count polls (`MODEM.DRV`) count bus time, not instructions, so they do
+not depend on the clock.
+
 ## Packaging and deployment
 
 `tools/package_web.sh <build-dir> <out-dir>` turns a finished public build into the folder that goes to Azure
