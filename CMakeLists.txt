@@ -113,10 +113,19 @@ if(EMSCRIPTEN)
     target_link_options(inn PRIVATE --pre-js ${CMAKE_SOURCE_DIR}/runtime/web/native-pre.js)
     set_property(TARGET inn APPEND PROPERTY LINK_DEPENDS ${CMAKE_SOURCE_DIR}/runtime/web/native-pre.js)
   endif()
-  foreach(script page.js site.js site.json audio-worklet.js legal/terms.html legal/privacy.html legal/copyright.html legal/legal.js zip.js saves.js auth.js music.js adv.js scene.js
+  foreach(script page.js site.js site.json audio-worklet.js legal/terms.html legal/privacy.html legal/copyright.html legal/legal.js zip.js saves.js auth.js music.js filters.js adv.js scene.js
           scenes/valley.js scenes/diner.js scenes/tower.js scenes/harbor.js scenes/town.js
           music/valley.js music/diner.js music/tower.js music/harbor.js music/town.js)
     configure_file(runtime/web/${script} ${CMAKE_BINARY_DIR}/${script} COPYONLY)
+  endforeach()
+  # The display filters' shaders (third_party/, docs/web.md "Display filters") sit flat in <build>/shaders/;
+  # the page fetches them when a filter is first chosen.
+  foreach(dir xbr xbrz scalefx hqx fsr1 crt-lottes anime4k sai)
+    file(GLOB shader_files CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/third_party/${dir}/*.glsl ${CMAKE_SOURCE_DIR}/third_party/${dir}/*.png)
+    foreach(shader ${shader_files})
+      get_filename_component(shader_name ${shader} NAME)
+      configure_file(${shader} ${CMAKE_BINARY_DIR}/shaders/${shader_name} COPYONLY)
+    endforeach()
   endforeach()
   # `cmake --build <dir> --target package-web` writes the deployable page to <dir>/package (docs/web.md,
   # "Packaging and deployment"). The script refuses lifted, native and preloaded builds. Pass the operator's

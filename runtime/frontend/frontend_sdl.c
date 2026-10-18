@@ -77,6 +77,10 @@ typedef struct Frontend {
     SDL_Texture *texture;
     uint32_t frame[VGA_MAX_W * VGA_MAX_H];
     int frame_w, frame_h;
+#ifdef __EMSCRIPTEN__
+    uint32_t sent[VGA_MAX_W * VGA_MAX_H]; /* the frame the page's GPU filter last received */
+    int sent_w, sent_h;
+#endif
     FrameClock clock;
     uint64_t step_wall_us, step_virtual_us; /* at the start of the current frame */
     uint64_t last_present_us;
@@ -200,10 +204,39 @@ static void draw_cursor_overlay(Frontend *f)
         }
 }
 
+#ifdef __EMSCRIPTEN__
+/* The page's display filters (runtime/web/filters.js, docs/web.md "Display filters"). wants() is 0 with Sharp or
+ * Smooth, when SDL draws the frame as before; 1 when a GPU filter is on and wants the frame only if it changed;
+ * 2 when it wants the current frame whatever (just switched on, or the context was rebuilt). */
+EM_JS(int, inn_gpu_wants, (void), { return (typeof Filters !== 'undefined') ? Filters.wants() : 0; });
+EM_JS(void, inn_gpu_frame, (const void *pixels, int w, int h), { Filters.frame(HEAPU8, pixels, w, h); });
+
+/* Hands the frame to the filter. Returns false when no filter is on and SDL should draw it. */
+static bool gpu_present(Frontend *f)
+{
+    int want = inn_gpu_wants();
+    if (!want) {
+        f->sent_w = 0; /* the filter has not seen the frames since: send the next one whole */
+        return false;
+    }
+    size_t bytes = (size_t)f->frame_w * (size_t)f->frame_h * sizeof f->frame[0];
+    if (want == 2 || f->sent_w != f->frame_w || f->sent_h != f->frame_h || memcmp(f->sent, f->frame, bytes) != 0) {
+        memcpy(f->sent, f->frame, bytes);
+        f->sent_w = f->frame_w, f->sent_h = f->frame_h;
+        inn_gpu_frame(f->frame, f->frame_w, f->frame_h);
+    }
+    return true;
+}
+#endif
+
 /* f->frame holds the rendered frame. */
 static void show_frame(Frontend *f)
 {
     draw_cursor_overlay(f);
+#ifdef __EMSCRIPTEN__
+    if (gpu_present(f))
+        return;
+#endif
     SDL_Rect src = { 0, 0, f->frame_w, f->frame_h };
     SDL_UpdateTexture(f->texture, &src, f->frame, f->frame_w * (int)sizeof f->frame[0]);
     SDL_RenderClear(f->renderer);

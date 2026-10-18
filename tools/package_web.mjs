@@ -55,6 +55,14 @@ for (const dir of ['scenes', 'music']) {
   }
 }
 
+// ---- display-filter shaders and lookup tables (third_party/, copied to <build>/shaders by CMake) ----
+// Fetched by filters.js when a filter is first chosen. GLSL stays as published: the licence headers are part of it.
+for (const f of readdirSync(join(build, 'shaders')).sort()) {
+  const m = /^([\w+-]+)\.(glsl|png)$/.exec(f);
+  if (!m) fail(`unexpected file shaders/${f}`);
+  assetMap[`shaders/${f}`] = putHashed('assets/shaders', m[1], m[2], read(`shaders/${f}`));
+}
+
 // The page inserts inn.js itself when the runtime is wanted (page.js, wantRuntime), through innAsset().
 assetMap['inn.js'] = innjsPath;
 // The audio sink's worklet module, which the runtime loads through innAsset() (audio_sdl.c).
@@ -153,13 +161,14 @@ const config = {
     'X-Content-Type-Options': 'nosniff',
     'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), hid=()',
   },
-  mimeTypes: { '.wasm': 'application/wasm', '.json': 'application/json' },
+  mimeTypes: { '.wasm': 'application/wasm', '.json': 'application/json', '.glsl': 'text/plain' },
 };
 put('staticwebapp.config.json', JSON.stringify(config, null, 2) + '\n');
 
 // ---- guard: nothing outside the expected list ships, and nothing that looks like game data ----
 const ALLOWED = [/^inn\.html$/, /^site\.json$/, /^staticwebapp\.config\.json$/, /^legal\/(terms|privacy|copyright)\.html$/,
-  /^assets\/(app|inn|legal)\.[0-9a-f]{10}\.(js|css|wasm)$/, /^assets\/worklet\.[0-9a-f]{10}\.js$/, /^assets\/(scenes|music)\/\w+\.[0-9a-f]{10}\.js$/];
+  /^assets\/(app|inn|legal)\.[0-9a-f]{10}\.(js|css|wasm)$/, /^assets\/worklet\.[0-9a-f]{10}\.js$/, /^assets\/(scenes|music)\/\w+\.[0-9a-f]{10}\.js$/,
+  /^assets\/shaders\/[\w+-]+\.[0-9a-f]{10}\.(glsl|png)$/];
 for (const [p, buf] of emitted) {
   if (!ALLOWED.some((re) => re.test(p))) fail(`unexpected output file ${p}`);
   if (buf.length > 3 && ((buf[0] === 0x4d && buf[1] === 0x5a) || (buf[0] === 0x50 && buf[1] === 0x4b))) fail(`${p} looks like an executable or an archive`);

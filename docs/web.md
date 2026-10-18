@@ -14,7 +14,7 @@ cmake --build build-web
 
 Output in `build-web/`: `inn.html` (from `runtime/web/shell.html`, which CMake fills in first: `data-runtime`, see
 "Loading the runtime"), `inn.js`, `inn.wasm`, and the page
-scripts `page.js`, `saves.js`, `auth.js`, `adv.js`, `scene.js` (and `scenes/`) and `zip.js` copied from `runtime/web/`. The default build type is `Release` (`-O3`).
+scripts `page.js`, `filters.js`, `saves.js`, `auth.js`, `adv.js`, `scene.js` (and `scenes/`) and `zip.js` copied from `runtime/web/`, and `shaders/` (the display filters' GLSL and lookup tables, flattened from `third_party/`). The default build type is `Release` (`-O3`).
 
 The native client (INN as C, games still on the emulator) is the same page with two cache variables.
 JSPI is required; Asyncify does not link this configuration:
@@ -393,7 +393,7 @@ itself on the new load when the disks are still there (kept with Remember).
 **Play.** There is no app bar. The game fills the viewport at 4:3 on a dark letterbox. Controls are a
 translucent strip that slides in when the pointer is within 8 px of the top edge (it stays while hovered
 or focused and hides 1.5 s after the pointer leaves): COM1 state, save-sync state, mute (suspends the sound's
-`AudioContext`, see "Sound"), display mode (cycles Sharp, Smooth, CRT), full screen and the settings drawer (display
+`AudioContext`, see "Sound"), display filter (cycles the choices the browser can run; see "Display filters"), full screen and the settings drawer (display
 mode, server, storage, log, Forget). Toasts stay over the game. When the client exits, an overlay offers
 to start again.
 
@@ -677,14 +677,90 @@ before SDL sees it (the game does not use it). Esc and every other key go to the
 the same layout.
 
 The canvas buffer is 960x720. `page.js` sizes its frame as the largest 4:3 box that fits the window
-(`layoutFrame`), so mouse coordinates map at any size. Display modes: Sharp (nearest-neighbour; snaps to a
-whole multiple of 960 when that costs under 4% of the size), Smooth (browser filtering) and CRT (filtering
-plus a 200-line scanline overlay); the choice is kept in `localStorage`. Right-click is the guest's right
+(`layoutFrame`), so mouse coordinates map at any size. Sharp (nearest-neighbour; snaps to a whole multiple of 960
+when that costs under 4% of the size) and Smooth (browser filtering) are the plain canvas; the other display filters
+are on the GPU (next section). The choice is kept in `localStorage` (`inn.scale`, `inn.scanlines`). Right-click is the guest's right
 button, so the context menu is suppressed.
 
 The system cursor is hidden over the canvas (CSS `cursor: none`, and `SDL_ShowCursor(SDL_DISABLE)` in the
 Emscripten branch of `frontend_sdl.c`, since SDL writes the canvas cursor style); only the game's own
 cursor shows. It is back over the letterbox, the strip and the drawer.
+
+## Display filters
+
+Settings, Display holds a list of picture filters and a Scanlines switch. **Sharp** and **Smooth** are the plain SDL
+canvas and cost nothing. Everything else is a WebGL 2 filter chain in `runtime/web/filters.js`:
+
+- `frontend_sdl.c` (`show_frame`, Emscripten only) asks `Filters.wants()` once per frame. With a GPU filter on it
+  compares the finished ARGB frame with the last one it sent (`memcmp`, about 0.03 ms) and calls `Filters.frame(HEAPU8,
+  ptr, w, h)` only when it differs; SDL's own texture upload and present are skipped. With Sharp or Smooth it draws as
+  before, and nothing in that path changed. A filter switched on mid-game gets the current frame at once (`wants()`
+  returns 2).
+- The frame is uploaded with `texSubImage2D` straight from the wasm heap, swizzled to RGBA in a first pass, and run
+  through the filter's passes. The last pass writes `#glcanvas`, laid over `#canvas` at 4:3 and sized to the frame area
+  in device pixels (`devicePixelRatio`). `#canvas` stays underneath at `opacity: 0` and keeps the keyboard, mouse,
+  pointer lock and focus; `#glcanvas` has `pointer-events: none`. Heavy filters (marked below) draw at most 5 million
+  pixels and the browser stretches the canvas the rest of the way.
+- Sizes: 320x200 and 640x480 frames work; a mode change reallocates the chain. A lost WebGL context, a shader that
+  does not compile or a missing extension falls back to Sharp with a note. Without WebGL 2 the GPU choices are greyed
+  out with the reason; Sharp and Smooth still work. ScaleFX needs `EXT_color_buffer_float` and the line-art enhancer
+  `EXT_color_buffer_float` or `EXT_color_buffer_half_float`.
+- Shaders are fetched when a filter is first chosen (`innAsset('shaders/<file>')`; hashed assets in the package) and kept
+  as published, with their licence headers. `filters.js` plays the libretro host: it adds `#version 300 es`, the VERTEX /
+  FRAGMENT switch, `MVPMatrix`, `Texture`, `TextureSize`, `InputSize`, `OutputSize`, `OrigTexture`, `PassPrevNTexture`,
+  `LUT` and the `#pragma parameter` defaults, and reads the mpv hook format for Anime4K. CSP: nothing is evaluated;
+  shaders are `fetch`ed text compiled by the GPU, and `script-src 'self'` is unchanged.
+- Scanlines (our own pass, `SCAN_FRAG`) darken the gap between source lines and fade out when the lines are under
+  3 output pixels thick. They combine with any filter except CRT, which draws its own.
+
+| Choice | What it is | Licence | Source (see `third_party/<dir>/README.md`) |
+|---|---|---|---|
+| Sharp, Smooth | plain canvas | n/a | n/a |
+| xBR, xBR strong (heavy) | Hyllian's xBR level 2 and 3 | MIT | libretro glsl-shaders `xbr/`, `third_party/xbr` |
+| xBRZ (heavy) | xbrz-freescale | MIT + GPL-3.0 (Zenju); used as GPL-3.0-or-later | glsl-shaders `xbrz/`, `third_party/xbrz` |
+| ScaleFX | Sp00kyFox, 5 passes at 3x, then a resample | MIT | glsl-shaders `scalefx/`, `third_party/scalefx` |
+| HQx | hq2x, hq3x or hq4x by window size, 2 passes and a lookup table | LGPL-2.1-or-later | glsl-shaders `hqx/`, `third_party/hqx` |
+| 2xSaI, Super 2xSaI, Super Eagle | the classic 2x filters | GPL (DOSBox's code, "GNU-GPL"); used as GPL-3.0-or-later | glsl-shaders `eagle/`, slang-shaders `edge-smoothing/eagle/`, `third_party/sai` |
+| FSR 1 (heavy) | AMD EASU upscale, then RCAS sharpen | MIT | AMD FidelityFX-FSR via the glsl-shaders port, `third_party/fsr1` |
+| CRT (heavy) | Timothy Lottes' scanline, mask and bloom shader | public domain | glsl-shaders `crt/`, `third_party/crt-lottes` |
+| Line-art enhancer | Anime4K CNN x2 (S), experimental | MIT | bloc97/Anime4K, `third_party/anime4k` |
+
+Filters with a fixed scale (ScaleFX 3x, HQx, the SaI family 2x) are fitted to the window with a bilinear pass; the SaI
+family also shifts the picture by a quarter or half a source pixel, which that pass undoes (`shift` in `DEFS`). Left
+out: none of the requested filters; the other libretro scalers were not needed.
+
+### Cost
+
+Measured 2026-10-17 in headless Chromium (SwiftShader, so the GPU work runs on the CPU and every number is far
+pessimistic against a real GPU), one frame including a read-back that waits for it, milliseconds, without the
+5-million-pixel cap:
+
+| Filter | 1920x1440 | 3840x2880 |
+|---|---|---|
+| Sharp / Smooth (GPU path) | 3.5 / 4.5 | 12.5 / 16 |
+| xBR / xBR strong / xBRZ | 67 / 63 / 67 | 203 / 251 / 269 |
+| ScaleFX / HQx | 9 / 8 | 18 / 20 |
+| 2xSaI / Super 2xSaI / Super Eagle | 6.5 / 7.7 / 7.5 | 18 / 20 / 20 |
+| FSR 1 | 43 | 167 |
+| CRT | 219 | 919 |
+| Line-art enhancer | 7.9 | 19.6 |
+| Sharp + Scanlines / xBR strong + Scanlines | 7.7 / 67 | |
+
+The filters with a fixed scale and the line-art network work at source size and pay mostly for the final resample;
+the others do their work for every output pixel, which is why they are capped. In the live page (local install and
+server, 1920x1440, boot to the player screen) `?perf=1` read speed 1.000 with host busy 28%, 23%, 8%, 8% in its first
+four windows for Sharp, xBR strong and the line-art enhancer alike, and the same with CRT apart from a first window
+at 0.967 while SwiftShader took 220 ms a frame. Frames are sent only when they changed: the player screen sent 55
+frames in 25 s.
+
+### Testing the filters
+
+`tools/filter_test/` renders a fixed 320x200 test card (made in code; it holds no game art) through every filter in
+headless Chromium, with `run.mjs <out-dir> [ids] [--size=WxH] [--scan]`; `--centroid` measures how far each filter moves
+the picture in source pixels (all are within 0.03 after the corrections) and `--time=N` the milliseconds per frame.
+`live.mjs` drives the packaged page with a local install and server and prints the emulator's `perf:` lines.
+Chromium needs `--use-angle=swiftshader` headless; those timings are software rendering on the CPU and far
+pessimistic against a real GPU.
 
 ## Sound
 
