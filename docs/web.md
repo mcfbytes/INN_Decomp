@@ -353,9 +353,12 @@ list) nothing changes: phone, then dial. With providers, the flow below runs (co
    is blocked, the page redirects in the same window instead and takes the result from the address fragment.
 3. *The card.* On success a calling-card icon joins the disk icon in the inventory and the score gains 5. Each
    INN account a sign-in owns is a line: an account number and a password, and a persona (a name, a face) that the
-   original client makes at its own Select Player screen after the dial (see "The persona on the drive"). A first
-   sign-in has no account, so the page opens one with no name and no dialog, and the narrator says "Welcome,
-   Caller 7F3A! Your number is 100003. The client will ask who you are, so dress nicely." before dialing. One account
+   original client makes at its own Select Player screen after the dial (see "The persona on the drive"). A
+   sign-in with no account yet asks first: "Welcome, Caller 7F3A. New here, or do you already have an account? Sign
+   in with the provider you used before to link it." with "Create a new account" (when the server says
+   `canCreate`) and "Link to my existing account" (below, "Sign-in methods"). Create opens an account with no name
+   and no dialog, and the narrator says "Welcome, Caller 7F3A! Your number is 100003. The client will ask who you
+   are, so dress nicely." before dialing. One account
    is used straight away; several give "And who's playing today?" with a button per line (the persona, or "New
    caller (100003)" while it has none), plus "Someone new, please" (another empty account) when the server says
    `canCreate`, and "My own number".
@@ -406,7 +409,24 @@ the name is used nominatively, to say which sign-in a card opens. The humour is 
 the scene, never about the companies.
 
 Game, "Sign out" calls `POST /auth/logout`, forgets the token and has the narrator say goodbye; Help, About names
-the signed-in identity. `?classic=1` keeps only the old "Sign in with ..." links (full redirect, `mode=redirect`),
+the signed-in identity.
+
+**Sign-in methods.** One player may link several providers so that any of them reaches the same lines (innkeeperd
+`docs/server/innkeeperd.md` section 8.7). Linking is always deliberate, by signing in with both cards one after the
+other; nothing is matched by email, and no email is asked for. Game, "Sign-in methods..." (while signed in) has the
+narrator list the cards that reach these lines, by provider name and link date ("Sign-in methods. These cards reach
+your lines: GitHub (since 2026-10-17), the one in your hand; Pigeon Post (since 2026-10-18)."), with a "Remove <name>"
+button for each card but the one in use, "Add another sign-in method" and OK. A single card cannot be removed, and
+the box says so. Add shows the calling cards; picking one opens the login popup straight from the click while the page
+fetches a link ticket (`POST /auth/identities/ticket`), then sends the popup on with `&link=<ticket>`. The popup
+answers with a proof instead of a session, and the page redeems it with its own token (`POST /auth/identities`):
+"Linked." and the list again. Remove asks once ("It will no longer reach these lines, and any sign-in with it ends
+now.") and calls `POST /auth/identities/unlink`. "Link to my existing account", offered to a sign-in with no lines,
+is the same flow the other way round: sign in with the old card, and the new one joins its lines; the page then
+goes on to "who's playing". Changing methods needs a sign-in from the last ten minutes: on 403 `reauth_required` the
+narrator asks for the current card again and comes back to the list. A blocked popup redirects instead
+(`inn.linkwhy` in `sessionStorage` remembers which of the two flows it was), and the proof comes back as
+`#inn-link=<proof>`. `?classic=1` keeps only the old "Sign in with ..." links (full redirect, `mode=redirect`),
 and the token that comes back is kept but the classic card does not use it.
 
 **Dialing.** Dial starts the client and opens a period-style terminal box near the telephone (`termAt`; docked at
@@ -442,8 +462,11 @@ page shows `message` for a 4xx it does not know):
 | Request | Success | Other |
 |---|---|---|
 | `GET /auth/providers` | 200 `{"signInRequired": true, "providers": [{"id": "example", "name": "Example Phone Co.", "url": "/auth/login?provider=example"}]}` | anything else, or no providers: sign-in stays off. `url` is relative to the auth origin or absolute on it; any other origin is ignored. `name` is shown as text only. `signInRequired` (innkeeperd `--public`) means every line needs a session: the operator then offers only the cards, with no "own number", and the page never dials without a session. A bare list (an older server) means sign-in is optional. |
-| `GET <url>&return=<page URL>&mode=popup&nonce=<nonce>` | the login (consent) page; ends on `/auth/callback` | 400 for an unknown provider or a `return` whose origin is not an allowed page origin; 400 `bad_nonce` for a malformed nonce, or for none at all on a `--public` server |
-| `GET /auth/session`, `Authorization: Bearer <token>` | 200 `{"identity": {"handle": "Caller 7F3A", "provider": "<id>"}, "accounts": [{"id": 100001, "persona": "Guybrush"}, {"id": 100002, "persona": null}], "canCreate": true, "attested": {"age": 18, "terms": 1}}` (`attested` is `null` when none is on record) | 401: token missing, unknown or expired |
+| `GET <url>&return=<page URL>&mode=popup&nonce=<nonce>` (and `&link=<ticket>` for a link login) | the login (consent) page; ends on `/auth/callback` | 400 for an unknown provider or a `return` whose origin is not an allowed page origin; 400 `bad_nonce` for a malformed nonce, or for none at all on a `--public` server. A ticket that is used, expired or not this session's comes back at once as `link_expired` |
+| `GET /auth/session`, `Authorization: Bearer <token>` | 200 `{"identity": {"handle": "Caller 7F3A", "provider": "<id>"}, "identities": [{"id": "<16 hex>", "provider": "<id>", "name": "<provider name>", "linkedOn": "2026-10-17", "current": true}], "accounts": [{"id": 100001, "persona": "Guybrush"}, {"id": 100002, "persona": null}], "canCreate": true, "attested": {"age": 18, "terms": 1}}` (`attested` is `null` when none is on record; `identities` are the sign-in methods that reach these accounts, by provider and date only) | 401: token missing, unknown or expired |
+| `POST /auth/identities/ticket` | 200 `{"ticket": "<sealed>", "expiresIn": 600}`: leave for one link login of this session | 401; 403 `reauth_required` (no sign-in in the last ten minutes); 409 `too_many_identities` |
+| `POST /auth/identities`, `{"proof": "<from the link login>"}` | 200 `{"identities": [...]}`: the proven sign-in now reaches these accounts (or these accounts are now the proven sign-in's, when this one had none) | 401; 400 `bad_proof` (expired, used, or another session's); 409 `identity_in_use`; 409 `too_many_identities` |
+| `POST /auth/identities/unlink`, `{"id": "<16 hex>"}` | 200 `{"identities": [...]}`; the removed method's sessions end | 401; 403 `reauth_required`; 409 `last_identity`; 409 `current_identity`; 403 `suspended`; 404 `no_such_identity`; 400 `bad_id` |
 | `POST /auth/attest`, `{"attest": "18+v2"}` | 204; the answer is stored on the identity | 400 `bad_attest`; 401 |
 | `POST /auth/accounts`, `{}` (an empty body works too) | 201 `{"id": 100002, "persona": null}`: an account with a number and a password and no persona yet. A body `{"persona": "Elaine"}` still works (1 to 10 of A-Z, a-z, 0-9, unique without regard to case) and answers `"persona": "Elaine"`; the page no longer sends it | 401; 403 `enrolment_closed`; 403 `attest_required`; 400 `bad_persona`; 409 `persona_taken` (only with a given persona); 429 `rate_limited` |
 | `POST /auth/accounts/<id>/credential` | 200 `{"account": 100002, "password": "K3J9QWZ7"}`; every call rotates the password | 401; 404 when the identity does not own `<id>` |
@@ -462,6 +485,9 @@ What the page does with the answers it does not just show:
 | callback `error`: `access_denied` | "Sign-in was declined at <provider>" |
 | callback `error`: `provider_error`, `server_error` | the provider (or the game server) "could not sign you in / finish the sign-in (it reported an error)" |
 | a result without this login's nonce (the page's own `state_mismatch`) | drops it: "That sign-in answer was not the one this page asked for, so it was dropped (state_mismatch)"; a page that still holds a token adds "Nothing changed: you are still signed in as <handle>" (so does any other failed login while signed in) |
+| link `error` (or 409 on the redeem): `identity_in_use` | "That card (<provider>) already has lines of its own, so the operator will not merge it into these"; nothing is linked |
+| link `error`: `already_linked`, `link_expired`; 409 `too_many_identities` | says so; nothing is linked |
+| 403 `reauth_required` on a ticket or an unlink | asks for the current card again (a fresh sign-in), then shows the sign-in methods |
 | any other callback code | "Sign-in did not finish (<code>)" |
 
 Every message is a narrator box with the fact first (what failed, the status or code), then a dry remark.
@@ -503,18 +529,18 @@ contract that goes with them is:
 `window.open` on the click. The server runs the provider's login, then on `/auth/callback` serves a tiny page whose script does
 `window.opener.postMessage(msg, <origin of return>)` and `window.close()`, where `msg` is
 `{"type": "inn-auth", "session": "<token>"}` or, when the player declined or the provider failed,
-`{"type": "inn-auth", "error": "access_denied"}` (any other code is shown as "did not finish"); each also carries
-`"nonce"`. The page accepts a message only when `event.origin` is the auth origin, `event.source` is the popup it
-opened and `type` is `inn-auth`, and then only when `nonce` is the one this login sent; otherwise it is
-`state_mismatch`.
+`{"type": "inn-auth", "error": "access_denied"}` (any other code is shown as "did not finish"), or for a link login
+`{"type": "inn-auth", "link": "<proof>"}`; each also carries `"nonce"`. The page accepts a message only when
+`event.origin` is the auth origin, `event.source` is the popup it opened and `type` is `inn-auth`, and then only
+when `nonce` is the one this login sent; otherwise it is `state_mismatch`.
 The `return` address must be checked against the configured page origins (an open redirect and a wildcard
 `postMessage` target would leak the token). If the popup is closed with no message the page says so.
 
 *Fallback.* When `window.open` returns null the page navigates itself to the same URL with `mode=redirect`. The
-server answers the callback with a 302 to `<return>#inn-session=<token>` (or `#inn-error=<code>`), followed by
-`&inn-nonce=<nonce>`. On load the page reads the fragment and takes the result only when `inn-nonce` is the nonce it
-stored for that login; anything else becomes `state_mismatch`. Either way it cleans the address with
-`history.replaceState`, and then continues from the account step.
+server answers the callback with a 302 to `<return>#inn-session=<token>` (or `#inn-error=<code>`, or
+`#inn-link=<proof>`), followed by `&inn-nonce=<nonce>`. On load the page reads the fragment and takes the result only
+when `inn-nonce` is the nonce it stored for that login; anything else becomes `state_mismatch`. Either way it cleans
+the address with `history.replaceState`, and then continues from the account step.
 
 *The nonce* (login CSRF). Every login URL gets a fresh `nonce`: 18 random bytes from `crypto.getRandomValues`,
 base64url, 24 characters (`newNonce` in `auth.js`). `loginUrl` keeps it in `sessionStorage` (`inn.nonce`) and in
@@ -561,9 +587,11 @@ accepts the Login and stores the 40/4 name as the account's persona. "I have my 
 now holds, which after a sign-in dial is the last credential written. `writeCredentials` then gives the drive the
 account's own view of the persona files and fetches them (below). It writes no persona of its own.
 
-**The first sign-in.** After the sign-in, an identity with no account gets one at once, with no question: the page
-posts `{}`, the narrator says "Welcome, Caller 7F3A! Your number is 100003. The client will ask who you are, so dress
-nicely.", and the line is dialed. Several accounts: "And who's playing today?" shows one button per account, the
+**The first sign-in.** After the sign-in, an identity with no account is asked "New here, or do you already have an
+account?": "Link to my existing account" runs the link flow ("Sign-in methods", above) with the card used before, and
+"Create a new account" posts `{}`, the narrator says "Welcome, Caller 7F3A! Your number is 100003. The client will
+ask who you are, so dress nicely.", and the line is dialed. With `canCreate` false (closed or invite-only
+enrolment) only the link is offered: a card linked to an invited player needs no invitation of its own. Several accounts: "And who's playing today?" shows one button per account, the
 persona or "New caller (100003)", then "Someone new, please" (another empty account, no dialog) and "My own number".
 
 ### The persona on the drive

@@ -103,11 +103,14 @@
 <p>When you sign in with a provider we ask for the <code>openid</code> scope only. We store:</p>
 <ul>
 <li>a <strong>keyed one-way hash</strong> of the provider and your account identifier at that provider (we cannot turn it back into your identifier in everyday operation);</li>
-<li>the date you confirmed your age and the version of the terms you accepted.</li>
+<li>the date you confirmed your age and the version of the terms you accepted;</li>
+<li>if you link more than one provider (below), one such hash for each, a number that ties them together, and the date each one was linked.</li>
 </ul>
 <p>We do <strong>not</strong> request or store your email address, your name or your profile. If a provider sends profile data anyway, it is thrown away without being stored. One honest caveat: some plain-OAuth providers return a username in the same response; we do not keep it.</p>
 <p>A hash with a secret key is still <em>pseudonymous</em> data, not anonymous: whoever holds the key and your provider identifier could recompute it. It is not stored in a form that names you.</p>
 <p>For security and legal reasons, the raw sign-in identifier is also kept, but only in a sealed (encrypted) form that the server itself cannot read; see section 3.</p>
+<h3>Linking sign-in methods</h3>
+<p>You can link several providers (for example Microsoft and GitHub) so that each one reaches the same game accounts: Game, Sign-in methods. You link them yourself, by signing in with one and then with the other, one right after the other. We never match providers by email address: <strong>no email address is requested, read, stored or hashed</strong>. The page lists your methods by the provider&rsquo;s name and the date each was linked, and never shows who you are at the provider. You can remove a method at any time as long as another one is left; a removed method no longer reaches your accounts, and its stored hash is erased on the schedule in section 7.</p>
 <h3>A session token</h3>
 <p>A short-lived random token tells the server that your browser is signed in. It expires.</p>
 
@@ -148,7 +151,7 @@
 <tr><td><code>inn.consent</code></td><td>localStorage</td><td>your answer to the age notice: the age, terms version and date</td><td>necessary: so you are not asked every visit</td></tr>
 <tr><td><code>inn.refused</code></td><td>sessionStorage</td><td>that you answered &ldquo;no&rdquo; to the age notice, until the tab closes</td><td>necessary</td></tr>
 <tr><td><code>inn.session</code></td><td>sessionStorage; localStorage if &ldquo;Remember on this device&rdquo; is on</td><td>the short-lived sign-in token</td><td>necessary: to keep you signed in</td></tr>
-<tr><td><code>inn.line</code>, <code>inn.signing</code>, <code>inn.redial</code></td><td>sessionStorage</td><td>which line you chose, and markers that a sign-in or a redial is under way</td><td>necessary: to finish a sign-in that leaves the page and returns</td></tr>
+<tr><td><code>inn.line</code>, <code>inn.signing</code>, <code>inn.linkwhy</code>, <code>inn.redial</code></td><td>sessionStorage</td><td>which line you chose, and markers that a sign-in, a link of a sign-in method or a redial is under way</td><td>necessary: to finish a sign-in that leaves the page and returns</td></tr>
 <tr><td><code>inn.nonce</code></td><td>sessionStorage</td><td>a random value made for the sign-in under way, deleted when it returns</td><td>necessary: so a sign-in someone else started cannot sign you in as them</td></tr>
 <tr><td><code>inn.saves.&lt;account number&gt;</code></td><td>localStorage</td><td>which save files this browser last synced, with their version and a checksum</td><td>necessary: for save sync to avoid overwriting newer saves</td></tr>
 <tr><td><code>inn.remember</code>, <code>inn.com1</code></td><td>localStorage</td><td>your choice to remember the installation, and the server address you used</td><td>preference you set</td></tr>
@@ -180,6 +183,7 @@
 <tr><td>Complaints and abuse reports</td><td>Kept 365 days</td></tr>
 <tr><td>Sealed connection records and the sealed sign-in identifier</td><td><span data-f="auditRetentionDays" data-default="90"></span> days by default, then purged automatically</td></tr>
 <tr><td>Expired sign-in sessions</td><td>Erased after 30 days</td></tr>
+<tr><td>A sign-in method you remove, or a sign-in that never opened an account</td><td>Erased once no sign-in session of it is left: about 30 days after its last session ended</td></tr>
 <tr><td>Anonymous diagnostics (section 4)</td><td><span data-f="telemetryRetentionDays" data-default="365"></span> days, then deleted automatically</td></tr>
 <tr><td>Readable server logs in public mode</td><td>They contain no personal data</td></tr>
 </tbody>

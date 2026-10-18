@@ -31,7 +31,8 @@ The real innkeeperd now does all of this itself (its docs/server/innkeeperd.md s
 WebSocket to the session; this mock never touches the WebSocket. It differs from the real server in two
 ways: its consent page is its own (the real server redirects to the provider's), and the Deny, "Provider
 error" and "Server error" buttons stand for the callback's error codes access_denied, provider_error and
-server_error.
+server_error. Linking sign-in methods (/auth/identities, innkeeperd.md section 8.7) is not mocked: those
+calls are 404, which the page shows as the server's message.
 
     python3 tools/mock_auth.py --port 2843 --page-origin http://127.0.0.1:2842 \\
         --accounts 100001:Guybrush --enrol open
