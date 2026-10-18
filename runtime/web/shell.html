@@ -4,7 +4,25 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="dark light">
-<title>Online world</title>
+<title>Online world: a 1990s online world in your browser</title>
+<meta name="description" content="A 1990s online world, playable in your browser with your own copy of the original client. Free, and nothing to install.">
+<meta name="theme-color" content="#1d1838" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#fff6dc" media="(prefers-color-scheme: light)">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Online world">
+<meta property="og:title" content="Online world: a 1990s online world in your browser">
+<meta property="og:description" content="A 1990s online world, playable in your browser with your own copy of the original client. Free, and nothing to install.">
+<meta property="og:locale" content="en_US">
+<meta property="og:image" content="og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="A hand-painted harbour village at dusk, with a lighthouse and a sea serpent.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Online world: a 1990s online world in your browser">
+<meta name="twitter:description" content="A 1990s online world, playable in your browser with your own copy of the original client. Free, and nothing to install.">
+<meta name="twitter:image" content="og.png">
+<meta name="twitter:image:alt" content="A hand-painted harbour village at dusk, with a lighthouse and a sea serpent.">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"WebApplication","name":"Online world","description":"A 1990s online world, playable in your browser with your own copy of the original client. Free, and nothing to install.","applicationCategory":"GameApplication","applicationSubCategory":"Online world","operatingSystem":"Any (runs in a modern web browser)","browserRequirements":"Requires JavaScript and WebAssembly","inLanguage":"en","isAccessibleForFree":true,"offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"image":"og.png"}</script>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' shape-rendering='crispEdges'%3E%3Crect width='16' height='16' fill='%2368aeea'/%3E%3Crect x='10' y='2' width='3' height='3' fill='%23ffe45c'/%3E%3Cpath d='M0 16V11l4-2 4 2 4-3 4 2v6z' fill='%237a9a34'/%3E%3Crect x='5' y='8' width='3' height='3' fill='%23e8741c'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -83,6 +101,8 @@
   body.dropping .scene::after { content: ""; position: absolute; inset: 10px; border: 4px dashed var(--accent); pointer-events: none;
                                 background: var(--accent-soft); }
   .adv { font-family: var(--pixel); color: var(--text); }
+  .nojs { position: fixed; z-index: 20; top: 16px; left: 16px; right: 16px; max-width: 40rem; margin: 0 auto; padding: 14px 18px;
+          background: var(--surface); border: 3px solid var(--border); box-shadow: inset 0 0 0 2px var(--edge); font-size: 17px; }
   .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; margin: 0; }
   #menubar { position: fixed; top: 0; left: 0; right: 0; z-index: 12; height: 30px; display: flex; align-items: stretch; gap: 2px;
              padding: 0 6px; background: var(--surface); border-bottom: 3px solid var(--border);
@@ -229,7 +249,7 @@
   .card { width: min(440px, 100%); background: var(--surface); color: var(--text); border: 3px solid var(--border);
           border-radius: var(--radius); box-shadow: inset 0 0 0 2px var(--edge), 6px 6px 0 rgba(0, 0, 0, .35), var(--shadow);
           padding: 22px 22px 18px; margin: auto 0; }
-  .card h1 { margin: 0 0 4px; font: 400 30px/1.1 var(--pixel); letter-spacing: .02em; }
+  #setup-title, #dial-title { margin: 0 0 4px; font: 400 30px/1.1 var(--pixel); letter-spacing: .02em; }
   .wordmark { margin: 0 0 8px; font: 400 40px/1 var(--pixel); letter-spacing: .04em; color: var(--accent); }
   .card .lede { margin: 0 0 16px; color: var(--muted); font-size: 14px; }
   .drop { position: relative; border: 2px dashed var(--faint); border-radius: var(--radius); padding: 18px 14px;
@@ -355,6 +375,7 @@
   .drawer section:last-child { border-bottom: 0; }
   .drawer h3 { margin: 0 0 8px; font: 400 20px/1.1 var(--pixel); letter-spacing: .05em; color: var(--muted); }
   .drawer .note { font-size: 13px; color: var(--muted); margin: 8px 0 0; }
+  .drawer .note a { color: var(--text); text-underline-offset: 2px; }
   select.input { font-family: inherit; font-size: 14px; cursor: pointer; }
   #scale-desc { min-height: 3.2em; }
   #log { margin: 0; height: 240px; overflow: auto; padding: 10px 12px; border-radius: 4px; background: #0a090d; color: #bdb6cc;
@@ -390,13 +411,15 @@
 </style>
 </head>
 <body data-view="setup">
+<h1 class="sr" id="site-title">Online world: a 1990s online world in your browser</h1>
+<noscript><p class="nojs">This is a free online world from the 1990s that you play in your browser, using your own copy of the original client. It needs JavaScript and WebAssembly, so please turn JavaScript on and reload the page.</p></noscript>
 <div class="scene" aria-hidden="true">
 </div>
 
 <main id="landing">
   <section class="card" id="setup" aria-labelledby="setup-title">
     <p class="wordmark" id="wordmark" hidden></p>
-    <h1 id="setup-title">Add your installation</h1>
+    <h2 id="setup-title">Add your installation</h2>
     <p class="lede">This runs your own copy of the original client in the browser. Its files stay on this device.</p>
 
     <div class="drop" id="drop">
@@ -437,7 +460,7 @@
   </section>
 
   <section class="card" id="dial" hidden aria-live="polite" aria-labelledby="dial-title">
-    <h1 id="dial-title">Dialing</h1>
+    <h2 id="dial-title">Dialing</h2>
     <pre class="modem" id="modem"></pre>
     <div class="lights" aria-hidden="true"><span id="light-tx"><i></i>TX</span><span id="light-cd"><i></i>CD</span></div>
     <div class="row" id="dial-actions" hidden><button class="btn primary" id="retry">Try again</button></div>
@@ -497,6 +520,14 @@
       <p class="note">The picture fills the window at its original 4:3 shape. Filters other than Sharp and Smooth run on your graphics card. Ctrl+Alt+F toggles full screen.</p>
     </section>
     <section>
+      <h3>Privacy</h3>
+      <label class="toggle">
+        <span>Send anonymous diagnostics<small id="diag-note"></small></span>
+        <span class="switch"><input id="diag" type="checkbox" checked><span></span></span>
+      </label>
+      <p class="note">No cookies, no account details. <a href="legal/privacy.html" target="_blank" rel="noopener">What is sent, and why</a></p>
+    </section>
+    <section>
       <h3>Server</h3>
       <div id="server-now" class="note" style="margin-top:0"></div>
     </section>
@@ -522,6 +553,7 @@
 <div id="toasts" aria-live="polite"></div>
 <nav id="fineprint" aria-label="Fine print"><a href="legal/terms.html" target="_blank" rel="noopener">Terms</a><span class="dot" aria-hidden="true">·</span><a href="legal/privacy.html" target="_blank" rel="noopener">Privacy</a><span class="dot" aria-hidden="true">·</span><a href="legal/copyright.html" target="_blank" rel="noopener">Copyright</a></nav>
 
+<script src="telemetry.js"></script>
 <script src="site.js"></script>
 <script src="zip.js"></script>
 <script src="saves.js"></script>

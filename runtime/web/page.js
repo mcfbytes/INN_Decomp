@@ -15,6 +15,7 @@ const SITE_NAME = '';
 // page's address overrides it, and any other non-empty '?auth=' value asks the game server's address.
 const AUTH_SERVER = '';
 const NEUTRAL_TITLE = 'Online world';
+const TAGLINE = 'a 1990s online world in your browser';   // the packager writes the same words into the static title
 const STRIP_EDGE_PX = 8, STRIP_HIDE_MS = 1500, CONNECT_HOLD_MS = 1400;
 const FRAME_W = 960, SNAP_KEEP = 0.96;
 
@@ -60,15 +61,16 @@ function layoutFrame() {
 // site.json's siteName wins over the constant above when it is set.
 function showName() {
   const name = Site.cfg.siteName || SITE_NAME;
-  if (!name) { document.title = NEUTRAL_TITLE; return; }
-  document.title = name;
+  if (!name) { document.title = `${NEUTRAL_TITLE}: ${TAGLINE}`; return; }
+  document.title = `${name}: ${TAGLINE}`;
+  $('site-title').textContent = document.title;
   $('wordmark').textContent = name;
   $('wordmark').hidden = false;
 }
 
 // ---- dial-up status: the COM1 state lines of the runtime, shown like a modem ----
 
-const dial = { lines: [], timer: 0 };
+const dial = { lines: [], timer: 0, t0: 0, onlineAt: 0 };
 const NO_CARRIER_QUIPS = [
   'Your call has met an untimely end. Try again?',
   'The line went quiet. It may be sulking.',
@@ -94,6 +96,8 @@ function dialLine(text, bad) {
 
 function dialBegin(server) {
   dial.lines = [];
+  dial.t0 = performance.now();
+  dial.onlineAt = 0;
   $('dial-actions').hidden = true;
   $('light-tx').className = 'on';
   $('light-cd').className = '';
@@ -257,9 +261,15 @@ function setLink(state) {
 
 function watchLog(text) {
   if (/^uart: websocket open/.test(text)) {
+    dial.onlineAt = performance.now();
+    Telemetry.connect('ok', dial.onlineAt - dial.t0);
     setLink('online');
     dialOnline();
   } else if (/^uart: websocket (closed|error)/.test(text) && $('link').dataset.state !== 'offline') {
+    // failed: the line never opened; closed: an open line ended. Only the result and a coarse duration go out.
+    if (dial.onlineAt) Telemetry.connect('closed', performance.now() - dial.onlineAt);
+    else Telemetry.connect('failed', performance.now() - dial.t0);
+    dial.onlineAt = 0;
     setLink('offline');
     if (page.view === 'dialing') dialFailed();
     else toast('Lost the connection to the server. Reload the page to reconnect.', 'bad');
@@ -296,19 +306,21 @@ function wsBase(server) {
 // Preload builds (dev) know their drive only once the runtime runs, so they, and ?autostart, load it at once.
 const EAGER = document.documentElement.dataset.runtime === 'eager' || params.has('autostart');
 const IDLE_START_MS = 8000;
-const rt = { state: 'idle', fs: false, ok: false, held: null, promise: null };   // idle > loading > ready
+const rt = { state: 'idle', fs: false, ok: false, held: null, promise: null, t0: 0, scriptAt: 0 };   // idle > loading > ready
 
 // Starts the load once. why is 'intent' (the player is reaching for the disks or the phone), 'saved' or 'idle'
 // (nobody asked: low priority). Returns a promise that settles when the drive is mounted.
 function wantRuntime(why = 'intent') {
   if (rt.state !== 'idle') return rt.promise;
   rt.state = 'loading';
+  rt.t0 = performance.now();
   rt.promise = new Promise((resolve, reject) => { rt.done = resolve; rt.fail = reject; });
   rt.promise.catch(() => {});
   const s = document.createElement('script');
   s.src = innAsset('inn.js');
   s.async = true;
   if (why !== 'intent') s.fetchPriority = 'low';
+  s.onload = () => { rt.scriptAt = performance.now(); };
   s.onerror = () => { rt.state = 'idle'; s.remove(); rt.fail(new Error('the runtime did not download')); };
   document.head.append(s);
   return rt.promise;
@@ -704,6 +716,7 @@ function setScale(scale, remember = true) {
 function cycleScale() {
   const ids = usableScales();
   setScale(ids[(ids.indexOf($('stage').dataset.scale) + 1) % ids.length]);
+  Telemetry.event('display_filter', { filter: $('stage').dataset.scale });
 }
 
 // The strip slides in when the pointer touches the top edge and leaves 1.5 s after the pointer does.
@@ -751,7 +764,7 @@ function toggleFullscreen() {
 function openSettings(open) {
   document.body.classList.toggle('drawer-open', open);
   $('drawer').inert = !open;
-  if (open) $('close-settings').focus();
+  if (open) { showDiagnostics(); $('close-settings').focus(); }
   else if (page.started) $('canvas').focus();
 }
 
@@ -845,8 +858,17 @@ async function start(session) {
   $('sound').hidden = !audioContext();
 }
 
+// Download is the request until the wasm has arrived (the browser's own timing for it, else until inn.js ran);
+// start is what the runtime then took to come up.
+function reportRuntime() {
+  const wasm = performance.getEntriesByType('resource').find((e) => /\.wasm$/.test(e.name.split(/[?#]/)[0]));
+  const got = wasm && wasm.responseEnd > 0 ? wasm.responseEnd : (rt.scriptAt || performance.now());
+  Telemetry.event('runtime_started', {}, { runtimeDownloadMs: got - rt.t0, runtimeStartMs: Math.max(0, performance.now() - got) });
+}
+
 async function onRuntimeReady() {
   rt.fs = true;
+  reportRuntime();
   await mountDrive();
   const held = rt.held;
   rt.held = null;
@@ -861,6 +883,29 @@ async function onRuntimeReady() {
   adv('ready');
   rt.done();
   if (params.get('autostart') && page.drive !== 'none') Site.whenClear().then(() => start());
+}
+
+// ---- anonymous diagnostics (telemetry.js; docs/web.md, "Diagnostics") ----
+
+function showDiagnostics() {
+  const box = $('diag'), note = $('diag-note');
+  const why = Telemetry.blockedBy();
+  box.checked = Telemetry.preference() && !why;
+  box.disabled = !!why || !Telemetry.available();
+  note.textContent = why ? `Off: your browser sends ${why}.`
+    : !Telemetry.available() ? 'This site does not collect diagnostics.'
+    : 'Error reports and load times, with no account, address or chat in them.';
+}
+
+function wireDiagnostics() {
+  $('diag').addEventListener('change', () => { Telemetry.setPreference($('diag').checked); showDiagnostics(); });
+  showDiagnostics();
+  // site.json decides whether there is anything to send, and arrives after this.
+  Site.ready.then(() => {
+    Telemetry.init(Site.cfg.telemetry);
+    if (Telemetry.enabled()) Telemetry.capabilities({ webgl2: Filters.support().webgl2, jspi: typeof WebAssembly === 'object' && typeof WebAssembly.Suspending === 'function' });
+    showDiagnostics();
+  });
 }
 
 function wirePage() {
@@ -886,6 +931,7 @@ function wirePage() {
     if (page.started) $('canvas').focus();
   });
   wireStrip();
+  wireDiagnostics();
   InnAuth.setAttest(() => Site.attest());
   showName();
   Site.ready.then(showName);
@@ -894,7 +940,7 @@ function wirePage() {
   $('close-settings').addEventListener('click', () => openSettings(false));
   $('scrim').addEventListener('click', () => openSettings(false));
   $('drawer').addEventListener('keydown', (e) => e.key === 'Escape' && openSettings(false));
-  $('scale').addEventListener('change', () => setScale($('scale').value));
+  $('scale').addEventListener('change', () => { setScale($('scale').value); Telemetry.event('display_filter', { filter: $('stage').dataset.scale }); });
   $('scanlines').checked = storageGet(SCAN_KEY) === '1';
   $('scanlines').addEventListener('change', () => { storageSet(SCAN_KEY, $('scanlines').checked ? '1' : '0'); setScale($('scale').value, false); });
   Filters.onLost = (why) => { toast(`${why} Showing Sharp instead.`, 'bad'); setScale('sharp', false); };

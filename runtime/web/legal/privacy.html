@@ -6,6 +6,23 @@
 <meta name="color-scheme" content="dark light">
 <meta name="robots" content="noindex">
 <title>Privacy Notice · Online world</title>
+<meta name="description" content="What this free 1990s online world stores about you and why: no cookies, no advertising, and anonymous diagnostics you can turn off.">
+<meta name="theme-color" content="#1d1838" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#fff6dc" media="(prefers-color-scheme: light)">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Online world">
+<meta property="og:title" content="Privacy Notice · Online world">
+<meta property="og:description" content="What this free 1990s online world stores about you and why: no cookies, no advertising, and anonymous diagnostics you can turn off.">
+<meta property="og:locale" content="en_US">
+<meta property="og:image" content="../og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="A hand-painted harbour village at dusk, with a lighthouse and a sea serpent.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Privacy Notice · Online world">
+<meta name="twitter:description" content="What this free 1990s online world stores about you and why: no cookies, no advertising, and anonymous diagnostics you can turn off.">
+<meta name="twitter:image" content="../og.png">
+<meta name="twitter:image:alt" content="A hand-painted harbour village at dusk, with a lighthouse and a sea serpent.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' shape-rendering='crispEdges'%3E%3Crect width='16' height='16' fill='%2368aeea'/%3E%3Crect x='10' y='2' width='3' height='3' fill='%23ffe45c'/%3E%3Cpath d='M0 16V11l4-2 4 2 4-3 4 2v6z' fill='%237a9a34'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=VT323&amp;display=swap">
 <script>
@@ -73,7 +90,7 @@
 <p class="meta">Effective <span data-f="effectiveDate"></span> · Version <span data-f="termsVersion"></span></p>
 <div class="notice"><strong>Not legal advice.</strong> This is a plain-English document written by a volunteer, not a lawyer. It should be reviewed by a qualified lawyer before this service is opened to the public.</div>
 
-<p>This notice says what <span data-f="operatorName"></span> (&ldquo;we&rdquo;) stores about you when you use this service, why, for how long, and what you can ask us to do. We designed the service to hold as little personal information as possible. The service is for people aged <span data-f="minimumAge"></span> or older.</p>
+<p>This notice says what <span data-f="operatorName"></span> (&ldquo;we&rdquo;) stores about you when you use this service, why, for how long, and what you can ask us to do. We are the &ldquo;controller&rdquo; of the personal information described here (the one who decides why and how it is used); our contact details are in section 14. We designed the service to hold as little personal information as possible. The service is for people aged <span data-f="minimumAge"></span> or older.</p>
 
 <h2>1. What we store</h2>
 <h3>Game account data</h3>
@@ -95,24 +112,62 @@
 <p>A short-lived random token tells the server that your browser is signed in. It expires.</p>
 
 <h2>2. What we do not do</h2>
-<p>No cookies. No analytics. No advertising. No tracking. We do not sell your personal information, and we do not share it except as described under &ldquo;Disclosure&rdquo; below.</p>
+<p>No cookies. No advertising. No cross-site tracking. We do not sell your personal information, and we do not share it except as described under &ldquo;Who handles data for us&rdquo; and &ldquo;Disclosure&rdquo; below. We do collect a small amount of <strong>anonymous diagnostics</strong> (section 4), which you can turn off.</p>
 
 <h2>3. Network information and the sealed record</h2>
 <p>Your IP address is necessarily used to deliver the connection to you. The server <strong>does not write IP addresses or message contents to readable logs</strong> in its public mode.</p>
 <p>For security, abuse prevention and legal obligations, the server keeps one <strong>sealed connection record</strong> per connection: the start and end time, your account number, your hashed sign-in identity and your IP address. The record is encrypted with the operator&rsquo;s public key. The matching private key is held in a separate, locked-down key vault that the server has no access to, so the server cannot read the records, and every decryption is logged. They are kept for <strong><span data-f="auditRetentionDays" data-default="90"></span> days</strong> by default and then deleted automatically. The operator can decrypt a record only offline, and only in response to valid legal process, or to investigate serious abuse. The raw sign-in identifier is likewise kept only in sealed form.</p>
 <p>The hosting provider (the company whose computers the service runs on) may keep its own network logs under its own policy, which we do not control.</p>
 
-<h2>4. On your device</h2>
-<p>The installation files you give the page stay in your browser&rsquo;s storage; they are not uploaded. If you turn on &ldquo;Remember on this device&rdquo;, the browser also keeps those files, the server address and your session on that device. You can clear them from Options in the page, or with your browser&rsquo;s own site-data controls. If you use save sync, only the listed game save files are uploaded. The page keeps a few small settings (display mode, score, your answer to the age notice) in the same browser storage. This is storage on your device, not cookies.</p>
+<h2>4. Anonymous diagnostics</h2>
+<p>If the operator has switched it on, the page sends a few anonymous diagnostics to the operator&rsquo;s Microsoft Azure Application Insights, so that we can find errors and keep the service working. It is our own small piece of code, not a third-party tracking script.</p>
+<h3>What is sent</h3>
+<ul>
+<li><strong>A page view:</strong> the page path only (for example &ldquo;/&rdquo; or &ldquo;/legal/privacy.html&rdquo;), never a query string or the part after a &ldquo;#&rdquo;.</li>
+<li><strong>Load timings:</strong> how long the page took to load, and how long the game runtime took to download and start.</li>
+<li><strong>Errors:</strong> uncaught errors and failed promises in the page: the message and a stack trace cut to about 2 KB. Web addresses in them are reduced to file names, and any server address, account number or path on your install is removed before sending.</li>
+<li><strong>A few events:</strong> that the runtime started; whether an online session connected, failed to connect, or ended (with a rough duration such as &ldquo;5-15s&rdquo;, never the server address); which display filter you chose; and whether your browser has WebGL 2 and JSPI.</li>
+<li>Your browser and operating system, which Application Insights works out from the usual User-Agent header your browser sends with every request. We add nothing to identify your device.</li>
+</ul>
+<h3>What is never sent</h3>
+<p>No account number, persona name, chat, mail or post, no file names from your installation, no server address, no sign-in details, no cookie and no persistent ID. Each page load makes up a random session number that is kept in memory only and is gone when you close or reload the page, so two visits cannot be linked to each other.</p>
+<h3>Why, and our legal basis</h3>
+<p>To find and fix errors and to keep the service working. Our legal basis is legitimate interests (Article 6(1)(f) of the GDPR and UK GDPR): the data is small, anonymous in practice and not used for anything else, and you can opt out at any time (below).</p>
+<h3>Who processes it, and IP addresses</h3>
+<p>Microsoft Azure Application Insights stores and processes it as our processor, in the Azure region the operator chose (section 13). Your IP address reaches Application Insights because it is part of any connection, but it is <strong>not stored</strong>: Application Insights uses it to work out a coarse location (country, region and city) and then masks it. We do not combine this data with account data.</p>
+<h3>How long</h3>
+<p>The diagnostics are kept for <strong><span data-f="telemetryRetentionDays" data-default="365"></span> days</strong> in the operator&rsquo;s Azure Log Analytics workspace, and then deleted automatically.</p>
+<h3>Turning it off</h3>
+<p>Switch off &ldquo;Send anonymous diagnostics&rdquo; in Settings (or the Options menu on the landing scene). The page then sends nothing, and remembers your choice on this device. It also sends nothing, and the switch is off and cannot be turned on, when your browser sends <strong>Global Privacy Control</strong> or <strong>Do Not Track</strong>. Diagnostics already sent cannot be tied back to you, because we hold nothing that identifies you in them.</p>
 
-<h2>5. Why we use it, and our legal basis</h2>
+<h2>5. Cookies and storage on your device</h2>
+<p>We set <strong>no cookies</strong>. The page uses your browser&rsquo;s own storage for the items below. Each is either strictly necessary to give you what you asked for, or a preference you set yourself. That is why there is no cookie banner: storage of this kind is exempt from consent under Article 5(3) of the ePrivacy Directive. No analytics cookies or advertising identifiers are stored. None of this is sent to anyone but you, except that the sign-in token goes to the server to show that you are signed in. You can clear it all with your browser&rsquo;s site-data controls, or Forget in Settings for the installation.</p>
+<table>
+<thead><tr><th>Key</th><th>Where</th><th>What it holds</th><th>Why</th></tr></thead>
+<tbody>
+<tr><td><code>inn.consent</code></td><td>localStorage</td><td>your answer to the age notice: the age, terms version and date</td><td>necessary: so you are not asked every visit</td></tr>
+<tr><td><code>inn.refused</code></td><td>sessionStorage</td><td>that you answered &ldquo;no&rdquo; to the age notice, until the tab closes</td><td>necessary</td></tr>
+<tr><td><code>inn.session</code></td><td>sessionStorage; localStorage if &ldquo;Remember on this device&rdquo; is on</td><td>the short-lived sign-in token</td><td>necessary: to keep you signed in</td></tr>
+<tr><td><code>inn.line</code>, <code>inn.signing</code>, <code>inn.redial</code></td><td>sessionStorage</td><td>which line you chose, and markers that a sign-in or a redial is under way</td><td>necessary: to finish a sign-in that leaves the page and returns</td></tr>
+<tr><td><code>inn.saves.&lt;account number&gt;</code></td><td>localStorage</td><td>which save files this browser last synced, with their version and a checksum</td><td>necessary: for save sync to avoid overwriting newer saves</td></tr>
+<tr><td><code>inn.remember</code>, <code>inn.com1</code></td><td>localStorage</td><td>your choice to remember the installation, and the server address you used</td><td>preference you set</td></tr>
+<tr><td><code>inn.scale</code>, <code>inn.scanlines</code>, <code>inn.theme</code>, <code>inn.anim</code>, <code>inn.music</code></td><td>localStorage</td><td>display filter, scanlines, day or dusk, animation and music on or off</td><td>preference you set</td></tr>
+<tr><td><code>inn.diag</code></td><td>localStorage</td><td>your choice on anonymous diagnostics</td><td>preference you set</td></tr>
+<tr><td><code>inn.score</code></td><td>sessionStorage</td><td>the points you have collected on the landing scene</td><td>preference-like: part of the page&rsquo;s game, until the tab closes</td></tr>
+<tr><td>database <code>/c</code></td><td>IndexedDB</td><td>the installation files you gave the page, only while &ldquo;Remember on this device&rdquo; is on</td><td>necessary to run the client; stays on your device, never uploaded</td></tr>
+</tbody>
+</table>
+<p>The page does not use the Cache API or service workers. The sign-in providers (section 8) may set their own cookies on their own sites while you sign in; we do not control those. The installation files you give the page stay in your browser&rsquo;s storage and are not uploaded. If you use save sync, only the listed game save files are uploaded.</p>
+
+<h2>6. Why we use it, and our legal basis</h2>
 <ul>
 <li><strong>To run the service you asked for</strong> (performing the service): accounts, sign-in, mail, posts, saves.</li>
-<li><strong>Legitimate interests</strong> in keeping the service secure and preventing abuse: the sealed connection record and the age and terms record.</li>
+<li><strong>Legitimate interests</strong> in keeping the service secure and working, and preventing abuse: the sealed connection record, the age and terms record, and the anonymous diagnostics (section 4). You can object to these; for the diagnostics, the switch in Settings does it at once.</li>
 <li><strong>Legal obligations</strong>, where the law requires us to keep or hand over information (see Disclosure).</li>
 </ul>
+<p>We do not rely on consent for any of this, so there is nothing to withdraw. We make no decisions about you by automated means.</p>
 
-<h2>6. How long we keep it</h2>
+<h2>7. How long we keep it</h2>
 <p>When you delete something, it disappears for other players at once, but we keep it for a short grace period before it is erased for good. That lets us act on abuse reports and undo mistakes.</p>
 <table>
 <thead><tr><th>What</th><th>How long</th></tr></thead>
@@ -124,6 +179,7 @@
 <tr><td>Complaints and abuse reports</td><td>Kept 365 days</td></tr>
 <tr><td>Sealed connection records and the sealed sign-in identifier</td><td><span data-f="auditRetentionDays" data-default="90"></span> days by default, then purged automatically</td></tr>
 <tr><td>Expired sign-in sessions</td><td>Erased after 30 days</td></tr>
+<tr><td>Anonymous diagnostics (section 4)</td><td><span data-f="telemetryRetentionDays" data-default="365"></span> days, then deleted automatically</td></tr>
 <tr><td>Readable server logs in public mode</td><td>They contain no personal data</td></tr>
 </tbody>
 </table>
@@ -131,26 +187,34 @@
 <p><strong>Backups.</strong> Backups rotate within 30 days, so erased data leaves our backups within about 30 days after it is erased.</p>
 <p><strong>Why these numbers.</strong> A grace period lets us act on abuse reports. US preservation requests run 90 days. Erasure requests are handled within about a month. Reports are kept for one year. The operator may change these periods; if so, the notice here is updated.</p>
 
-<h2>7. Disclosure</h2>
-<p>We disclose information only when the law requires it: a valid subpoena, court order or warrant; or to report apparent child sexual exploitation to the National Center for Missing &amp; Exploited Children (NCMEC), as US law requires. When that happens, only the named account&rsquo;s records are opened. We do not sell or share data otherwise.</p>
+<h2>8. Who handles data for us, and disclosure</h2>
+<p>We use these <strong>processors</strong>, who handle personal information only on our instructions:</p>
+<ul>
+<li><strong>Microsoft Azure</strong> hosts the service, its database and its backups (section 13).</li>
+<li><strong>Microsoft Azure Application Insights</strong> receives the anonymous diagnostics (section 4).</li>
+<li><strong>The sign-in provider you choose</strong> (for example Microsoft) confirms who you are to us. It is a separate controller for its own accounts; its own notice applies to what it does. We receive only the identifier described in section 1.</li>
+</ul>
+<p>The page also loads one font (VT323) from <strong>Google Fonts</strong>, which means Google receives your IP address and browser details when the page loads; see Google&rsquo;s own privacy policy. We send Google nothing else.</p>
+<p>Apart from that, we disclose information only when the law requires it: a valid subpoena, court order or warrant; or to report apparent child sexual exploitation to the National Center for Missing &amp; Exploited Children (NCMEC), as US law requires. When that happens, only the named account&rsquo;s records are opened. We do not sell or share data otherwise.</p>
 
-<h2>8. Your choices and rights</h2>
-<p>You can ask us to give you a copy of your data (access and export), to correct it, or to delete it. Email <a data-f="privacyEmail" data-fallback="contactEmail" data-mail></a>. We reply within 30 days. We may need to check that you control the account, for example by having you sign in again. Deleting your account disables it at once and erases it after the grace period in section 6; the sealed records are not individually deletable and are purged on their normal schedule (or held longer only under a valid legal hold). An access request also covers items still inside a deletion window.</p>
-<p><strong>If you live in California or another US state with a privacy law,</strong> you may have rights to know, delete, and correct, and not to be discriminated against for using them; we do not sell or share personal information for advertising. <strong>If you live in the EU or UK,</strong> you may also have the right to object to processing based on legitimate interests, to restrict it, to data portability, and to complain to your data protection authority. We will honour the rights the law gives you where they apply; this paragraph is a summary, not a promise of more.</p>
+<h2>9. Your choices and rights</h2>
+<p>You can ask us to give you a copy of your data (access and export), to correct it, or to delete it. Email <a data-f="privacyEmail" data-fallback="contactEmail" data-mail></a>. We reply within 30 days. We may need to check that you control the account, for example by having you sign in again. Deleting your account disables it at once and erases it after the grace period in section 7; the sealed records are not individually deletable and are purged on their normal schedule (or held longer only under a valid legal hold). An access request also covers items still inside a deletion window.</p>
+<p><strong>If you are in the EU or UK</strong> (GDPR and UK GDPR), you also have the right to restrict processing, to data portability, and to object to processing based on legitimate interests (see section 6). You have the right to <strong>complain to a supervisory authority</strong>: the data protection authority where you live, work or believe the problem happened (in the UK, the Information Commissioner&rsquo;s Office; the EU authorities are listed at edpb.europa.eu). We would be glad to hear from you first, but you do not have to.</p>
+<p><strong>If you live in California or another US state with a privacy law,</strong> you may have rights to know, delete and correct, and not to be discriminated against for using them. <strong>We do not sell or share your personal information</strong> (as those laws define &ldquo;sell&rdquo; and &ldquo;share&rdquo;, including for cross-context behavioural advertising), and we do not use it for advertising. We honour Global Privacy Control. We will honour the rights the law gives you where they apply; this paragraph is a summary, not a promise of more.</p>
 
-<h2>9. Children</h2>
+<h2>10. Children</h2>
 <p>The service is for people who are <span data-f="minimumAge"></span> or older. We do not knowingly collect information from anyone younger. If we learn that an account belongs to someone under 13, or under <span data-f="minimumAge"></span>, we delete it.</p>
 
-<h2>10. Security</h2>
+<h2>11. Security</h2>
 <p>We take reasonable measures to protect what we hold: the sealed records, hashed identity, short-lived tokens and as little data as possible. No system is perfectly secure, and we cannot guarantee it.</p>
-
-<h2>11. Where the data is kept</h2>
-<p>Data is stored in: <span data-f="serverLocation"></span>. If you connect from elsewhere, your information travels there.</p>
 
 <h2>12. Changes</h2>
 <p>If we change this notice in a way that matters, the version number goes up and the page asks you to confirm again. The effective date and version are at the top.</p>
 
-<h2>13. Contact</h2>
+<h2>13. Where the data is kept, and transfers</h2>
+<p>Data is stored in: <span data-f="serverLocation"></span>. The Azure regions we use are in the United States. If you connect from the EU or UK, your information is therefore transferred to the United States. Microsoft takes part in the EU-US Data Privacy Framework (and its UK extension), and its contracts with us include the European Commission&rsquo;s Standard Contractual Clauses (with the UK addendum), which are the safeguards for that transfer. You can ask us for a copy of the clauses.</p>
+
+<h2>14. Contact</h2>
 <p><span data-f="operatorName"></span><br>Privacy questions: <a data-f="privacyEmail" data-fallback="contactEmail" data-mail></a></p>
 
 </main>

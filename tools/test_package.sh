@@ -42,7 +42,7 @@ if [ -n "${1:-}" ]; then
   b=$1
   if "$here/package_web.sh" "$b" "$tmp/pkg" --game wss://play.example.test:2316 --auth https://auth.example.test >"$tmp/log" 2>&1; then ok "packages the public build"; else bad "packages the public build: $(tail -3 "$tmp/log")"; fi
   # nothing outside the expected list, no game data, hashed names, the config is valid and under SWA's 20 KB limit
-  stray=$(cd "$tmp/pkg" && find . -type f | sed 's|^\./||' | grep -Ev '^(inn\.html|site\.json|staticwebapp\.config\.json|legal/(terms|privacy|copyright)\.html|assets/(app|inn|legal)\.[0-9a-f]{10}\.(js|css|wasm)|assets/worklet\.[0-9a-f]{10}\.js|assets/(scenes|music)/[a-z]+\.[0-9a-f]{10}\.js|assets/shaders/[A-Za-z0-9_+-]+\.[0-9a-f]{10}\.(glsl|png))$')
+  stray=$(cd "$tmp/pkg" && find . -type f | sed 's|^\./||' | grep -Ev '^(inn\.html|site\.json|og\.png|staticwebapp\.config\.json|legal/(terms|privacy|copyright)\.html|assets/(app|inn|legal)\.[0-9a-f]{10}\.(js|css|wasm)|assets/worklet\.[0-9a-f]{10}\.js|assets/(scenes|music)/[a-z]+\.[0-9a-f]{10}\.js|assets/shaders/[A-Za-z0-9_+-]+\.[0-9a-f]{10}\.(glsl|png))$')
   [ -z "$stray" ] && ok "output holds only expected files" || bad "stray files: $stray"
   [ "$(find "$tmp/pkg" -type f | wc -l)" -ge 20 ] && ok "output file count" || bad "output file count"
   python3 -I - "$tmp/pkg/staticwebapp.config.json" <<'P' && ok "staticwebapp.config.json" || bad "staticwebapp.config.json"
@@ -97,6 +97,61 @@ src = open(os.path.join(d, w)).read()
 assert 'registerProcessor' in src and 'inn-sink' in src
 assert 'audio-worklet.js' in open(os.path.join(d, m['inn.js'])).read()
 P
+  # no address given, so no canonical link, robots.txt or sitemap (and the legal pages stay noindex); the preview image still ships
+  python3 -I - "$tmp/pkg" <<'P' && ok "without a site address: no canonical, robots.txt or sitemap.xml" || bad "without a site address: no canonical, robots.txt or sitemap.xml"
+import os, re, sys
+d = sys.argv[1]
+for f in ('robots.txt', 'sitemap.xml'): assert not os.path.exists(os.path.join(d, f)), f
+assert os.path.getsize(os.path.join(d, 'og.png')) > 1000
+for f in ('inn.html', 'legal/terms.html', 'legal/privacy.html', 'legal/copyright.html'):
+    h = open(os.path.join(d, f)).read()
+    assert 'rel="canonical"' not in h and 'og:url' not in h and 'og:image' not in h, f
+    assert 'rel=canonical' not in h and '<title>' in h and 'name="description"' in h, f
+assert 'content="noindex"' in open(os.path.join(d, 'legal/privacy.html')).read()
+P
+  # with an address and a connection string: the tags, robots.txt, sitemap.xml and the CSP entry for the ingestion origin
+  cp -r "$b" "$tmp/seo" && python3 -I - "$tmp/seo/site.json" <<'P'
+import json, sys
+d = json.load(open(sys.argv[1])); d['siteName'] = 'Example Site'
+d['telemetry'] = {'connectionString': 'InstrumentationKey=00000000-1111-2222-3333-444444444444;IngestionEndpoint=https://eastus-8.in.applicationinsights.azure.com/;LiveEndpoint=https://eastus.livediagnostics.monitor.azure.com/'}
+json.dump(d, open(sys.argv[1], 'w'))
+P
+  if "$here/package_web.sh" "$tmp/seo" "$tmp/pkg2" --game wss://play.example.test:2316 --site-url https://example.org >"$tmp/log2" 2>&1; then ok "packages with --site-url"; else bad "packages with --site-url: $(tail -3 "$tmp/log2")"; fi
+  python3 -I - "$tmp/pkg2" <<'P' && ok "search and preview tags, robots.txt, sitemap.xml, telemetry CSP" || bad "search and preview tags, robots.txt, sitemap.xml, telemetry CSP"
+import json, os, re, sys
+d = sys.argv[1]
+rd = lambda f: open(os.path.join(d, f)).read()
+assert rd('robots.txt') == 'User-agent: *\nAllow: /\n\nSitemap: https://example.org/sitemap.xml\n'
+assert re.findall(r'<loc>([^<]*)</loc>', rd('sitemap.xml')) == ['https://example.org/', 'https://example.org/legal/terms.html', 'https://example.org/legal/privacy.html', 'https://example.org/legal/copyright.html']
+png = open(os.path.join(d, 'og.png'), 'rb').read()
+assert png[:8] == b'\x89PNG\r\n\x1a\n' and int.from_bytes(png[16:20], 'big') == 1200 and int.from_bytes(png[20:24], 'big') == 630
+for f, path in (('inn.html', '/'), ('legal/terms.html', '/legal/terms.html'), ('legal/privacy.html', '/legal/privacy.html'), ('legal/copyright.html', '/legal/copyright.html')):
+    h = rd(f); url = 'https://example.org' + path
+    assert f'<link rel="canonical" href="{url}">' in h, f
+    assert f'<meta property="og:url" content="{url}">' in h, f
+    assert 'content="https://example.org/og.png"' in h and h.count('twitter:card') == 1 and 'summary_large_image' in h, f
+    assert re.search(r'<title>[^<]*Example Site</title>' if f != 'inn.html' else r'<title>Example Site: [^<]+</title>', h), f
+    assert 'name="description"' in h and 'name="theme-color"' in h and 'og:title' in h and 'twitter:image' in h, f
+    assert 'content="noindex"' not in h, f
+h = rd('inn.html')
+assert len(re.findall(r'<h1\b', h)) == 1 and '<noscript>' in h
+ld = json.loads(re.search(r'<script type="application/ld\+json">(.*?)</script>', h).group(1))
+assert ld['@type'] == 'WebApplication' and ld['applicationCategory'] == 'GameApplication' and ld['name'] == 'Example Site' and ld['image'] == 'https://example.org/og.png'
+assert not re.search(r'sierra|imagination|tsn|\binn\b', json.dumps(ld) + re.search(r'<title>.*?</title>', h).group(0), re.I)
+c = json.load(open(os.path.join(d, 'staticwebapp.config.json')))
+csp = c['globalHeaders']['Content-Security-Policy']
+assert 'https://eastus-8.in.applicationinsights.azure.com' in csp and 'livediagnostics' not in csp
+cs = csp.split('connect-src ')[1].split(';')[0].split()
+assert 'https://eastus-8.in.applicationinsights.azure.com' in cs and not {'https:', 'wss:', 'ws:', '*'} & set(cs), cs
+assert "script-src 'self' 'wasm-unsafe-eval' 'sha256-" in csp and "'unsafe-inline'" not in csp.split('script-src')[1].split(';')[0]
+r = {x['route']: x for x in c['routes']}
+assert r['/']['rewrite'] == '/inn.html' and '/robots.txt' in r and '/sitemap.xml' in r and '/og.png' in r
+P
+  # refusals: a bad connection string, and a site address with a path
+  cp -r "$b" "$tmp/badcs" && python3 -I -c "
+import json,sys; p=sys.argv[1]; d=json.load(open(p)); d['telemetry']={'connectionString':'InstrumentationKey=nope;IngestionEndpoint=https://x.test/'}; json.dump(d,open(p,'w'))" "$tmp/badcs/site.json"
+  msg=$("$here/package_web.sh" "$tmp/badcs" "$tmp/out5" 2>&1); [ $? -eq 2 ] && grep -q "InstrumentationKey" <<<"$msg" && ok "refuses a bad telemetry connection string" || bad "bad connection string: $msg"
+  msg=$("$here/package_web.sh" "$b" "$tmp/out6" --site-url https://example.org/some/path 2>&1); [ $? -eq 2 ] && grep -q "without a path" <<<"$msg" && ok "refuses a --site-url with a path" || bad "site-url path: $msg"
   # a page built for a preloaded drive (it loads the runtime at once and its build holds data) is refused
   cp -r "$b" "$tmp/eager" && sed -i 's|data-runtime=\("\?\)lazy|data-runtime=\1eager|' "$tmp/eager/inn.html"
   msg=$("$here/package_web.sh" "$tmp/eager" "$tmp/out4" 2>&1); [ $? -eq 2 ] && grep -q "lazy-runtime" <<<"$msg" && ok "refuses a page that loads the runtime at once" || bad "eager page: $msg"

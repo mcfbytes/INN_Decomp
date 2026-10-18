@@ -573,6 +573,7 @@ void main() {
     list: DEFS.map(({ id, label, group, desc, gpu, noScan }) => ({ id, label, group: GROUPS[group], desc, gpu: gpu !== false, noScan: !!noScan })),
     stats,
     why,
+    support,
     get active() { return !!cur; },
     get shown() { return shown; },
     set onLost(f) { onLost = f; },
