@@ -42,7 +42,7 @@ if [ -n "${1:-}" ]; then
   b=$1
   if "$here/package_web.sh" "$b" "$tmp/pkg" --game wss://play.example.test:2316 --auth https://auth.example.test >"$tmp/log" 2>&1; then ok "packages the public build"; else bad "packages the public build: $(tail -3 "$tmp/log")"; fi
   # nothing outside the expected list, no game data, hashed names, the config is valid and under SWA's 20 KB limit
-  stray=$(cd "$tmp/pkg" && find . -type f | sed 's|^\./||' | grep -Ev '^(inn\.html|site\.json|og\.png|staticwebapp\.config\.json|legal/(terms|privacy|copyright)\.html|assets/(app|inn|legal)\.[0-9a-f]{10}\.(js|css|wasm)|assets/vt323\.[0-9a-f]{10}\.ttf|assets/worklet\.[0-9a-f]{10}\.js|assets/(scenes|music)/[a-z]+\.[0-9a-f]{10}\.js|assets/shaders/[A-Za-z0-9_+-]+\.[0-9a-f]{10}\.(glsl|png))$')
+  stray=$(cd "$tmp/pkg" && find . -type f | sed 's|^\./||' | grep -Ev '^(inn\.html|site\.json|og\.png|icons/(favicon\.ico|icon\.svg|apple-touch-icon\.png|icon-(192|512)\.png|manifest\.webmanifest)|staticwebapp\.config\.json|legal/(terms|privacy|copyright)\.html|assets/(app|inn|legal)\.[0-9a-f]{10}\.(js|css|wasm)|assets/vt323\.[0-9a-f]{10}\.ttf|assets/worklet\.[0-9a-f]{10}\.js|assets/(scenes|music)/[a-z]+\.[0-9a-f]{10}\.js|assets/shaders/[A-Za-z0-9_+-]+\.[0-9a-f]{10}\.(glsl|png))$')
   [ -z "$stray" ] && ok "output holds only expected files" || bad "stray files: $stray"
   [ "$(find "$tmp/pkg" -type f | wc -l)" -ge 20 ] && ok "output file count" || bad "output file count"
   python3 -I - "$tmp/pkg/staticwebapp.config.json" <<'P' && ok "staticwebapp.config.json" || bad "staticwebapp.config.json"
@@ -54,9 +54,42 @@ assert "frame-ancestors 'none'" in h['Content-Security-Policy'] and "'unsafe-eva
 assert 'wss://play.example.test:2316' in h['Content-Security-Policy'] and 'https://auth.example.test' in h['Content-Security-Policy']
 assert 'wss://auth.example.test' in h['Content-Security-Policy']
 assert h['Cross-Origin-Opener-Policy'] == 'same-origin-allow-popups' and h['Referrer-Policy']
-assert c['mimeTypes']['.wasm'] == 'application/wasm'
+assert c['mimeTypes']['.wasm'] == 'application/wasm' and c['mimeTypes']['.webmanifest'] == 'application/manifest+json'
+assert "manifest-src 'self'" in h['Content-Security-Policy'] and "img-src 'self'" in h['Content-Security-Policy']
 r = {x['route']: x for x in c['routes']}
+assert r['/icons/*']['headers']['Cache-Control'] == 'public, max-age=86400'
 assert 'immutable' in r['/assets/*']['headers']['Cache-Control'] and r['/inn.html']['headers']['Cache-Control'] == 'no-cache' and r['/site.json']['headers']['Cache-Control'] == 'no-cache'
+P
+  # the icons ship: the .ico holds 16, 32 and 48 px images, the manifest parses and names files that exist, and every page's
+  # icon links resolve (the legal pages one level down), with no inline icon left and no Sierra or INN name in the manifest
+  python3 -I - "$tmp/pkg" <<'P' && ok "the icons ship, the manifest parses and the pages' icon links resolve" || bad "the icons ship, the manifest parses and the pages' icon links resolve"
+import json, os, re, struct, sys
+d = sys.argv[1]
+ico = open(os.path.join(d, 'icons/favicon.ico'), 'rb').read()
+assert ico[:4] == b'\0\0\1\0'
+n = struct.unpack('<H', ico[4:6])[0]
+assert sorted(ico[6 + 16 * i] for i in range(n)) == [16, 32, 48]
+for f, w in (('apple-touch-icon.png', 180), ('icon-192.png', 192), ('icon-512.png', 512)):
+    p = open(os.path.join(d, 'icons', f), 'rb').read()
+    assert p[:8] == b'\x89PNG\r\n\x1a\n' and int.from_bytes(p[16:20], 'big') == w == int.from_bytes(p[20:24], 'big'), f
+assert open(os.path.join(d, 'icons/icon.svg')).read().startswith('<svg')
+mf = os.path.join(d, 'icons/manifest.webmanifest')
+m = json.load(open(mf))
+assert m['name'] and m['short_name'] and m['display'] in ('browser', 'standalone', 'minimal-ui', 'fullscreen')
+assert re.fullmatch(r'#[0-9a-f]{6}', m['background_color']) and re.fullmatch(r'#[0-9a-f]{6}', m['theme_color'])
+assert not re.search(r'sierra|imagination|tsn|\binn\b', json.dumps(m), re.I)
+for i in m['icons']:
+    assert os.path.isfile(os.path.join(d, 'icons', i['src'])), i
+assert os.path.isdir(os.path.normpath(os.path.join(d, 'icons', m['start_url'])))
+for f, up in (('inn.html', ''), ('legal/terms.html', '../'), ('legal/privacy.html', '../'), ('legal/copyright.html', '../')):
+    h = open(os.path.join(d, f)).read()
+    assert 'href="data:' not in h and "href=data:" not in h, f
+    at = lambda a, k: (re.search(r'\b' + k + r'=(?:"([^"]*)"|([^\s>"]+))', a) or [None] * 3)
+    links = [((at(a, 'rel')[1] or at(a, 'rel')[2]), (at(a, 'href')[1] or at(a, 'href')[2])) for a in re.findall(r'<link\b([^>]*)>', h)]
+    links = [(k, v) for k, v in links if k in ('icon', 'apple-touch-icon', 'manifest')]
+    assert {k for k, _ in links} == {'icon', 'apple-touch-icon', 'manifest'} and len(links) == 4, f
+    for _, href in links:
+        assert href.startswith(up + 'icons/') and os.path.isfile(os.path.normpath(os.path.join(d, os.path.dirname(f), href))), (f, href)
 P
   # the runtime is not in the page: no script tag for it, inn.js is in the asset map (page.js inserts it), the page is the lazy kind
   python3 -I - "$tmp/pkg" <<'P' && ok "inn.html loads the runtime lazily" || bad "inn.html loads the runtime lazily"

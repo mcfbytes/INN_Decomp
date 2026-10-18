@@ -196,6 +196,9 @@ for (const f of ['terms', 'privacy', 'copyright']) put(`legal/${f}.html`, seo(pa
 const og = read('og.png');
 if (!(og.length > 8 && og.readUInt32BE(16) === 1200 && og.readUInt32BE(20) === 630)) fail('og.png is not a 1200x630 PNG (tools/make_og.mjs writes it)');
 put('og.png', og);
+// The page icons (tools/make_favicon.py and tools/make_logo.mjs write them): unhashed, the pages and the manifest name them by path.
+const ICONS = ['favicon.ico', 'icon.svg', 'apple-touch-icon.png', 'icon-192.png', 'icon-512.png', 'manifest.webmanifest'];
+for (const f of ICONS) put(`icons/${f}`, read(`icons/${f}`));
 if (base) {
   put('robots.txt', `User-agent: *\nAllow: /\n\nSitemap: ${base}/sitemap.xml\n`);
   const urls = ['/', '/legal/terms.html', '/legal/privacy.html', '/legal/copyright.html'];
@@ -219,6 +222,7 @@ const csp = [
   "style-src-attr 'unsafe-inline'",
   "font-src 'self'",
   "img-src 'self' data: blob:",
+  "manifest-src 'self'",
   "media-src 'self' blob:",
   `connect-src ${[...new Set(connect)].join(' ')}`,
   "base-uri 'none'", "form-action 'none'", "object-src 'none'", "frame-ancestors 'none'",
@@ -235,6 +239,7 @@ const config = {
     { route: '/sitemap.xml', headers: noCache },
     // Not hashed: link previews need a stable address. A day is long enough to spare the bandwidth, short enough to change it.
     { route: '/og.png', headers: { 'Cache-Control': 'public, max-age=86400' } },
+    { route: '/icons/*', headers: { 'Cache-Control': 'public, max-age=86400' } },
   ],
   // One page, no client-side routes: an unknown path is a plain 404, so there is no navigationFallback.
   globalHeaders: {
@@ -245,12 +250,12 @@ const config = {
     'X-Content-Type-Options': 'nosniff',
     'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), hid=()',
   },
-  mimeTypes: { '.wasm': 'application/wasm', '.json': 'application/json', '.glsl': 'text/plain', '.txt': 'text/plain', '.xml': 'application/xml' },
+  mimeTypes: { '.wasm': 'application/wasm', '.json': 'application/json', '.glsl': 'text/plain', '.txt': 'text/plain', '.xml': 'application/xml', '.webmanifest': 'application/manifest+json', '.ico': 'image/x-icon', '.svg': 'image/svg+xml' },
 };
 put('staticwebapp.config.json', JSON.stringify(config, null, 2) + '\n');
 
 // ---- guard: nothing outside the expected list ships, and nothing that looks like game data ----
-const ALLOWED = [/^inn\.html$/, /^site\.json$/, /^og\.png$/, /^robots\.txt$/, /^sitemap\.xml$/, /^staticwebapp\.config\.json$/, /^legal\/(terms|privacy|copyright)\.html$/,
+const ALLOWED = [/^inn\.html$/, /^site\.json$/, /^og\.png$/, /^icons\/(favicon\.ico|icon\.svg|apple-touch-icon\.png|icon-(192|512)\.png|manifest\.webmanifest)$/, /^robots\.txt$/, /^sitemap\.xml$/, /^staticwebapp\.config\.json$/, /^legal\/(terms|privacy|copyright)\.html$/,
   /^assets\/(app|inn|legal)\.[0-9a-f]{10}\.(js|css|wasm)$/, /^assets\/vt323\.[0-9a-f]{10}\.ttf$/, /^assets\/worklet\.[0-9a-f]{10}\.js$/, /^assets\/(scenes|music)\/\w+\.[0-9a-f]{10}\.js$/,
   /^assets\/shaders\/[\w+-]+\.[0-9a-f]{10}\.(glsl|png)$/];
 for (const [p, buf] of emitted) {
