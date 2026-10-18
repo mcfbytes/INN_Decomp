@@ -28,7 +28,9 @@ SHA-256 of the vendored files:
 
 ## VT323 (web page font)
 
-The browser page (`runtime/web/shell.html`) loads VT323 by Peter Hull from Google Fonts
-(`fonts.googleapis.com`) for headings, the modem panel and the control strip; the stylesheet falls back to the
-system monospace font when it cannot load. License: SIL Open Font License 1.1. Not vendored and not
-redistributed with the build.
+The browser page (`runtime/web/shell.html`) and the legal pages use VT323 by Peter Hull for headings, the modem
+panel and the control strip. It is vendored in `third_party/vt323/` (`VT323-Regular.ttf`, unmodified) and served
+from the page's own origin, so visitors' addresses never reach a font host; the stylesheet falls back to the system
+monospace font if the file cannot load. License: SIL Open Font License 1.1 (`OFL.txt`; the copyright line is
+"Copyright 2011, The VT323 Project Authors"; no Reserved Font Name is declared). The license travels with the file;
+the packaged site ships it as `assets/vt323.<hash>.ttf`.
