@@ -1089,7 +1089,7 @@ endpoint that logs POSTs and answers CORS.
 ```
 inn.html  site.json  staticwebapp.config.json  og.png  [robots.txt  sitemap.xml: with a site address]
 legal/{terms,privacy,copyright}.html
-assets/{app,inn,legal}.<hash>.{js,css,wasm}   assets/scenes/<id>.<hash>.js   assets/music/<id>.<hash>.js
+assets/{app,inn,legal}.<hash>.{js,css,wasm}   assets/vt323.<hash>.ttf   assets/scenes/<id>.<hash>.js   assets/music/<id>.<hash>.js
 ```
 
 `staticwebapp.config.json` (SWA reads it from the root; its limit is 20 KB):
@@ -1101,8 +1101,8 @@ assets/{app,inn,legal}.<hash>.{js,css,wasm}   assets/scenes/<id>.<hash>.js   ass
   it; the packaged run logged no fallback warning).
 - **CSP**, in `globalHeaders`: `default-src 'none'`; `script-src 'self' 'wasm-unsafe-eval'` plus the hashes of
   the inline scripts (the theme snippet in `<head>` runs before first paint, so it stays inline);
-  `style-src 'self' https://fonts.googleapis.com` and `font-src https://fonts.gstatic.com` (VT323; these two make
-  Google receive the visitor's address, which the privacy notice says);
+  `style-src 'self'` and `font-src 'self'` (the VT323 font is served from the page's own origin as a hashed
+  `assets/vt323.<hash>.ttf`, `third_party/vt323/`; no request goes to Google);
   `style-src-attr 'unsafe-inline'` (a few `style=` attributes and the page sets inline styles; no inline `<style>`
   remains); `img-src 'self' data: blob:`; `media-src 'self' blob:`; `base-uri 'none'`; `form-action 'none'`;
   `object-src 'none'`; `frame-ancestors 'none'`. No `unsafe-eval`.

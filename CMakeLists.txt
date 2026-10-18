@@ -118,6 +118,8 @@ if(EMSCRIPTEN)
           music/valley.js music/diner.js music/tower.js music/harbor.js music/town.js)
     configure_file(runtime/web/${script} ${CMAKE_BINARY_DIR}/${script} COPYONLY)
   endforeach()
+  # The page font (third_party/vt323/, OFL 1.1): the pages' @font-face names fonts/VT323-Regular.ttf.
+  configure_file(third_party/vt323/VT323-Regular.ttf ${CMAKE_BINARY_DIR}/fonts/VT323-Regular.ttf COPYONLY)
   # The display filters' shaders (third_party/, docs/web.md "Display filters") sit flat in <build>/shaders/;
   # the page fetches them when a filter is first chosen.
   foreach(dir xbr xbrz scalefx hqx fsr1 crt-lottes anime4k sai)

@@ -31,9 +31,8 @@ time can keep 1.
 
 If you turn the diagnostics on, check the privacy notice against your deployment: the retention number (section 4 and
 the table), the Azure region (section 13), the sign-in providers you enable (section 8), and that the infrastructure
-really masks IP addresses. The notice also tells visitors that Google Fonts receives their address when the page
-loads (the page uses the VT323 font from Google); self-hosting the font would remove that disclosure and a
-third-party request, and is worth doing before a European launch.
+really masks IP addresses. The page serves its VT323 font itself (`third_party/vt323/`), so no third party
+receives a visitor's address when the page loads and the notice names no font processor.
 
 ## 2. Register a DMCA designated agent
 

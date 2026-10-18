@@ -42,7 +42,7 @@ if [ -n "${1:-}" ]; then
   b=$1
   if "$here/package_web.sh" "$b" "$tmp/pkg" --game wss://play.example.test:2316 --auth https://auth.example.test >"$tmp/log" 2>&1; then ok "packages the public build"; else bad "packages the public build: $(tail -3 "$tmp/log")"; fi
   # nothing outside the expected list, no game data, hashed names, the config is valid and under SWA's 20 KB limit
-  stray=$(cd "$tmp/pkg" && find . -type f | sed 's|^\./||' | grep -Ev '^(inn\.html|site\.json|og\.png|staticwebapp\.config\.json|legal/(terms|privacy|copyright)\.html|assets/(app|inn|legal)\.[0-9a-f]{10}\.(js|css|wasm)|assets/worklet\.[0-9a-f]{10}\.js|assets/(scenes|music)/[a-z]+\.[0-9a-f]{10}\.js|assets/shaders/[A-Za-z0-9_+-]+\.[0-9a-f]{10}\.(glsl|png))$')
+  stray=$(cd "$tmp/pkg" && find . -type f | sed 's|^\./||' | grep -Ev '^(inn\.html|site\.json|og\.png|staticwebapp\.config\.json|legal/(terms|privacy|copyright)\.html|assets/(app|inn|legal)\.[0-9a-f]{10}\.(js|css|wasm)|assets/vt323\.[0-9a-f]{10}\.ttf|assets/worklet\.[0-9a-f]{10}\.js|assets/(scenes|music)/[a-z]+\.[0-9a-f]{10}\.js|assets/shaders/[A-Za-z0-9_+-]+\.[0-9a-f]{10}\.(glsl|png))$')
   [ -z "$stray" ] && ok "output holds only expected files" || bad "stray files: $stray"
   [ "$(find "$tmp/pkg" -type f | wc -l)" -ge 20 ] && ok "output file count" || bad "output file count"
   python3 -I - "$tmp/pkg/staticwebapp.config.json" <<'P' && ok "staticwebapp.config.json" || bad "staticwebapp.config.json"
@@ -96,6 +96,23 @@ assert re.fullmatch(r'assets/worklet\.[0-9a-f]{10}\.js', w)
 src = open(os.path.join(d, w)).read()
 assert 'registerProcessor' in src and 'inn-sink' in src
 assert 'audio-worklet.js' in open(os.path.join(d, m['inn.js'])).read()
+P
+  # the font is served from the page's own origin: hashed asset, CSP font-src 'self', every page's CSS names it, and no
+  # packaged file mentions a Google font host
+  python3 -I - "$tmp/pkg" <<'P' && ok "the font is self-hosted and nothing names googleapis or gstatic" || bad "the font is self-hosted and nothing names googleapis or gstatic"
+import json, os, re, sys
+d = sys.argv[1]
+fonts = [f for f in os.listdir(os.path.join(d, 'assets')) if re.fullmatch(r'vt323\.[0-9a-f]{10}\.ttf', f)]
+assert len(fonts) == 1 and open(os.path.join(d, 'assets', fonts[0]), 'rb').read(4) == b'\x00\x01\x00\x00'
+css = [f for f in os.listdir(os.path.join(d, 'assets')) if f.endswith('.css')]
+assert css and all(fonts[0] in open(os.path.join(d, 'assets', f)).read() for f in css)
+c = json.load(open(os.path.join(d, 'staticwebapp.config.json')))
+csp = c['globalHeaders']['Content-Security-Policy']
+assert "font-src 'self';" in csp and "style-src 'self';" in csp
+for root, _, files in os.walk(d):
+    for f in files:
+        t = open(os.path.join(root, f), 'rb').read().lower()
+        assert b'googleapis' not in t and b'gstatic' not in t, os.path.join(root, f)
 P
   # no address given, so no canonical link, robots.txt or sitemap (and the legal pages stay noindex); the preview image still ships
   python3 -I - "$tmp/pkg" <<'P' && ok "without a site address: no canonical, robots.txt or sitemap.xml" || bad "without a site address: no canonical, robots.txt or sitemap.xml"

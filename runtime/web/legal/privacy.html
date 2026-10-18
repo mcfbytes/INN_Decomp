@@ -24,12 +24,12 @@
 <meta name="twitter:image" content="../og.png">
 <meta name="twitter:image:alt" content="A hand-painted harbour village at dusk, with a lighthouse and a sea serpent.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' shape-rendering='crispEdges'%3E%3Crect width='16' height='16' fill='%2368aeea'/%3E%3Crect x='10' y='2' width='3' height='3' fill='%23ffe45c'/%3E%3Cpath d='M0 16V11l4-2 4 2 4-3 4 2v6z' fill='%237a9a34'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=VT323&amp;display=swap">
 <script>
   // The game page's Options > Time of day choice, if any (same origin).
   try { const t = localStorage.getItem('inn.theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch { /* follow the system */ }
 </script>
 <style>
+  @font-face { font-family: "VT323"; font-style: normal; font-weight: 400; font-display: swap; src: url("../fonts/VT323-Regular.ttf") format("truetype"); }
   :root {
     --bg: #17151d; --surface: #1d1838; --surface-2: #2a2250; --border: #0c0a20; --edge: #6c58b0;
     --text: #f0e8ff; --muted: #b8acd8; --accent: #ffb23c; --accent-ink: #231a10; --link: #ffc863;
@@ -194,8 +194,7 @@
 <li><strong>Microsoft Azure Application Insights</strong> receives the anonymous diagnostics (section 4).</li>
 <li><strong>The sign-in provider you choose</strong> (for example Microsoft) confirms who you are to us. It is a separate controller for its own accounts; its own notice applies to what it does. We receive only the identifier described in section 1.</li>
 </ul>
-<p>The page also loads one font (VT323) from <strong>Google Fonts</strong>, which means Google receives your IP address and browser details when the page loads; see Google&rsquo;s own privacy policy. We send Google nothing else.</p>
-<p>Apart from that, we disclose information only when the law requires it: a valid subpoena, court order or warrant; or to report apparent child sexual exploitation to the National Center for Missing &amp; Exploited Children (NCMEC), as US law requires. When that happens, only the named account&rsquo;s records are opened. We do not sell or share data otherwise.</p>
+<p>We disclose information only when the law requires it: a valid subpoena, court order or warrant; or to report apparent child sexual exploitation to the National Center for Missing &amp; Exploited Children (NCMEC), as US law requires. When that happens, only the named account&rsquo;s records are opened. We do not sell or share data otherwise.</p>
 
 <h2>9. Your choices and rights</h2>
 <p>You can ask us to give you a copy of your data (access and export), to correct it, or to delete it. Email <a data-f="privacyEmail" data-fallback="contactEmail" data-mail></a>. We reply within 30 days. We may need to check that you control the account, for example by having you sign in again. Deleting your account disables it at once and erases it after the grace period in section 7; the sealed records are not individually deletable and are purged on their normal schedule (or held longer only under a valid legal hold). An access request also covers items still inside a deletion window.</p>

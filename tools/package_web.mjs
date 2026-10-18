@@ -71,6 +71,11 @@ assetMap['inn.js'] = innjsPath;
 // The audio sink's worklet module, which the runtime loads through innAsset() (audio_sdl.c).
 assetMap['audio-worklet.js'] = putHashed('assets', 'worklet', 'js', minify(read('audio-worklet.js'), 'js'));
 
+// ---- the page font (third_party/vt323/, SIL OFL 1.1): same origin, hashed; the CSS is moved to assets/, so it names the file beside it ----
+const fontPath = putHashed('assets', 'vt323', 'ttf', read('fonts/VT323-Regular.ttf'));
+const fontName = fontPath.split('/').pop();
+const FONT_URL = /url\(["']?(?:\.\.\/)?fonts\/VT323-Regular\.ttf["']?\)/g;
+
 // ---- HTML pages: styles and scripts move out, hashed; inline scripts are listed for the CSP ----
 const inlineHashes = new Set();
 const attr = (a, n) => { const m = new RegExp(`\\b${n}=("([^"]*)"|'([^']*)'|([^\\s>]+))`).exec(a); return m ? (m[2] ?? m[3] ?? m[4]) : null; };
@@ -78,7 +83,7 @@ function page(file, prefix) {
   let html = read(file).toString('utf8');
   const stem = file === 'inn.html' ? 'app' : 'legal';
   const styles = [];
-  html = html.replace(/<style\b[^>]*>([\s\S]*?)<\/style>/g, (_, css) => { styles.push(css); return styles.length === 1 ? '\0STYLE\0' : ''; });
+  html = html.replace(/<style\b[^>]*>([\s\S]*?)<\/style>/g, (_, css) => { styles.push(css.replace(FONT_URL, `url("${fontName}")`)); return styles.length === 1 ? '\0STYLE\0' : ''; });
   if (styles.length) {
     const p = putHashed('assets', stem, 'css', minify(styles.join('\n'), 'css'));
     html = html.replace('\0STYLE\0', `<link rel="stylesheet" href="${prefix}${p}">`);
@@ -210,9 +215,9 @@ if (!games.length && !connectAny) console.warn('package_web: note: no --game giv
 const csp = [
   "default-src 'none'",
   `script-src 'self' 'wasm-unsafe-eval' ${[...inlineHashes].join(' ')}`.trim(),
-  "style-src 'self' https://fonts.googleapis.com",
+  "style-src 'self'",
   "style-src-attr 'unsafe-inline'",
-  "font-src https://fonts.gstatic.com",
+  "font-src 'self'",
   "img-src 'self' data: blob:",
   "media-src 'self' blob:",
   `connect-src ${[...new Set(connect)].join(' ')}`,
@@ -246,7 +251,7 @@ put('staticwebapp.config.json', JSON.stringify(config, null, 2) + '\n');
 
 // ---- guard: nothing outside the expected list ships, and nothing that looks like game data ----
 const ALLOWED = [/^inn\.html$/, /^site\.json$/, /^og\.png$/, /^robots\.txt$/, /^sitemap\.xml$/, /^staticwebapp\.config\.json$/, /^legal\/(terms|privacy|copyright)\.html$/,
-  /^assets\/(app|inn|legal)\.[0-9a-f]{10}\.(js|css|wasm)$/, /^assets\/worklet\.[0-9a-f]{10}\.js$/, /^assets\/(scenes|music)\/\w+\.[0-9a-f]{10}\.js$/,
+  /^assets\/(app|inn|legal)\.[0-9a-f]{10}\.(js|css|wasm)$/, /^assets\/vt323\.[0-9a-f]{10}\.ttf$/, /^assets\/worklet\.[0-9a-f]{10}\.js$/, /^assets\/(scenes|music)\/\w+\.[0-9a-f]{10}\.js$/,
   /^assets\/shaders\/[\w+-]+\.[0-9a-f]{10}\.(glsl|png)$/];
 for (const [p, buf] of emitted) {
   if (!ALLOWED.some((re) => re.test(p))) fail(`unexpected output file ${p}`);
