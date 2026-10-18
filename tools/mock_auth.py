@@ -8,8 +8,10 @@
 It implements the page <-> server contract in docs/web.md ("Sign-in (server contract)"):
 
     GET  /auth/providers                     [{id, name, url}]
-    GET  /auth/login?provider=&return=&mode= consent page (Allow / Deny)
-    GET  /auth/callback?...                   finishes: popup postMessage, or a redirect with a fragment
+    GET  /auth/login?provider=&return=&mode=&nonce=
+                                             consent page (Allow / Deny)
+    GET  /auth/callback?...                   finishes: popup postMessage, or a redirect with a fragment; the
+                                              page's nonce comes back with either
     GET  /auth/session                        Bearer token -> {identity: {handle, provider}, accounts, canCreate,
                                               attested: {age, terms} | null}
     POST /auth/attest                         {attest: "18+v1"} -> 204 (records the age/terms answer)
@@ -118,6 +120,7 @@ CONSENT = """<!doctype html><meta charset="utf-8"><meta name="viewport" content=
 <form method="get" action="/auth/callback">
 <input type="hidden" name="provider" value="{provider}"><input type="hidden" name="return" value="{ret}">
 <input type="hidden" name="mode" value="{mode}"><input type="hidden" name="attest" value="{attest}">
+<input type="hidden" name="nonce" value="{nonce}">
 <button name="decision" value="allow" autofocus>Allow</button><button name="decision" value="deny">Deny</button>
 <button name="decision" value="provider_error">Provider error</button><button name="decision" value="server_error">Server error</button>
 </form>"""
@@ -194,7 +197,8 @@ def make_handler(state):
                     return self.err(400, "bad_return", "The return address is not an allowed page origin.")
                 page = CONSENT.format(name=html.escape(PROVIDERS[provider]), provider=provider,
                                       ret=html.escape(ret, quote=True), mode=html.escape(q.get("mode", "popup"), quote=True),
-                                      attest=html.escape(q.get("attest", ""), quote=True))
+                                      attest=html.escape(q.get("attest", ""), quote=True),
+                                      nonce=html.escape(q.get("nonce", ""), quote=True))
                 return self.reply(200, page, "text/html")
             if url.path == "/auth/callback":
                 return self.callback(q)
@@ -248,6 +252,10 @@ def make_handler(state):
                 code = {"provider_error": "provider_error", "server_error": "server_error"}.get(q.get("decision"), "access_denied")
                 message = {"type": "inn-auth", "error": code}
                 frag = f"inn-error={code}"
+            nonce = q.get("nonce", "")
+            if re.fullmatch(r"[A-Za-z0-9_-]{16,64}", nonce):
+                message["nonce"] = nonce
+                frag += f"&inn-nonce={nonce}"
             if mode == "redirect":
                 return self.reply(302, headers=[("Location", f"{ret}#{frag}")])
             body = POPUP_DONE.format(message=json.dumps(message).replace("<", "\\u003c"), target=json.dumps(origin))

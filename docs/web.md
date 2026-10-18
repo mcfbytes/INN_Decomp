@@ -442,7 +442,7 @@ page shows `message` for a 4xx it does not know):
 | Request | Success | Other |
 |---|---|---|
 | `GET /auth/providers` | 200 `{"signInRequired": true, "providers": [{"id": "example", "name": "Example Phone Co.", "url": "/auth/login?provider=example"}]}` | anything else, or no providers: sign-in stays off. `url` is relative to the auth origin or absolute on it; any other origin is ignored. `name` is shown as text only. `signInRequired` (innkeeperd `--public`) means every line needs a session: the operator then offers only the cards, with no "own number", and the page never dials without a session. A bare list (an older server) means sign-in is optional. |
-| `GET <url>&return=<page URL>&mode=popup` | the login (consent) page; ends on `/auth/callback` | 400 for an unknown provider or a `return` whose origin is not an allowed page origin |
+| `GET <url>&return=<page URL>&mode=popup&nonce=<nonce>` | the login (consent) page; ends on `/auth/callback` | 400 for an unknown provider or a `return` whose origin is not an allowed page origin; 400 `bad_nonce` for a malformed nonce, or for none at all on a `--public` server |
 | `GET /auth/session`, `Authorization: Bearer <token>` | 200 `{"identity": {"handle": "Caller 7F3A", "provider": "<id>"}, "accounts": [{"id": 100001, "persona": "Guybrush"}, {"id": 100002, "persona": null}], "canCreate": true, "attested": {"age": 18, "terms": 1}}` (`attested` is `null` when none is on record) | 401: token missing, unknown or expired |
 | `POST /auth/attest`, `{"attest": "18+v2"}` | 204; the answer is stored on the identity | 400 `bad_attest`; 401 |
 | `POST /auth/accounts`, `{}` (an empty body works too) | 201 `{"id": 100002, "persona": null}`: an account with a number and a password and no persona yet. A body `{"persona": "Elaine"}` still works (1 to 10 of A-Z, a-z, 0-9, unique without regard to case) and answers `"persona": "Elaine"`; the page no longer sends it | 401; 403 `enrolment_closed`; 403 `attest_required`; 400 `bad_persona`; 409 `persona_taken` (only with a given persona); 429 `rate_limited` |
@@ -461,6 +461,7 @@ What the page does with the answers it does not just show:
 | 503 `busy`, other 5xx | "The switchboard is busy" or "The sign-in server had a problem", with the status, and a retry hint |
 | callback `error`: `access_denied` | "Sign-in was declined at <provider>" |
 | callback `error`: `provider_error`, `server_error` | the provider (or the game server) "could not sign you in / finish the sign-in (it reported an error)" |
+| a result without this login's nonce (the page's own `state_mismatch`) | drops it: "That sign-in answer was not the one this page asked for, so it was dropped (state_mismatch)"; a page that still holds a token adds "Nothing changed: you are still signed in as <handle>" (so does any other failed login while signed in) |
 | any other callback code | "Sign-in did not finish (<code>)" |
 
 Every message is a narrator box with the fact first (what failed, the status or code), then a dry remark.
@@ -498,19 +499,28 @@ contract that goes with them is:
 - *This is self-declaration, not verification.* Mainstream OIDC providers give no reliable 18+ claim without the
   user's birthdate or other personal data, which we choose not to collect.
 
-**Login handshake.** The page opens `<url>&return=<page URL without fragment>&mode=popup` with `window.open` on the
-click. The server runs the provider's login, then on `/auth/callback` serves a tiny page whose script does
+**Login handshake.** The page opens `<url>&return=<page URL without fragment>&mode=popup&nonce=<nonce>` with
+`window.open` on the click. The server runs the provider's login, then on `/auth/callback` serves a tiny page whose script does
 `window.opener.postMessage(msg, <origin of return>)` and `window.close()`, where `msg` is
 `{"type": "inn-auth", "session": "<token>"}` or, when the player declined or the provider failed,
-`{"type": "inn-auth", "error": "access_denied"}` (any other code is shown as "did not finish"). The page accepts a
-message only when `event.origin` is the auth origin, `event.source` is the popup it opened and `type` is `inn-auth`.
+`{"type": "inn-auth", "error": "access_denied"}` (any other code is shown as "did not finish"); each also carries
+`"nonce"`. The page accepts a message only when `event.origin` is the auth origin, `event.source` is the popup it
+opened and `type` is `inn-auth`, and then only when `nonce` is the one this login sent; otherwise it is
+`state_mismatch`.
 The `return` address must be checked against the configured page origins (an open redirect and a wildcard
 `postMessage` target would leak the token). If the popup is closed with no message the page says so.
 
 *Fallback.* When `window.open` returns null the page navigates itself to the same URL with `mode=redirect`. The
-server answers the callback with a 302 to `<return>#inn-session=<token>` (or `#inn-error=<code>`). On load the page
-reads the fragment, stores the token, cleans the address with `history.replaceState` and continues from the account
-step. The disks are still there if "Remember on this device" was on (the saved install); otherwise the narrator asks
+server answers the callback with a 302 to `<return>#inn-session=<token>` (or `#inn-error=<code>`), followed by
+`&inn-nonce=<nonce>`. On load the page reads the fragment and takes the result only when `inn-nonce` is the nonce it
+stored for that login; anything else becomes `state_mismatch`. Either way it cleans the address with
+`history.replaceState`, and then continues from the account step.
+
+*The nonce* (login CSRF). Every login URL gets a fresh `nonce`: 18 random bytes from `crypto.getRandomValues`,
+base64url, 24 characters (`newNonce` in `auth.js`). `loginUrl` keeps it in `sessionStorage` (`inn.nonce`) and in
+memory, and it is deleted when the result comes back. Without it, an attacker could send a victim's page a
+`#inn-session=` (or a callback link) from the attacker's own login and sign the victim in as the attacker. A
+`--public` innkeeperd refuses a login without a nonce. The disks are still there if "Remember on this device" was on (the saved install); otherwise the narrator asks
 for them again.
 
 **The token** is opaque to the page. It is kept in `sessionStorage` (`inn.session`), and also in `localStorage`

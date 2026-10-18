@@ -647,7 +647,10 @@ const Adv = (() => {
       access_denied: `Sign-in was declined at ${at}`,
       provider_error: `${at} could not sign you in (it reported an error)`,
       server_error: 'The game server could not finish the sign-in (it reported an error)',
+      state_mismatch: 'That sign-in answer was not the one this page asked for, so it was dropped (state_mismatch)',
     }[code] || `Sign-in did not finish (${code})`;
+    // A page still holding a token stays signed in: a dropped or declined login changed nothing.
+    if (signedIn()) return say(`${what}. Nothing changed: you are still signed in as ${who() || 'before'}.`, { bad: true, actions: [{ label: 'OK', fn: narrHide }] });
     say(`${what}. You are not signed in. The operator hangs up with great dignity.`, {
       bad: true, actions: [{ label: 'Pick a card', fn: () => askWho({ own: sign.own }) }, { label: 'OK', fn: narrHide }] });
   }

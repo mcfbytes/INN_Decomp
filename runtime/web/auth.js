@@ -5,7 +5,8 @@
 'use strict';
 
 const InnAuth = (() => {
-  const SESSION_KEY = 'inn.session', LINE_KEY = 'inn.line', PENDING_KEY = 'inn.signing';
+  const SESSION_KEY = 'inn.session', LINE_KEY = 'inn.line', PENDING_KEY = 'inn.signing', NONCE_KEY = 'inn.nonce';
+  const NONCE_BYTES = 18;
   const POPUP_POLL_MS = 400, POPUP_GRACE_MS = 600;
   // docs/protocol/messages.md section 4.1 item 2 (script.095 export 4); same table as PASSWORD_KEY in
   // TSN-INN-Decomp tools/dosbox/install_client.py.
@@ -53,15 +54,31 @@ const InnAuth = (() => {
 
   // ---------- the session ----------
 
-  const st = { base: '', origin: '', token: '', attest: null, identity: null, provider: '', pending: false, fragmentError: '' };
+  const st = { base: '', origin: '', token: '', attest: null, identity: null, provider: '', pending: false, fragmentError: '', nonce: '' };
 
-  // A redirect login comes back with the result in the address fragment. Take it and clean the address.
+  // The page's own random value for one login (18 bytes, base64url, 24 characters). The server echoes it
+  // with the result, so a result this page did not ask for (login CSRF) is dropped (docs/web.md).
+  function newNonce() {
+    const bytes = new Uint8Array(NONCE_BYTES);
+    crypto.getRandomValues(bytes);
+    let text = '';
+    for (const b of bytes) text += String.fromCharCode(b);
+    return btoa(text).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+
+  // A redirect login comes back with the result in the address fragment: a session or an error. Take it
+  // only when it carries this page's nonce, and clean the address either way.
   function readFragment() {
     const h = new URLSearchParams(location.hash.replace(/^#/, ''));
     const session = h.get('inn-session'), error = h.get('inn-error');
     if (!session && !error) return;
-    if (session) { st.token = session; st.pending = true; saveToken(); }
-    if (error) st.fragmentError = error;
+    const expected = get('session', NONCE_KEY);
+    del('session', NONCE_KEY);
+    if (!expected || h.get('inn-nonce') !== expected) st.fragmentError = 'state_mismatch';
+    else {
+      if (session) { st.token = session; st.pending = true; saveToken(); }
+      if (error) st.fragmentError = error;
+    }
     try { history.replaceState(null, '', location.pathname + location.search); } catch { /* address left as it is */ }
   }
 
@@ -95,10 +112,14 @@ const InnAuth = (() => {
   // The page's own address without the fragment: where the server sends the player back to.
   const returnUrl = () => location.origin + location.pathname + location.search;
 
+  // A fresh nonce goes with every login and is kept to check the result.
   function loginUrl(href, mode) {
     const url = new URL(href);
     url.searchParams.set('return', returnUrl());
     if (mode) url.searchParams.set('mode', mode);
+    st.nonce = newNonce();
+    set('session', NONCE_KEY, st.nonce);
+    url.searchParams.set('nonce', st.nonce);
     // "<age>+v<terms>": the player's answer to the age and terms notice (docs/web.md, Sign-in).
     const attest = st.attest && st.attest();
     if (attest) url.searchParams.set('attest', attest);
@@ -169,8 +190,9 @@ const InnAuth = (() => {
   }
 
   // Opens the login in a popup. Call it straight from the click so the browser allows it. Resolves
-  // { session }, or { error: '<code>' } when the server reports one ('access_denied' for Deny), or
-  // { closed: true } when the window goes away. Resolves null when the popup is blocked.
+  // { session }, or { error: '<code>' } when the server reports one ('access_denied' for Deny, 'state_mismatch'
+  // for a result without this login's nonce), or { closed: true } when the window goes away. Resolves null when
+  // the popup is blocked.
   function popupLogin(href) {
     let win = null;
     try { win = window.open(loginUrl(href, 'popup'), 'inn-auth', 'popup=yes,width=520,height=660'); } catch { win = null; }
@@ -186,10 +208,13 @@ const InnAuth = (() => {
     function onMessage(e) {
       const d = e.data;
       if (e.origin !== st.origin || e.source !== win || !d || d.type !== 'inn-auth') return;
-      if (typeof d.session === 'string' && d.session) {
+      if (!st.nonce || d.nonce !== st.nonce) finish({ error: 'state_mismatch' });
+      else if (typeof d.session === 'string' && d.session) {
         st.token = d.session;
         finish({ session: d.session });
       } else finish({ error: typeof d.error === 'string' ? d.error : 'failed' });
+      st.nonce = '';
+      del('session', NONCE_KEY);
     }
     window.addEventListener('message', onMessage);
     poll = setInterval(() => {
@@ -210,6 +235,7 @@ const InnAuth = (() => {
   const api = {
     encodePassword, passwordFile, setCfgId,
     configure, setAttest: (fn) => { st.attest = fn; }, attestNow, loadToken, saveToken, forget, loginUrl, call, fetchSession, createAccount, credential, saves, saveFile, logout,
+    newNonce, readFragment,
     popupLogin, redirectLogin, AuthError,
     state: st,
     token: () => st.token || loadToken(),

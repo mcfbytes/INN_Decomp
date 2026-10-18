@@ -149,6 +149,7 @@
 <tr><td><code>inn.refused</code></td><td>sessionStorage</td><td>that you answered &ldquo;no&rdquo; to the age notice, until the tab closes</td><td>necessary</td></tr>
 <tr><td><code>inn.session</code></td><td>sessionStorage; localStorage if &ldquo;Remember on this device&rdquo; is on</td><td>the short-lived sign-in token</td><td>necessary: to keep you signed in</td></tr>
 <tr><td><code>inn.line</code>, <code>inn.signing</code>, <code>inn.redial</code></td><td>sessionStorage</td><td>which line you chose, and markers that a sign-in or a redial is under way</td><td>necessary: to finish a sign-in that leaves the page and returns</td></tr>
+<tr><td><code>inn.nonce</code></td><td>sessionStorage</td><td>a random value made for the sign-in under way, deleted when it returns</td><td>necessary: so a sign-in someone else started cannot sign you in as them</td></tr>
 <tr><td><code>inn.saves.&lt;account number&gt;</code></td><td>localStorage</td><td>which save files this browser last synced, with their version and a checksum</td><td>necessary: for save sync to avoid overwriting newer saves</td></tr>
 <tr><td><code>inn.remember</code>, <code>inn.com1</code></td><td>localStorage</td><td>your choice to remember the installation, and the server address you used</td><td>preference you set</td></tr>
 <tr><td><code>inn.scale</code>, <code>inn.scanlines</code>, <code>inn.theme</code>, <code>inn.anim</code>, <code>inn.music</code></td><td>localStorage</td><td>display filter, scanlines, day or dusk, animation and music on or off</td><td>preference you set</td></tr>
