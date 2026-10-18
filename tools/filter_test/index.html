@@ -1,0 +1,15 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Filter test card</title>
+<style>
+  body { margin: 0; background: #202020; }
+  #stage { position: relative; }
+  #glcanvas { display: block; }
+</style>
+<div id="stage" data-gpu="0"><canvas id="glcanvas" width="16" height="16"></canvas></div>
+<script>
+// Page-side stand-in for site.js: assets sit next to the page.
+const innAsset = (p) => p;
+</script>
+<script src="filters.js"></script>
+<script src="card.js"></script>

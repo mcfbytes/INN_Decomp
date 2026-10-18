@@ -42,7 +42,7 @@ if [ -n "${1:-}" ]; then
   b=$1
   if "$here/package_web.sh" "$b" "$tmp/pkg" --game wss://play.example.test:2316 --auth https://auth.example.test >"$tmp/log" 2>&1; then ok "packages the public build"; else bad "packages the public build: $(tail -3 "$tmp/log")"; fi
   # nothing outside the expected list, no game data, hashed names, the config is valid and under SWA's 20 KB limit
-  stray=$(cd "$tmp/pkg" && find . -type f | sed 's|^\./||' | grep -Ev '^(inn\.html|site\.json|staticwebapp\.config\.json|legal/(terms|privacy|copyright)\.html|assets/(app|inn|legal)\.[0-9a-f]{10}\.(js|css|wasm)|assets/worklet\.[0-9a-f]{10}\.js|assets/(scenes|music)/[a-z]+\.[0-9a-f]{10}\.js)$')
+  stray=$(cd "$tmp/pkg" && find . -type f | sed 's|^\./||' | grep -Ev '^(inn\.html|site\.json|staticwebapp\.config\.json|legal/(terms|privacy|copyright)\.html|assets/(app|inn|legal)\.[0-9a-f]{10}\.(js|css|wasm)|assets/worklet\.[0-9a-f]{10}\.js|assets/(scenes|music)/[a-z]+\.[0-9a-f]{10}\.js|assets/shaders/[A-Za-z0-9_+-]+\.[0-9a-f]{10}\.(glsl|png))$')
   [ -z "$stray" ] && ok "output holds only expected files" || bad "stray files: $stray"
   [ "$(find "$tmp/pkg" -type f | wc -l)" -ge 20 ] && ok "output file count" || bad "output file count"
   python3 -I - "$tmp/pkg/staticwebapp.config.json" <<'P' && ok "staticwebapp.config.json" || bad "staticwebapp.config.json"
@@ -67,6 +67,24 @@ assert 'data-runtime="lazy"' in h or 'data-runtime=lazy' in h
 m = json.loads(re.search(r'id="inn-assets">([^<]*)<', h).group(1))
 assert re.fullmatch(r'assets/inn\.[0-9a-f]{10}\.js', m['inn.js']) and os.path.exists(os.path.join(d, m['inn.js']))
 assert re.search(r'inn\.[0-9a-f]{10}\.wasm', open(os.path.join(d, m['inn.js'])).read())
+P
+  # the display filters: every shader and lookup table is a hashed asset in the map, the licence headers stay in the GLSL,
+  # and the page's scripts carry no remote loads or eval
+  python3 -I - "$tmp/pkg" <<'P' && ok "the display-filter shaders are hashed assets" || bad "the display-filter shaders are hashed assets"
+import json, os, re, sys
+d = sys.argv[1]; h = open(os.path.join(d, 'inn.html')).read()
+m = json.loads(re.search(r'id="inn-assets">([^<]*)<', h).group(1))
+sh = {k: v for k, v in m.items() if k.startswith('shaders/')}
+for need in ('xbr-lv2.glsl', 'xbrz-freescale.glsl', 'scalefx-pass0.glsl', 'hqx-pass2.glsl', 'hq4x.png', 'fsr-pass0.glsl', 'crt-lottes.glsl', 'supereagle.glsl', '2xsai.glsl', 'Anime4K_Upscale_CNN_x2_S.glsl'):
+    assert 'shaders/' + need in sh, need
+for k, v in sh.items():
+    assert re.fullmatch(r'assets/shaders/[\w+-]+\.[0-9a-f]{10}\.(glsl|png)', v) and os.path.exists(os.path.join(d, v)), k
+    if v.endswith('.glsl'):
+        t = open(os.path.join(d, v)).read()
+        assert re.search(r'copyright|public domain|license|licence', t, re.I), k + ' lost its licence header'
+app = [f for f in os.listdir(os.path.join(d, 'assets')) if f.startswith('app.')][0]
+js = open(os.path.join(d, 'assets', app)).read()
+assert 'Filters' in js and 'glcanvas' in js and not re.search(r'\beval\s*\(|new Function', js)
 P
   # the audio worklet module is a hashed same-origin asset in the map (script-src 'self' covers addModule)
   python3 -I - "$tmp/pkg" <<'P' && ok "the audio worklet is a hashed asset" || bad "the audio worklet is a hashed asset"

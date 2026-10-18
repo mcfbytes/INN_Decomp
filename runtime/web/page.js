@@ -7,8 +7,7 @@ const PROGRAM = { exe: 'TSNEXEC.EXE', dir: 'INN', args: ['DEFAULT'] };
 const SYNC_EVERY_MS = 15000;
 const LOG_LINES_MAX = 400;
 const WS_PORT_DEFAULT = 2316;
-const REMEMBER_KEY = 'inn.remember', SERVER_KEY = 'inn.com1', SCALE_KEY = 'inn.scale';
-const SCALES = ['sharp', 'smooth', 'crt'];
+const REMEMBER_KEY = 'inn.remember', SERVER_KEY = 'inn.com1', SCALE_KEY = 'inn.scale', SCAN_KEY = 'inn.scanlines';
 const TOAST_MS = 6000;
 // The one place for a site name. Empty means no wordmark and the neutral title below.
 const SITE_NAME = '';
@@ -55,6 +54,7 @@ function layoutFrame() {
   else width = Math.floor(fit);
   $('frame').style.setProperty('--fw', `${width}px`);
   $('frame').style.setProperty('--fh', `${width * 3 / 4}px`);
+  Filters.layout(width, width * 3 / 4, window.devicePixelRatio || 1);
 }
 
 // site.json's siteName wins over the constant above when it is set.
@@ -652,19 +652,58 @@ function setMuted(muted) {
   $('sound').querySelector('.wave').toggleAttribute('hidden', muted);
 }
 
-function setScale(scale) {
-  if (!SCALES.includes(scale)) scale = SCALES[0];
+// The picture filter (filters.js). Sharp and Smooth are the plain canvas; every other choice, and Scanlines over
+// either, draws on the GPU. A choice the browser cannot run is greyed out in the list and the picture falls back to
+// Sharp, but the stored choice is left alone (it may work on another browser).
+let scaleToken = 0;
+function fillScaleList() {
+  const sel = $('scale');
+  if (sel.options.length) return;
+  let group = null, groupName = '';
+  for (const f of Filters.list) {
+    if (f.group !== groupName) { group = document.createElement('optgroup'); group.label = groupName = f.group; sel.append(group); }
+    const o = document.createElement('option');
+    const reason = Filters.why(f.id);
+    o.value = f.id;
+    o.textContent = reason ? `${f.label} (unavailable)` : f.label;
+    o.disabled = !!reason;
+    group.append(o);
+  }
+}
+
+function usableScales() {
+  return Filters.list.filter((f) => !Filters.why(f.id)).map((f) => f.id);
+}
+
+function setScale(scale, remember = true) {
+  fillScaleList();
+  const def = Filters.list.find((f) => f.id === scale);
+  if (!def) { scale = 'sharp'; remember = false; }
+  const reason = Filters.why(scale);
+  const want = scale;
+  if (reason) scale = 'sharp';
+  const shown = Filters.list.find((f) => f.id === scale);
+  const scan = $('scanlines').checked && !shown.noScan;
   $('stage').dataset.scale = scale;
-  const label = { sharp: 'Sharp', smooth: 'Smooth', crt: 'CRT' }[scale];
-  $('mode-label').textContent = label;
-  $('mode').ariaLabel = `Display mode: ${label}`;
+  $('mode-label').textContent = shown.label;
+  $('mode').ariaLabel = `Display mode: ${shown.label}`;
+  $('scale').value = want;
+  $('scale-desc').textContent = reason ? `${Filters.list.find((f) => f.id === want).label} is not available: ${reason}` : shown.desc;
+  $('scanlines').disabled = !!shown.noScan;
   layoutFrame();
-  for (const b of $('scale').querySelectorAll('button')) b.setAttribute('aria-checked', String(b.dataset.scale === scale));
-  storageSet(SCALE_KEY, scale);
+  if (remember) storageSet(SCALE_KEY, want);
+  const token = ++scaleToken;
+  Filters.use(scale, scan).then(() => {}, (err) => {
+    if (token !== scaleToken) return;
+    log(`Display filter ${scale}: ${err.message}`);
+    toast(`The ${shown.label} filter could not start. Showing Sharp instead.`, 'bad');
+    setScale('sharp', false);
+  });
 }
 
 function cycleScale() {
-  setScale(SCALES[(SCALES.indexOf($('stage').dataset.scale) + 1) % SCALES.length]);
+  const ids = usableScales();
+  setScale(ids[(ids.indexOf($('stage').dataset.scale) + 1) % ids.length]);
 }
 
 // The strip slides in when the pointer touches the top edge and leaves 1.5 s after the pointer does.
@@ -855,7 +894,10 @@ function wirePage() {
   $('close-settings').addEventListener('click', () => openSettings(false));
   $('scrim').addEventListener('click', () => openSettings(false));
   $('drawer').addEventListener('keydown', (e) => e.key === 'Escape' && openSettings(false));
-  $('scale').addEventListener('click', (e) => e.target.dataset.scale && setScale(e.target.dataset.scale));
+  $('scale').addEventListener('change', () => setScale($('scale').value));
+  $('scanlines').checked = storageGet(SCAN_KEY) === '1';
+  $('scanlines').addEventListener('change', () => { storageSet(SCAN_KEY, $('scanlines').checked ? '1' : '0'); setScale($('scale').value, false); });
+  Filters.onLost = (why) => { toast(`${why} Showing Sharp instead.`, 'bad'); setScale('sharp', false); };
   $('copy-log').addEventListener('click', () => navigator.clipboard.writeText($('log').textContent)
     .then(() => toast('Log copied.', 'ok'), () => toast('Could not copy the log.', 'bad')));
   setScale(storageGet(SCALE_KEY));
