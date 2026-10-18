@@ -452,7 +452,7 @@ const Adv = (() => {
     $('adv-zip').click();
   }
 
-  const diskButtons = () => [{ label: 'Folder', fn: chooseFolder }, { label: '.zip', fn: chooseZip }];
+  const diskButtons = () => [{ label: 'Folder…', fn: chooseFolder }, { label: '.zip…', fn: chooseZip }];
 
   function disksClicked() {
     const o = objects().disks || {};
@@ -463,8 +463,8 @@ const Adv = (() => {
       say(`You already have the disks. ${o.again || 'Swapping them is allowed, if you feel fickle.'}`, { actions: diskButtons(), near: sparkX('disks') });
       return;
     }
-    say(`${o.open || 'You open the box.'} Choose the folder that contains TSNEXEC.EXE. Or perhaps a disk image (.zip)?`, { actions: diskButtons(), near: sparkX('disks') });
-    chooseFolder();
+    // Ask first: the browser's picker is either a folder one or a file one, so open neither until the player says.
+    say(`${o.open || 'You open the box.'} Inside: either a folder that contains TSNEXEC.EXE, or a disk image (.zip). Which have you got?`, { actions: diskButtons(), near: sparkX('disks') });
   }
 
   function phoneClicked() {
