@@ -604,6 +604,7 @@ const Adv = (() => {
       refreshInv();
       return askWho({ own: true, bad: true, text: 'Your sign-in has expired (the server answered 401). The operator would like to see some identification.' });
     }
+    if (kind === 'reauth') return askAgain();
     const tail = { network: ' The operator\'s line is mostly static.', closed: ' The operator suggests a larger switchboard.', server: ' The operator is looking into it.', limit: ' The operator is firm about this.', attest: ' The doorman wants it in writing.', refused: '' }[kind] || '';
     const busy = kind === 'server' && e.code === 'busy';
     const head = {
@@ -617,8 +618,9 @@ const Adv = (() => {
     say(`${head}${/[.!?]$/.test(head) ? '' : '.'}${tail}`, { bad: true, actions: signedIn() ? [{ label: 'OK', fn: narrHide }] : [{ label: 'Pick a card', fn: () => askWho({ own: sign.own }) }, { label: 'OK', fn: narrHide }] });
   }
 
-  // Called straight from the click, so the browser lets the popup open.
-  async function signIn(p) {
+  // Called straight from the click, so the browser lets the popup open. `after` replaces the line choice
+  // once signed in (signing in again before a change of sign-in methods).
+  async function signIn(p, after) {
     if (sign.busy) return;
     const pending = InnAuth.popupLogin(p.href);
     if (!pending) {
@@ -634,6 +636,7 @@ const Adv = (() => {
     const r = await pending;
     sign.busy = false;
     sign.cancel = null;
+    if (r.session && after) { InnAuth.saveToken($('remember').checked); refreshInv(); return after(); }
     if (r.session) return signedInNow(SIGN_QUIP);
     if (r.error) return signDeclined(r.error, p.name);
     say('The sign-in window was closed before you signed in. You are not signed in, and nothing was changed. The operator is still holding, out of habit.', {
@@ -643,14 +646,31 @@ const Adv = (() => {
   // The codes the server sends with a failed login (docs/web.md "Login handshake"; innkeeperd.md 8.6).
   function signDeclined(code, name) {
     const at = (name || 'the provider').replace(/\.$/, '');
+    const linking = LINK_CODES[code];
+    if (linking) {
+      return say(linking.replace('<card>', at), { bad: true, actions: signedIn()
+        ? [{ label: 'Sign-in methods', fn: menuMethods }, { label: 'OK', fn: narrHide }]
+        : [{ label: 'Pick a card', fn: () => askWho({ own: sign.own }) }, { label: 'OK', fn: narrHide }] });
+    }
     const what = {
       access_denied: `Sign-in was declined at ${at}`,
       provider_error: `${at} could not sign you in (it reported an error)`,
       server_error: 'The game server could not finish the sign-in (it reported an error)',
+      state_mismatch: 'That sign-in answer was not the one this page asked for, so it was dropped (state_mismatch)',
     }[code] || `Sign-in did not finish (${code})`;
+    // A page still holding a token stays signed in: a dropped or declined login changed nothing.
+    if (signedIn()) return say(`${what}. Nothing changed: you are still signed in as ${who() || 'before'}.`, { bad: true, actions: [{ label: 'OK', fn: narrHide }] });
     say(`${what}. You are not signed in. The operator hangs up with great dignity.`, {
       bad: true, actions: [{ label: 'Pick a card', fn: () => askWho({ own: sign.own }) }, { label: 'OK', fn: narrHide }] });
   }
+
+  // What a link login can answer besides a proof (innkeeperd.md section 8.7); nothing was linked in any of them.
+  const LINK_CODES = {
+    identity_in_use: 'That card (<card>) already has lines of its own, so the operator will not merge it into these (identity_in_use). Sign in with it on its own to use those lines. Nothing was linked.',
+    already_linked: 'That card (<card>) is already one of yours. Nothing needed doing.',
+    link_expired: 'The link took too long, or was already used (link_expired). Nothing was linked; start again.',
+    too_many_identities: 'These lines already have as many calling cards as the operator allows (too_many_identities). Remove one first.',
+  };
 
   // A fresh token: keep it, show the card in the inventory, then pick the line.
   function signedInNow(lead) {
@@ -667,10 +687,7 @@ const Adv = (() => {
       return say(`${intro}Signed in as ${name}. Now the disks, then the telephone.`, { near: sparkX('disks') });
     }
     if (page.started) return;
-    if (!s.accounts.length) {
-      if (!s.canCreate) return signFail(new InnAuth.AuthError('closed', 'No lines on this card.'));
-      return openNewLine(`${intro}Welcome, ${name}!`, true);
-    }
+    if (!s.accounts.length) return firstCall(s, intro);
     if (s.accounts.length === 1 && !sign.pick) {
       const a = s.accounts[0];
       const who = a.persona ? `Ah, it's ${a.persona}.` : `Line ${a.id}, still unnamed: the client will ask who you are.`;
@@ -744,6 +761,115 @@ const Adv = (() => {
     withSession((s) => chooseLine(s, ''));
   }
 
+  // ---- sign-in methods: more than one calling card for the same lines (innkeeperd.md section 8.7) ----
+  // Linking is deliberate: the player signs in with both cards, one after the other, and never by email.
+
+  const LINK_WHY_KEY = 'inn.linkwhy';
+  const methodName = (m) => m.name || providerName(m.provider);
+
+  // A card with no lines yet: a new player, or one who used another card before.
+  function firstCall(s, intro) {
+    const name = s.identity.handle;
+    const actions = [];
+    if (s.canCreate) actions.push({ label: 'Create a new account', fn: () => openNewLine(`Welcome, ${name}!`, true) });
+    actions.push({ label: 'Link to my existing account', fn: linkExisting });
+    const closed = s.canCreate ? '' : ' (This card cannot open new lines here, but it can join yours.)';
+    say(`${intro}Welcome, ${name}. New here, or do you already have an account? Sign in with the provider you used before to link it.${closed}`,
+      { actions, focus: true, near: sparkX('phone') });
+  }
+
+  function linkExisting() {
+    say('Which calling card did you use before? Sign in with it, and this card joins its lines.', {
+      cards: providers.map((p) => ({ id: p.id, label: p.name, fn: () => linkWith(p, 'first') })), focus: true,
+      actions: [{ label: 'Back', fn: () => withSession((s) => chooseLine(s, '')) }] });
+  }
+
+  function menuMethods() {
+    if (sign.busy) return say('The operator already has you on hold.');
+    withSession((s) => showMethods(s, ''));
+  }
+
+  // Two cards of one provider (two accounts there) are told apart by number, in link order.
+  function methodLabels(list) {
+    const total = {}, seen = {};
+    for (const m of list) total[methodName(m)] = (total[methodName(m)] || 0) + 1;
+    return list.map((m) => {
+      const name = methodName(m);
+      if (total[name] < 2) return name;
+      seen[name] = (seen[name] || 0) + 1;
+      return `${name} #${seen[name]}`;
+    });
+  }
+
+  function showMethods(s, lead) {
+    const list = s.methods.length ? s.methods : [{ id: '', provider: s.identity.provider, name: '', linkedOn: '', current: true }];
+    const labels = methodLabels(list);
+    const cards = list.map((m, i) => `${labels[i]}${m.linkedOn ? ` (since ${m.linkedOn})` : ''}${m.current ? ', the one in your hand' : ''}`);
+    const one = list.length === 1 ? ' Only one, so it stays: add another, and either will do.' : '';
+    const actions = list.map((m, i) => ({ m, label: labels[i] })).filter(({ m }) => !m.current && m.id)
+      .map(({ m, label }) => ({ label: `Remove ${label}`, fn: () => removeMethod(m, label) }));
+    actions.push({ label: 'Add another sign-in method', fn: addMethod }, { label: 'OK', fn: narrHide });
+    say(`${lead ? `${lead} ` : ''}Sign-in methods. These cards reach your lines: ${cards.join('; ')}.${one}`, { actions, focus: true });
+  }
+
+  function addMethod() {
+    say('Which card should reach these lines too? Sign in with it, and the operator files it with this one.', {
+      cards: providers.map((p) => ({ id: p.id, label: p.name, fn: () => linkWith(p, 'add') })), focus: true,
+      actions: [{ label: 'Never mind', fn: menuMethods }] });
+  }
+
+  // Called straight from the card's click so the popup may open; the ticket is fetched while it does.
+  async function linkWith(p, why) {
+    if (sign.busy) return;
+    const ticket = InnAuth.linkTicket();
+    const pending = InnAuth.popupLogin(p.href, ticket);
+    if (!pending) {
+      say('The pop-up was blocked, so the operator will transfer you in this window. Your disks come back with you if "Remember on this device" is on.', { sticky: true });
+      store.set(LINK_WHY_KEY, why);
+      ticket.then((t) => setTimeout(() => InnAuth.redirectLogin(p.href, t), 900), signFail);
+      return;
+    }
+    ticket.catch(() => { /* the popup reports it */ });
+    sign.busy = true;
+    say(`The operator puts you on hold. Sign in with ${p.name} in the window that opened, so the operator knows both cards are yours.`, {
+      hold: true, actions: [{ label: 'Hang up on the operator', fn: () => pending.cancel() }], focus: true });
+    const r = await pending;
+    sign.busy = false;
+    if (r.link) return redeem(r.link, why);
+    if (r.failed) return signFail(r.failed);
+    if (r.error) return signDeclined(r.error, p.name);
+    say('The sign-in window was closed before you signed in. Nothing was linked.', { bad: true, actions: [{ label: 'OK', fn: narrHide }] });
+  }
+
+  // The proof goes back with this session's token; only the session that asked may use it.
+  async function redeem(proof, why) {
+    try { await InnAuth.redeemLink(proof); } catch (e) {
+      if (e instanceof InnAuth.AuthError && LINK_CODES[e.code]) return signDeclined(e.code, '');
+      return signFail(e);
+    }
+    if (why === 'first') return withSession((s) => chooseLine(s, 'Linked. The operator finds your old lines on the new card.'));
+    return withSession((s) => showMethods(s, 'Linked.'));
+  }
+
+  function removeMethod(m, label) {
+    say(`Remove ${label}? It will no longer reach these lines, and any sign-in with it ends now.`, { focus: true,
+      actions: [{ label: `Remove ${label}`, fn: () => removeNow(m, label) }, { label: 'Keep it', fn: menuMethods }] });
+  }
+
+  async function removeNow(m, label) {
+    try { await InnAuth.unlink(m.id); } catch (e) { return signFail(e); }
+    return withSession((s) => showMethods(s, `${label} was removed.`));
+  }
+
+  // Changing sign-in methods needs a sign-in from the last ten minutes (403 reauth_required).
+  function askAgain() {
+    const id = InnAuth.state.identity;
+    const own = providers.find((p) => id && p.id === id.provider);
+    const list = (own ? [own] : providers).map((p) => ({ id: p.id, label: p.name, fn: () => signIn(p, menuMethods) }));
+    say('For your safety, the operator wants to hear it from your card again before changing sign-in methods (the server answered 403). Sign in once more, then try again.',
+      { bad: true, cards: list, actions: [{ label: 'Not now', fn: narrHide }] });
+  }
+
   // ---- coming back: a page load can carry a redirect login, a saved token or a redial ----
 
   function go() {
@@ -751,8 +877,12 @@ const Adv = (() => {
     adv.went = true;
     const err = InnAuth.takeFragmentError();
     const pend = InnAuth.takePending();
+    const proof = InnAuth.takeLinkProof();
+    const why = store.get(LINK_WHY_KEY) || 'add';
+    store.set(LINK_WHY_KEY, '');
     if (!providers.length) { if (store.get('inn.redial') === '1' && haveDisks()) { store.set('inn.redial', ''); dial(); } return; }
     if (err) { signDeclined(err, ''); return; }
+    if (proof && signedIn()) { InnAuth.fetchSession().then(() => redeem(proof, why), signFail); return; }
     const redial = store.get('inn.redial') === '1' && haveDisks();
     if (redial) store.set('inn.redial', '');
     if (pend) { sign.own = true; signedInNow(SIGN_QUIP); return; }
@@ -856,6 +986,7 @@ const Adv = (() => {
       game.push({ sep: true });
       if (signedIn()) {
         game.push({ label: 'Who\'s playing…', fn: menuLine, off: () => page.started });
+        game.push({ label: 'Sign-in methods…', fn: menuMethods, off: () => page.started });
         game.push({ label: 'Sign out', fn: signOut, off: () => page.started });
       } else game.push({ label: 'Sign in…', fn: () => (wantRuntime(), sign.busy ? say('The operator already has you on hold.') : askWho({ own: false })), off: () => page.started });
     }
