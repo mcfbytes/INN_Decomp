@@ -866,6 +866,8 @@ const Adv = (() => {
         { label: 'Remember on this device', check: () => $('remember').checked, fn: toggleRemember, off: () => !page.persistent },
         { label: 'Animation', check: () => adv.anim, fn: toggleAnim },
         { label: `Music: ${InnMusic.enabled() ? 'on' : 'off'}`, fn: toggleMusic },
+        { label: 'Send anonymous diagnostics', check: () => Telemetry.preference() && !Telemetry.blockedBy(), fn: () => { Telemetry.setPreference(!Telemetry.preference()); showDiagnostics(); },
+          off: () => !!Telemetry.blockedBy() || !Telemetry.available() },
         { sep: true },
         { label: 'Time of day: follow system', radio: () => theme() === 'auto', fn: () => setTheme('auto') },
         { label: 'Time of day: day', radio: () => theme() === 'light', fn: () => setTheme('light') },

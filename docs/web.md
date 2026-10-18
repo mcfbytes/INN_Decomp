@@ -613,11 +613,14 @@ CasinoLand and SierraLand pairs follow the same views, but only the hub's was ex
 (`docs/legal.md` is the checklist). Fields: `siteName`, `operatorName`, `contactEmail`, `privacyEmail` (optional,
 falls back to `contactEmail`), `dmcaAgent` `{name, address, email, phone}`, `governingLaw`, `serverLocation`,
 `effectiveDate`, `termsVersion` (an integer, starting at 1), `minimumAge` (18). Optional extras: `auditRetentionDays`
-(shown in the privacy notice, default 90), `authServer` (overrides `AUTH_SERVER`) and `gameServer`. The game line
+(shown in the privacy notice, default 90), `telemetryRetentionDays` (shown in the privacy notice, default 365, the
+Log Analytics workspace's retention), `siteUrl` (see "Search and link previews"), `telemetry` `{connectionString}`
+(see "Diagnostics"), `authServer` (overrides `AUTH_SERVER`) and `gameServer`. The game line
 the page dials is `gameServer` when set, else the sign-in server's origin as `ws(s)` (innkeeperd serves both on one
 listener; in production Caddy fronts it as `wss://game.<domain>`), else the page's own host on port 2316. A player's
 address under Advanced, or `?com1=`, still wins. `siteName` overrides
-`SITE_NAME` in `page.js`; the title stays "Online world" when neither is set. The CMake copy list puts `site.json`
+`SITE_NAME` in `page.js`; with neither set the title is "Online world: a 1990s online world in your browser" (with
+a name, "<name>: a 1990s online world in your browser"). The CMake copy list puts `site.json`
 and `legal/` next to `inn.html`.
 
 `legal/terms.html`, `privacy.html` and `copyright.html` are standalone documents. `legal/legal.js` fills their
@@ -629,7 +632,9 @@ Where the links are: the Help menu (Terms of Use, Privacy, Copyright & takedown,
 `rel="noopener"`); Help, About (operator, contact, terms version and the links); a small always-visible
 "Terms · Privacy · Copyright" plate in the bottom-right of the landing (the narrator and telephone boxes sit above
 it; on a phone it spans the bottom), also under `?classic=1`; the game view's settings drawer under "Fine print";
-and the age dialog. There is no cookie banner: nothing here uses cookies or tracking.
+and the age dialog. There is no cookie banner: the page sets no cookies, and the browser storage it uses is strictly
+necessary or a preference you set (the privacy notice lists every key). It does send anonymous diagnostics when the
+operator turns them on ("Diagnostics" below); that is not cookie-based and has an off switch.
 
 **The age and terms notice** (`site.js`). On first visit, and again whenever `termsVersion` rises, a centred dialog
 ("Before you go in...") sits over the dimmed scene, which keeps animating unless reduced motion is set. It says the
@@ -651,6 +656,7 @@ python3 tools/mock_auth.py --port 2843 --page-origin http://127.0.0.1:8080 --acc
 # page: http://127.0.0.1:8080/inn.html?auth=http://127.0.0.1:2843&com1=ws://127.0.0.1:2316
 node tools/test_auth.js          # encoder, LSCI.CFG edit, the null persona and the empty account call
 node tools/test_saves.js         # the persona views, the prefetch and the PLAYER.DIR rule
+node tools/test_telemetry.js     # diagnostics: the connection string, the scrubbing and the envelopes
 ```
 
 Flags for the error paths: `--attest-required` makes `POST /auth/accounts` answer 403 `attest_required` until the
@@ -846,7 +852,7 @@ nothing below is needed to run or test locally.
 
 ```
 emcmake cmake -S . -B build-web -G Ninja && cmake --build build-web
-tools/package_web.sh build-web dist --game wss://play.example.net:2316 --auth https://play.example.net
+tools/package_web.sh build-web dist --game wss://play.example.net:2316 --auth https://play.example.net --site-url https://play.example.net
 # or: cmake --build build-web --target package-web   (writes build-web/package; -DINN_PACKAGE_ARGS="--game;wss://...;--auth;https://...")
 tools/test_package.sh build-web      # the guards and the output checks
 ```
@@ -979,10 +985,81 @@ bytes either way, since `auth.js` is in `app.js` in both cases. The wasm is 76% 
 can reach is the 25 KB gzip of everything else, and it takes the first-paint path from 74 KB to 51 KB gzip and
 from 14 requests to 8.
 
+### Search and link previews
+
+Every page carries a `<title>`, a meta description, Open Graph and Twitter `summary_large_image` tags and a
+`theme-color`; the sources hold generic text, and the packager fills in what is site-specific. The text is generic on
+purpose ("a 1990s online world, playable in your browser with your own copy of the original client"): no game,
+company or network names, in metadata too.
+
+- **`siteName`** (site.json) goes into the `<title>`, `og:title`, `og:site_name`, the `<h1>` and the JSON-LD name.
+  Without it the generic fallback stays. `page.js` keeps `document.title` in the same form at run time.
+- **`siteUrl`** (site.json, an origin such as `https://example.org`; `--site-url` overrides it) is optional. When
+  set, the packager writes `<link rel="canonical">` and `og:url` into `inn.html` and the three legal pages, makes
+  `og:image`, `twitter:image` and the JSON-LD `image` and `url` absolute, writes `robots.txt` (allow all, names the
+  sitemap) and `sitemap.xml` (the page and the three legal pages), and takes `noindex` off the legal pages (they
+  are in the sitemap). When unset it writes none of those, leaves the legal pages `noindex`, drops the image tags
+  (a preview image needs an absolute address) and prints a note.
+- **`inn.html`** also has one `<h1>` (visually hidden: the landing's own headings are h2, and the landing is hidden
+  by the adventure layer), a `<noscript>` paragraph saying what the site is, and JSON-LD `WebApplication`
+  (`applicationCategory` `GameApplication`, free, runs in the browser). JSON-LD is data, not script, so the CSP
+  does not block it and the packager neither minifies nor hashes it; `script-src` is unchanged.
+- **`og.png`** is 1200x630, rendered from the landing's own harbour scene (original artwork) by
+  `tools/make_og.mjs` (headless Chromium through playwright-core; the usage is at the top of the file). Re-run it if
+  a scene or the wording changes. The CMake copy list and the packager's allowed list include it; the packager
+  checks its size. It is not content-hashed (link previews need a stable address) and is cached for a day.
+- **Crawlers see `/`** with a 200: `staticwebapp.config.json` rewrites `/` to `/inn.html` (a rewrite, not a
+  redirect), and `canonical` names `/` so `/inn.html` is not a duplicate.
+
+### Diagnostics
+
+`runtime/web/telemetry.js` (no third-party SDK) posts anonymous diagnostics to the operator's Azure Application
+Insights. It builds v2 envelopes itself and sends them to `<IngestionEndpoint>/v2/track` with `fetch` (`keepalive`,
+batched every 5 s or 20 items, `text/plain` so there is no preflight) and `navigator.sendBeacon` on `pagehide` and
+when the tab is hidden. A failed post is dropped. `tools/test_telemetry.js` tests the scrubbing and the envelopes.
+
+**On only when** site.json has `telemetry.connectionString` (`InstrumentationKey=...;IngestionEndpoint=https://...`;
+from the infrastructure's `webTelemetryConnectionString` output; not a secret, since it ships in the page).
+`package_web` checks it and adds its ingestion origin, and nothing broader, to `connect-src`. **Off** when
+`navigator.globalPrivacyControl === true` or `navigator.doNotTrack === '1'`, or when the visitor turns off "Send
+anonymous diagnostics" (Settings drawer under Privacy, and the Options menu; on by default, shown off and disabled
+under GPC or DNT; stored as `inn.diag` in `localStorage`, inside try/catch like the other preferences).
+
+**Sent, and nothing else:**
+
+| What | Envelope | Fields |
+|---|---|---|
+| page view | `PageviewData` | `name` and `url` = the path only (no query string, no hash), `duration` = load time |
+| runtime started | `EventData` `runtime_started` | measurements `runtimeDownloadMs` (request to the wasm arriving) and `runtimeStartMs` |
+| errors | `ExceptionData` | `typeName`, `message` (1 KB at most), `stack` (2 KB at most) |
+| online session | `EventData` `connect` | `result` = `ok`, `failed` or `closed`; `duration` bucket (`under-2s`, `2-5s`, `5-15s`, `15-60s`, `1-5min`, `5-30min`, `over-30min`) |
+| display filter | `EventData` `display_filter` | `filter` (an id from the fixed list), when the visitor picks one |
+| capabilities | `EventData` `capabilities` | `webgl2`, `jspi` (true or false) |
+
+Every envelope has `iKey`, `time`, and the tags `ai.session.id` (random per page load, kept in memory only),
+`ai.operation.name` (the path) and `ai.internal.sdkVersion`. There is no user, device or location tag: Application
+Insights derives browser and OS from the User-Agent header and masks the IP address (coarse location only). No
+cookie is set and no persistent ID exists. Error text is scrubbed first: web addresses become file names (no host,
+directory, query or hash), `ws:`, `wss:` and any other address become `[address]`, bare `host:port` and IPv4
+addresses likewise, digit runs of five or more become `[number]` (account numbers), e-mail addresses become `[email]`,
+and paths on the C: drive become `/c/[path]`. Never sent: account numbers, handles, chat, file names from the
+installation, server addresses. An example envelope:
+
+```
+{"name":"Microsoft.ApplicationInsights.00000000111122223333444444444444.Event","time":"2026-10-18T02:12:43.361Z",
+ "iKey":"00000000-1111-2222-3333-444444444444",
+ "tags":{"ai.session.id":"521bf2e6c3900bf4","ai.operation.name":"/","ai.internal.sdkVersion":"web-diag:1"},
+ "data":{"baseType":"EventData","baseData":{"ver":2,"name":"connect","properties":{"result":"ok","duration":"5-15s"},"measurements":{}}}}
+```
+
+The privacy notice (`legal/privacy.html`) says all of this to visitors. Local test: put a dummy string whose
+`IngestionEndpoint` is `http://127.0.0.1:<port>/` in `site.json` (loopback http is accepted for that) and run a fake
+endpoint that logs POSTs and answers CORS.
+
 ### Output and headers
 
 ```
-inn.html  site.json  staticwebapp.config.json
+inn.html  site.json  staticwebapp.config.json  og.png  [robots.txt  sitemap.xml: with a site address]
 legal/{terms,privacy,copyright}.html
 assets/{app,inn,legal}.<hash>.{js,css,wasm}   assets/scenes/<id>.<hash>.js   assets/music/<id>.<hash>.js
 ```
@@ -990,20 +1067,22 @@ assets/{app,inn,legal}.<hash>.{js,css,wasm}   assets/scenes/<id>.<hash>.js   ass
 `staticwebapp.config.json` (SWA reads it from the root; its limit is 20 KB):
 
 - **Caching.** `/assets/*`: `public, max-age=31536000, immutable` (every name is content-hashed, so a new
-  build is a new URL). `/`, `/inn.html`, `/site.json`, `/legal/*`: `no-cache`. `/` is rewritten to `/inn.html`.
+  build is a new URL). `/`, `/inn.html`, `/site.json`, `/legal/*`, `/robots.txt`, `/sitemap.xml`: `no-cache`; `/og.png`: one day. `/` is rewritten to `/inn.html`.
   There is no `navigationFallback`: the page has no client-side routes, so an unknown path is a plain 404.
 - **MIME.** `.wasm` is `application/wasm`, which `WebAssembly.instantiateStreaming` requires (Emscripten uses
   it; the packaged run logged no fallback warning).
 - **CSP**, in `globalHeaders`: `default-src 'none'`; `script-src 'self' 'wasm-unsafe-eval'` plus the hashes of
   the inline scripts (the theme snippet in `<head>` runs before first paint, so it stays inline);
-  `style-src 'self' https://fonts.googleapis.com` and `font-src https://fonts.gstatic.com` (VT323);
+  `style-src 'self' https://fonts.googleapis.com` and `font-src https://fonts.gstatic.com` (VT323; these two make
+  Google receive the visitor's address, which the privacy notice says);
   `style-src-attr 'unsafe-inline'` (a few `style=` attributes and the page sets inline styles; no inline `<style>`
   remains); `img-src 'self' data: blob:`; `media-src 'self' blob:`; `base-uri 'none'`; `form-action 'none'`;
   `object-src 'none'`; `frame-ancestors 'none'`. No `unsafe-eval`.
 - **`connect-src`** is the part the operator sets: `'self'`, one `--game wss://host:port` per game server (the
   page's default server is described under `site.json` above; a custom address typed under Advanced is blocked
   unless its origin is listed), one `--auth https://host` per sign-in server (`authServer` and `gameServer` in the
-  build's `site.json` are added automatically, and each sign-in origin's `wss://` twin is allowed too), and `--connect-any` for `ws: wss: https:` if you want visitors to type any server.
+  build's `site.json` are added automatically, and each sign-in origin's `wss://` twin is allowed too), the telemetry
+  ingestion origin when `site.json` has a connection string (that origin only), and `--connect-any` for `ws: wss: https:` if you want visitors to type any server.
   The packager warns when `--game` is missing. To change it later, edit the `Content-Security-Policy` string in
   `staticwebapp.config.json` and redeploy.
 - **Other.** `Referrer-Policy: no-referrer`, `X-Content-Type-Options: nosniff`, a `Permissions-Policy` that turns
@@ -1022,8 +1101,10 @@ assets/{app,inn,legal}.<hash>.{js,css,wasm}   assets/scenes/<id>.<hash>.js   ass
 
 1. Build the public hybrid build (no `INN_NATIVE`, no `private/lifted`, no `INN_WEB_PRELOAD_DIR`), then run
    `tools/package_web.sh` with the operator's origins.
-2. Fill in `site.json` in the output (operator name, contact addresses, governing law, effective date, and
-   `authServer` if the sign-in server has its own origin); the legal pages say what is missing.
+2. Fill in `site.json` (operator name, contact addresses, governing law, effective date, `authServer` if the
+   sign-in server has its own origin, `siteUrl`, and `telemetry.connectionString` for diagnostics). Do it in the
+   build's `site.json` before packaging: the CSP is built from it, so a connection string added to the output
+   afterwards is blocked by the browser. The legal pages say what is missing.
 3. Deploy the folder as the app content with no build step, for example
    `swa deploy ./dist --deployment-token <token>` or the GitHub Action with `app_location: dist`,
    `skip_app_build: true`. Nothing here contacts Azure; the deployment is the operator's step.

@@ -19,6 +19,7 @@ const Site = (() => {
     dmcaAgent: { name: '', address: '', email: '', phone: '' },
     governingLaw: '', serverLocation: '', effectiveDate: '', termsVersion: 1, minimumAge: 18,
     auditRetentionDays: 90, authServer: '', gameServer: '',
+    siteUrl: '', telemetry: { connectionString: '' },   // read by the packager and telemetry.js; the page itself ignores siteUrl
   };
   const LINKS = [
     { label: 'Terms of Use', short: 'Terms', href: 'legal/terms.html' },
@@ -40,8 +41,9 @@ const Site = (() => {
 
   function merge(d) {
     if (!d || typeof d !== 'object') return;
-    for (const k of ['siteName', 'operatorName', 'contactEmail', 'privacyEmail', 'governingLaw', 'serverLocation', 'effectiveDate', 'authServer', 'gameServer'])
+    for (const k of ['siteName', 'operatorName', 'contactEmail', 'privacyEmail', 'governingLaw', 'serverLocation', 'effectiveDate', 'authServer', 'gameServer', 'siteUrl'])
       cfg[k] = str(d[k]);
+    if (d.telemetry && typeof d.telemetry === 'object') cfg.telemetry.connectionString = str(d.telemetry.connectionString);
     if (d.dmcaAgent && typeof d.dmcaAgent === 'object')
       for (const k of Object.keys(cfg.dmcaAgent)) cfg.dmcaAgent[k] = str(d.dmcaAgent[k]);
     cfg.termsVersion = posInt(d.termsVersion, DEFAULTS.termsVersion);

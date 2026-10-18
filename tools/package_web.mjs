@@ -4,6 +4,8 @@
 //   --auth <http(s)://host>        sign-in server (repeatable; site.json "authServer" is added too). Its ws(s)
 //                                  twin is allowed as well: the page dials the sign-in server when no game server is set
 //   --connect-any                  CSP lets the page connect to any ws/wss/https origin (operator typed addresses)
+//   --site-url <https://host>      the public address (overrides site.json "siteUrl"): canonical and og:url tags,
+//                                  robots.txt and sitemap.xml are written only when there is one
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -12,11 +14,12 @@ import zlib from 'node:zlib';
 
 const [build, out, esbuild, ...opts] = process.argv.slice(2);
 const games = [], auths = [];
-let connectAny = false;
+let connectAny = false, siteUrlOpt = '';
 for (let i = 0; i < opts.length; i++) {
   if (opts[i] === '--game') games.push(opts[++i]);
   else if (opts[i] === '--auth') auths.push(opts[++i]);
   else if (opts[i] === '--connect-any') connectAny = true;
+  else if (opts[i] === '--site-url') siteUrlOpt = opts[++i] || '';
   else fail(`unknown option ${opts[i]}`);
 }
 function fail(msg) { console.error(`package_web: refused: ${msg}`); process.exit(2); }
@@ -83,6 +86,7 @@ function page(file, prefix) {
   const core = [];
   let firstCore = -1;
   html = html.replace(/<script\b([^>]*)>([\s\S]*?)<\/script>/g, (all, a, body) => {
+    if (/\btype=["']?application\/ld\+json/.test(a)) return all;   // data, not code: the CSP ignores it and it is not minified
     const src = attr(a, 'src');
     if (src === null) {   // inline: minify, allow by hash
       const min = minify(body, 'js').toString('utf8').trimEnd();
@@ -104,16 +108,6 @@ function page(file, prefix) {
   return html;
 }
 
-let main = page('inn.html', '');
-// What the shell wrapped around that tag goes with it, and the page must be the lazy kind.
-main = main.replace(/(<!--(?:(?!-->)[\s\S])*-->\s*)?<template id="?inn-runtime"?>\s*<\/template>/, '');
-if (/<template\b|<script[^>]*\bsrc=["']?inn\.js/.test(main)) fail('inn.html still carries the runtime tag');
-if (!/data-runtime=["']?lazy/.test(main)) fail('inn.html is not a lazy-runtime page (data-runtime)');
-// The asset map goes before the first script (site.js reads it); JSON is data, so the CSP ignores it.
-main = main.replace(/<script\b/, `<script type="application/json" id="inn-assets">${JSON.stringify(assetMap)}</script><script`);
-put('inn.html', main);
-for (const f of ['terms', 'privacy', 'copyright']) put(`legal/${f}.html`, page(`legal/${f}.html`, '../'));
-
 // ---- site.json (unhashed: operators edit it) ----
 let site;
 try { site = JSON.parse(read('site.json').toString('utf8')); } catch (e) { fail(`site.json is not valid JSON: ${e.message}`); }
@@ -123,6 +117,86 @@ if (unset.length) console.warn(`package_web: note: site.json leaves ${unset.join
 if (site.authServer) auths.push(site.authServer);
 if (site.gameServer) games.push(site.gameServer);
 
+// The public address. Without one there is no canonical link, og:url, og:image, robots.txt or sitemap.xml:
+// a preview image needs an absolute address, and a sitemap must name the real host.
+const siteUrl = siteUrlOpt || (typeof site.siteUrl === 'string' ? site.siteUrl.trim() : '');
+const base = siteUrl ? origin(siteUrl, ['https:', 'http:']) : '';
+if (siteUrl && new URL(siteUrl).pathname.replace(/\/$/, '')) fail(`--site-url must be an origin without a path: ${siteUrl}`);
+if (!base) console.warn('package_web: note: no --site-url and no site.json "siteUrl": writing no canonical link, og:url, og:image, robots.txt or sitemap.xml, and the legal pages stay noindex');
+
+// Anonymous diagnostics (runtime/web/telemetry.js): on only with a connection string, and the CSP then names its ingestion origin.
+let telemetryOrigin = '';
+const cs = site.telemetry && typeof site.telemetry.connectionString === 'string' ? site.telemetry.connectionString.trim() : '';
+if (cs) {
+  const parts = Object.fromEntries(cs.split(';').map((p) => [p.slice(0, p.indexOf('=')).trim().toLowerCase(), p.slice(p.indexOf('=') + 1).trim()]));
+  if (!/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(parts.instrumentationkey || '')) fail('site.json telemetry.connectionString has no valid InstrumentationKey');
+  let u;
+  try { u = new URL(parts.ingestionendpoint || ''); } catch { fail('site.json telemetry.connectionString has no valid IngestionEndpoint'); }
+  const loopback = ['127.0.0.1', 'localhost'].includes(u.hostname);
+  if (u.protocol !== 'https:' && !(u.protocol === 'http:' && loopback)) fail('the telemetry IngestionEndpoint must be https (http only for a loopback test address)');
+  telemetryOrigin = u.origin;
+} else console.warn('package_web: note: site.json has no telemetry.connectionString; the page sends no diagnostics');
+
+// ---- search and link-preview tags ----
+const TAGLINE = 'a 1990s online world in your browser';   // the same words page.js puts in document.title
+const esc = (t) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+const siteName = typeof site.siteName === 'string' ? site.siteName.trim() : '';
+// file: 'inn.html' or 'legal/<name>.html'. The sources carry generic text; this fills in the name and the address.
+// The shell arrives already minified by Emscripten (unquoted attributes, reordered), so tags are read with attr().
+function seo(html, file) {
+  const legal = file !== 'inn.html';
+  const url = base + (legal ? `/${file}` : '/');
+  const set = {}, drop = new Set();
+  if (siteName) {
+    const title = legal ? html.match(/<title>([^<]*) · Online world<\/title>/)[1] + ` · ${esc(siteName)}` : `${esc(siteName)}: ${TAGLINE}`;
+    html = html.replace(/<title>[^<]*<\/title>/, `<title>${title}</title>`);
+    set['og:title'] = set['twitter:title'] = title;
+    set['og:site_name'] = esc(siteName);
+    if (!legal) html = html.replace(/(<h1\b[^>]*\bid="?site-title"?[^>]*>)[^<]*/, `$1${title}`);
+  }
+  if (base) {
+    set['og:image'] = set['twitter:image'] = `${base}/og.png`;
+    if (legal) drop.add('robots');   // the legal pages are listed in the sitemap
+  } else for (const k of ['og:image', 'og:image:width', 'og:image:height', 'og:image:alt', 'twitter:image', 'twitter:image:alt']) drop.add(k);
+  html = html.replace(/<meta\b([^>]*)>/g, (all, a) => {
+    const prop = attr(a, 'property'), key = prop ?? attr(a, 'name');
+    if (key === null) return all;
+    if (drop.has(key)) return '';
+    const media = attr(a, 'media');
+    const out = `<meta ${prop !== null ? 'property' : 'name'}="${key}" content="${key in set ? set[key] : (attr(a, 'content') ?? '')}"${media ? ` media="${media}"` : ''}>`;
+    return key === 'description' && base ? `${out}<link rel="canonical" href="${url}"><meta property="og:url" content="${url}">` : out;
+  });
+  // JSON-LD: the name and, with an address, the url and image; without one, no image.
+  html = html.replace(/<script\b([^>]*)>([\s\S]*?)<\/script>/g, (all, a, body) => {
+    if (attr(a, 'type') !== 'application/ld+json') return all;
+    const ld = JSON.parse(body);
+    if (siteName) ld.name = siteName;
+    if (base) { ld.url = url; ld.image = `${base}/og.png`; } else delete ld.image;
+    return `<script type="application/ld+json">${JSON.stringify(ld).replace(/</g, '\\u003c')}</script>`;
+  });
+  return html;
+}
+
+let main = page('inn.html', '');
+// What the shell wrapped around that tag goes with it, and the page must be the lazy kind.
+main = main.replace(/(<!--(?:(?!-->)[\s\S])*-->\s*)?<template id="?inn-runtime"?>\s*<\/template>/, '');
+if (/<template\b|<script[^>]*\bsrc=["']?inn\.js/.test(main)) fail('inn.html still carries the runtime tag');
+if (!/data-runtime=["']?lazy/.test(main)) fail('inn.html is not a lazy-runtime page (data-runtime)');
+// The asset map goes before the first script (site.js reads it); JSON is data, so the CSP ignores it.
+main = main.replace(/<script\b/, `<script type="application/json" id="inn-assets">${JSON.stringify(assetMap)}</script><script`);
+put('inn.html', seo(main, 'inn.html'));
+for (const f of ['terms', 'privacy', 'copyright']) put(`legal/${f}.html`, seo(page(`legal/${f}.html`, '../'), `legal/${f}.html`));
+
+// ---- the preview image, robots.txt and sitemap.xml ----
+const og = read('og.png');
+if (!(og.length > 8 && og.readUInt32BE(16) === 1200 && og.readUInt32BE(20) === 630)) fail('og.png is not a 1200x630 PNG (tools/make_og.mjs writes it)');
+put('og.png', og);
+if (base) {
+  put('robots.txt', `User-agent: *\nAllow: /\n\nSitemap: ${base}/sitemap.xml\n`);
+  const urls = ['/', '/legal/terms.html', '/legal/privacy.html', '/legal/copyright.html'];
+  put('sitemap.xml', `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.map((u) => `  <url><loc>${base}${u}</loc></url>`).join('\n')}\n</urlset>\n`);
+}
+
 // ---- staticwebapp.config.json ----
 const connect = ["'self'"];
 for (const g of games) connect.push(origin(g, ['ws:', 'wss:']));
@@ -130,6 +204,7 @@ for (const a of new Set(auths)) {
   const o = origin(a, ['http:', 'https:']);
   connect.push(o, o.replace(/^http/, 'ws'));
 }
+if (telemetryOrigin) connect.push(telemetryOrigin);
 if (connectAny) connect.push('ws:', 'wss:', 'https:');
 if (!games.length && !connectAny) console.warn('package_web: note: no --game given; the CSP lets the page reach only its own origin' + (auths.length ? ' and the sign-in server (which it then dials)' : ''));
 const csp = [
@@ -151,6 +226,10 @@ const config = {
     { route: '/inn.html', headers: noCache },
     { route: '/site.json', headers: noCache },
     { route: '/legal/*', headers: noCache },
+    { route: '/robots.txt', headers: noCache },
+    { route: '/sitemap.xml', headers: noCache },
+    // Not hashed: link previews need a stable address. A day is long enough to spare the bandwidth, short enough to change it.
+    { route: '/og.png', headers: { 'Cache-Control': 'public, max-age=86400' } },
   ],
   // One page, no client-side routes: an unknown path is a plain 404, so there is no navigationFallback.
   globalHeaders: {
@@ -161,12 +240,12 @@ const config = {
     'X-Content-Type-Options': 'nosniff',
     'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), hid=()',
   },
-  mimeTypes: { '.wasm': 'application/wasm', '.json': 'application/json', '.glsl': 'text/plain' },
+  mimeTypes: { '.wasm': 'application/wasm', '.json': 'application/json', '.glsl': 'text/plain', '.txt': 'text/plain', '.xml': 'application/xml' },
 };
 put('staticwebapp.config.json', JSON.stringify(config, null, 2) + '\n');
 
 // ---- guard: nothing outside the expected list ships, and nothing that looks like game data ----
-const ALLOWED = [/^inn\.html$/, /^site\.json$/, /^staticwebapp\.config\.json$/, /^legal\/(terms|privacy|copyright)\.html$/,
+const ALLOWED = [/^inn\.html$/, /^site\.json$/, /^og\.png$/, /^robots\.txt$/, /^sitemap\.xml$/, /^staticwebapp\.config\.json$/, /^legal\/(terms|privacy|copyright)\.html$/,
   /^assets\/(app|inn|legal)\.[0-9a-f]{10}\.(js|css|wasm)$/, /^assets\/worklet\.[0-9a-f]{10}\.js$/, /^assets\/(scenes|music)\/\w+\.[0-9a-f]{10}\.js$/,
   /^assets\/shaders\/[\w+-]+\.[0-9a-f]{10}\.(glsl|png)$/];
 for (const [p, buf] of emitted) {
