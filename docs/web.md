@@ -210,11 +210,37 @@ repository; this is the browser side.
 - **Which files.** `INN\YSERBIUS\MYCHARS.DAT`, `AUTOMAPS.DAT`, `INN\TWINION\TWINCHAR.DAT`, `AUTOMAPS.DAT`,
   `INN\PLAYER.DIR` and `INN\*.DTA` except `PASS_SET.DTA`, which never leaves the browser; the same two in
   `INN\LL` and `INN\SL` (CasinoLand and SierraLand personas) and the CasinoLand bankroll `INN\LL$$<n>.DAT`
-  (`LLSYSTEM.DAT`, CasinoLand's access password, stays local). The host
+  (`LLSYSTEM.DAT`, CasinoLand's access password, stays local). The 1995 client (2.4.46) adds
+  `INN\CAWDOR\CAWCHAR.DAT`, `AUTOMAPS.DAT` and `CHARKEY.DAT`, and the Arena's personas: `INN\PLAYER.LST`, `INN\<name>.PER`
+  and `INN\ARENA\<name>.LND`. The host
   enforces the same list. Names are matched without regard to case against the drive's own spelling.
   While a signed-in line is dialed `PLAYER.DIR` and the `.DTA` files are that account's own: the drive shows
   one view of them at a time (see "The persona on the drive"). On the way back from the host, a `.DTA` is
   written only when the `PLAYER.DIR` beside it names it.
+- **Two client versions, one set of host paths.** The host's paths are the 1994 client's (2.3.18), so saves made
+  before 2.4.46 stay valid and one persona is one stored copy whichever version made it. The 1995 client runs the
+  Clubhouse from `INN\CC`, so its `PLAYER.DIR` and persona `.DTA` files are there (its installer moves the 2.3
+  ones from `INN` unchanged), and the page maps them in both directions:
+
+  | File | 2.3.18 drive | 2.4.46 drive | Host path |
+  |---|---|---|---|
+  | hub personas | `INN\PLAYER.DIR`, `INN\<name>.DTA` | `INN\CC\PLAYER.DIR`, `INN\CC\<name>.DTA` | `INN\PLAYER.DIR`, `INN\<name>.DTA` |
+  | CasinoLand, SierraLand | `INN\LL\...`, `INN\SL\...` | same | same |
+  | Yserbius, Twinion | `INN\YSERBIUS\MYCHARS.DAT`, `INN\TWINION\TWINCHAR.DAT`, `AUTOMAPS.DAT` | same | same |
+  | Cawdor | none | `INN\CAWDOR\CAWCHAR.DAT`, `AUTOMAPS.DAT`, `CHARKEY.DAT` | same |
+  | Arena | none | `INN\PLAYER.LST`, `INN\<name>.PER`, `INN\ARENA\<name>.LND` | same |
+
+  The layout is read off the drive (`layout` in `saves.js`): it is the 1995 one when `INN\CC\RESOURCE.MAP` exists
+  (the Clubhouse's own resource map; `TSN.PRG`'s `DEFAULT` program does `cd CC`). The 1994 client has no `CC`. It is
+  looked up whenever it is needed, not remembered. On a 1995 drive the copies of `PLAYER.DIR` and `*.DTA` that lie in `INN`
+  are strays and are left alone: not sent, not replaced, not part of a view. `PASS_SET.DTA` never syncs, from `INN`
+  or from `CC`. Cawdor and Arena files are restored only into a drive that already has the `CAWDOR` or `ARENA` folder, so a
+  2.3.18 drive gets neither folder; the stash of the persona views (below) is laid out by host path, whatever the layout.
+  `CHARKEY.DAT` is rewritten by Cawdor at every start (6.5 KB after years of play) and its role is not known; it is
+  synced with the characters. The Arena's `PLAYER.LST` was seen only as 5 bytes for one player (so probably one
+  name per line, like `PLAYER.DIR`); a restore treats it as a list of names when it is plain text and otherwise
+  holds nothing back. An account with a few personas in each land stays well within the host's 64 files; twelve
+  Arena personas (the Select Player screen's most faces) would be 25 files of the 64.
 - **When.** The host sends a manifest as soon as the line has logged on (`LoginAccepted`); before that it
   answers `not_logged_on`. For each path, comparing the local SHA-256 with the hash and version last
   synced (kept in `localStorage` per account):
@@ -548,7 +574,8 @@ positions, 65 bytes plus the town. The same pair of files exists in `INN\LL` and
 
 **One view of the persona files at a time.** One INN account can hold several personas, and the drive is one
 install shared by every account that signs in on this browser, so the page keeps only one view's `PLAYER.DIR` and
-persona `.DTA` files (the hub's, CasinoLand's and SierraLand's; never `PASS_SET.DTA`) in the places the client reads.
+persona `.DTA` files (the hub's, CasinoLand's and SierraLand's; never `PASS_SET.DTA`) and the Arena's `PLAYER.LST`,
+`.PER` and `.LND` files in the places the client reads.
 A *view* is `own` (whatever the install came with, say the zip's Guybrush) or an account number. The other views
 wait in `INNVIEWS/<view>/INN/...` at the top of the drive, with their modification times, and
 `INNVIEWS/ACTIVE` names the view on the drive (missing means `own`). `InnSaves.useView(view)` (`saves.js`) stashes
@@ -568,7 +595,8 @@ changed file), and the client's 40/4 sets the account's persona name there.
 **PLAYER.DIR is authoritative.** The save channel has no delete. If the player deletes a persona in the client
 (Select Player, Delete), the client rewrites `PLAYER.DIR` without the name and removes the `.DTA`, but the host still
 holds the `.DTA`. A `.DTA` therefore comes back from the host (the HTTP prefetch or the manifest) only when the
-`PLAYER.DIR` on the drive names it (`mayRestore`; `PLAYER.DIR` itself is handled first). The new, shorter
+`PLAYER.DIR` on the drive names it (`mayRestore`; `PLAYER.DIR` itself is handled first). The Arena's `.PER` and
+`.LND` files follow `INN\PLAYER.LST` the same way. The new, shorter
 `PLAYER.DIR` is uploaded as the account's current one. A stray `.DTA` that is already on the drive still follows the
 ordinary rules, and the host keeps its history for a restore by the operator.
 

@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Checks for the signed-in line's part of runtime/web/saves.js: one view of the persona files on the drive at
 // a time (an account's, or the install's own), the HTTP prefetch, and PLAYER.DIR as the authority for which
-// .DTA files come back. Runs against a small in-memory drive and a scripted host.
+// .DTA files come back; and the 1995 client's layout (the Clubhouse in INN\CC, Cawdor, the Arena) beside the
+// 1994 one. Runs against a small in-memory drive and a scripted host.
 // Run: node tools/test_saves.js
 'use strict';
 const assert = require('node:assert/strict');
@@ -182,5 +183,140 @@ const wait = () => new Promise((r) => setTimeout(r, 50));
   assert.deepEqual(await InnSaves.prefetch(100009, fresh, async () => { throw new Error('unused'); }), { restored: 1, failed: 0 });
   assert.equal(get('INN/YSERBIUS/MYCHARS.DAT'), 'mine');
   assert.equal(get('INN/YSERBIUS/MYCHARS.OLD'), 'starter');
+
+  // ---- the two client layouts: 1994 (2.3.18) keeps the hub's personas in INN, 1995 (2.4.46) in INN\CC ----
+  const drive = (list) => { files.clear(); store.clear(); for (const [p, d] of Object.entries(list)) put(p, d); };
+  const CC_DRIVE = { 'INN/CC/RESOURCE.MAP': 'map', 'INN/CC/PLAYER.DIR': 'Zelda\r\n', 'INN/CC/ZELDA.DTA': 'zelda looks', 'INN/CC/PASS_SET.DTA': 'secret',
+    'INN/PLAYER.DIR': 'Stray\r\n', 'INN/STRAY.DTA': 'stray looks', 'INN/PASS_SET.DTA': 'secret too',
+    'INN/YSERBIUS/MYCHARS.DAT': 'hero', 'INN/CAWDOR/CAWCHAR.DAT': 'caw', 'INN/CAWDOR/AUTOMAPS.DAT': 'caw maps', 'INN/CAWDOR/CHARKEY.DAT': 'key',
+    'INN/CAWDOR/CAWCHAR.NEW': 'work file', 'INN/PLAYER.LST': 'Bob\r\n', 'INN/BOB.PER': 'bob per', 'INN/ARENA/BOB.LND': 'bob lnd' };
+  const uploads = () => Object.fromEntries(sent.filter((m) => m.op === 'put').map((m) => [m.path, Buffer.from(m.data, 'base64').toString()]));
+  const hostFiles = {};
+  const hostReply = (m) => {
+    if (m.op === 'get') return { id: m.id, op: 'file', path: m.path, data: b64(hostFiles[m.path]), hash: hashOf(hostFiles[m.path]), version: 1, mtime: 1000 };
+    if (m.op === 'put') return { id: m.id, op: 'stored', version: 1, hash: hashOf(m.data) };
+    throw new Error(`unexpected ${m.op}`);
+  };
+  const sync = async (account, held) => {
+    reset();
+    reply = hostReply;
+    InnSaves.onControl(JSON.stringify({ op: 'manifest', account, files: entries(held, 1) }));
+    await wait(); await wait();
+  };
+
+  // The path mapping, both ways.
+  drive(CC_DRIVE);
+  assert.equal(InnSaves.serverPath('INN\\CC\\PLAYER.DIR'), 'INN\\PLAYER.DIR');
+  assert.equal(InnSaves.serverPath('c:/inn/cc/zelda.dta'.slice(2)), 'INN\\ZELDA.DTA');
+  assert.equal(InnSaves.serverPath('INN\\CC\\PASS_SET.DTA'), null, 'the password file never syncs from CC');
+  assert.equal(InnSaves.serverPath('INN\\PASS_SET.DTA'), null);
+  assert.equal(InnSaves.serverPath('INN\\PLAYER.DIR'), null, 'a root copy on a 1995 drive is a stray');
+  assert.equal(InnSaves.serverPath('INN\\STRAY.DTA'), null);
+  assert.equal(InnSaves.serverPath('INN\\CC\\RESOURCE.MAP'), null);
+  assert.equal(InnSaves.serverPath('INN\\LL\\LUCKY.DTA'), 'INN\\LL\\LUCKY.DTA', 'CasinoLand stays where it was');
+  assert.equal(InnSaves.serverPath('INN\\SL\\PLAYER.DIR'), 'INN\\SL\\PLAYER.DIR');
+  assert.equal(InnSaves.serverPath('INN\\BOB.PER'), 'INN\\BOB.PER');
+  assert.equal(InnSaves.serverPath('INN\\ARENA\\BOB.LND'), 'INN\\ARENA\\BOB.LND');
+  assert.equal(InnSaves.serverPath('INN\\ARENA\\BOB.PER'), null);
+  assert.equal(InnSaves.serverPath('INN\\CAWDOR\\CHARKEY.DAT'), 'INN\\CAWDOR\\CHARKEY.DAT');
+  assert.equal(InnSaves.serverPath('INN\\CAWDOR\\CAWCHAR.NEW'), null);
+  assert.equal(InnSaves.drivePath('INN\\PLAYER.DIR'), 'INN\\CC\\PLAYER.DIR');
+  assert.equal(InnSaves.drivePath('INN\\ZELDA.DTA'), 'INN\\CC\\ZELDA.DTA');
+  assert.equal(InnSaves.drivePath('INN\\LL\\ZELDA.DTA'), 'INN\\LL\\ZELDA.DTA');
+  assert.equal(InnSaves.drivePath('INN\\BOB.PER'), 'INN\\BOB.PER');
+  drive({ 'INN/PLAYER.DIR': 'Zelda\r\n', 'INN/CC2/RESOURCE.MAP': 'not the clubhouse' });
+  assert.equal(InnSaves.serverPath('INN\\PLAYER.DIR'), 'INN\\PLAYER.DIR', 'a 1994 drive has its personas in INN');
+  assert.equal(InnSaves.serverPath('INN\\CC\\PLAYER.DIR'), null);
+  assert.equal(InnSaves.drivePath('INN\\PLAYER.DIR'), 'INN\\PLAYER.DIR');
+
+  // A 1995 drive uploads its CC personas under the host's paths, with Cawdor and the Arena, and nothing else.
+  drive(CC_DRIVE);
+  InnSaves.useView(200001);
+  assert.equal(get('INN/PLAYER.DIR'), 'Stray\r\n', 'strays are not part of any view');
+  assert.equal(get('INN/CC/PLAYER.DIR'), undefined);
+  assert.equal(get('INN/CC/PASS_SET.DTA'), 'secret', 'the password file stays in CC');
+  assert.equal(get('INN/PLAYER.LST'), undefined, 'the Arena\'s list is part of the view');
+  assert.equal(get('INN/BOB.PER'), undefined);
+  assert.equal(get('INN/ARENA/BOB.LND'), undefined);
+  assert.equal(get('INN/CAWDOR/CAWCHAR.DAT'), 'caw', 'the characters are not part of the view');
+  assert.equal(get('INNVIEWS/own/INN/ZELDA.DTA'), 'zelda looks', 'the stash is laid out by the host\'s paths');
+  assert.equal(get('INNVIEWS/own/INN/ARENA/BOB.LND'), 'bob lnd');
+  assert.equal(InnSaves.useView('own'), true);
+  assert.equal(get('INN/CC/ZELDA.DTA'), 'zelda looks', 'back in CC, not in INN');
+  assert.equal(get('INN/CC/PLAYER.DIR'), 'Zelda\r\n');
+  assert.equal(get('INN/ZELDA.DTA'), undefined);
+  assert.equal(get('INN/ARENA/BOB.LND'), 'bob lnd');
+  assert.equal(get('INN/BOB.PER'), 'bob per');
+  assert.equal(get('INN/PLAYER.LST'), 'Bob\r\n');
+  InnSaves.useView(200001);
+  put('INN/CC/PLAYER.DIR', 'Zelda\r\n');
+  put('INN/CC/ZELDA.DTA', 'zelda looks');
+  put('INN/PLAYER.LST', 'Bob\r\n');
+  put('INN/BOB.PER', 'bob per');
+  put('INN/ARENA/BOB.LND', 'bob lnd');
+  await sync(200001, {});
+  assert.deepEqual(uploads(), {
+    'INN\\PLAYER.DIR': 'Zelda\r\n', 'INN\\ZELDA.DTA': 'zelda looks', 'INN\\CAWDOR\\CAWCHAR.DAT': 'caw', 'INN\\CAWDOR\\AUTOMAPS.DAT': 'caw maps',
+    'INN\\CAWDOR\\CHARKEY.DAT': 'key', 'INN\\YSERBIUS\\MYCHARS.DAT': 'hero', 'INN\\PLAYER.LST': 'Bob\r\n', 'INN\\BOB.PER': 'bob per', 'INN\\ARENA\\BOB.LND': 'bob lnd',
+  }, 'no strays, no PASS_SET.DTA from CC or INN, no work files');
+  Object.assign(hostFiles, uploads());
+
+  // The persona made on 1995 comes to a 1994 drive in INN; the folders it does not have are not made.
+  drive({ 'INN/PASS_SET.DTA': 'secret' });
+  InnSaves.useView(200001);
+  await sync(200001, hostFiles);
+  assert.equal(get('INN/PLAYER.DIR'), 'Zelda\r\n');
+  assert.equal(get('INN/ZELDA.DTA'), 'zelda looks');
+  assert.equal(get('INN/YSERBIUS/MYCHARS.DAT'), 'hero');
+  assert.equal(get('INN/PASS_SET.DTA'), 'secret');
+  assert.deepEqual(snapshot().filter((f) => /CAWDOR|ARENA|\/CC\/|PLAYER\.LST|\.PER$/.test(f)), [], 'no Cawdor, Arena or CC on a 1994 drive');
+  assert.deepEqual(sent.filter((m) => m.op === 'put'), [], 'and nothing was uploaded over the host');
+
+  // A persona made on 1994 comes to a 1995 drive in CC.
+  const hostFrom94 = { 'INN\\PLAYER.DIR': 'Link\r\n', 'INN\\LINK.DTA': 'link looks', 'INN\\LL\\PLAYER.DIR': 'Link\r\n', 'INN\\LL\\LINK.DTA': 'link at the casino' };
+  for (const k of Object.keys(hostFiles)) delete hostFiles[k];
+  Object.assign(hostFiles, hostFrom94);
+  drive({ 'INN/CC/RESOURCE.MAP': 'map', 'INN/CC/PLAYER.DIR': '', 'INN/PLAYER.DIR': 'Stray\r\n', 'INN/STRAY.DTA': 'stray looks' });
+  InnSaves.useView(200002);
+  await sync(200002, hostFrom94);
+  assert.equal(get('INN/CC/PLAYER.DIR'), 'Link\r\n');
+  assert.equal(get('INN/CC/LINK.DTA'), 'link looks');
+  assert.equal(get('INN/LL/LINK.DTA'), 'link at the casino');
+  assert.equal(get('INN/LINK.DTA'), undefined, 'not in INN');
+  assert.equal(get('INN/PLAYER.DIR'), 'Stray\r\n', 'the stray is left as it was');
+  assert.deepEqual(sent.filter((m) => m.op === 'put'), []);
+
+  // Cawdor and Arena files go to a 1995 drive that has those folders, but not on a 1995 drive without them.
+  for (const k of Object.keys(hostFiles)) delete hostFiles[k];
+  Object.assign(hostFiles, { 'INN\\CAWDOR\\CHARKEY.DAT': 'key', 'INN\\PLAYER.LST': 'Bob\r\n', 'INN\\BOB.PER': 'p', 'INN\\ARENA\\BOB.LND': 'l',
+    'INN\\GONE.PER': 'deleted in the client', 'INN\\ARENA\\GONE.LND': 'deleted too' });
+  drive({ 'INN/CC/RESOURCE.MAP': 'map', 'INN/CAWDOR/HELP.DAT': 'h', 'INN/ARENA/GAMELIST.CFG': 'g' });
+  InnSaves.useView(200003);
+  await sync(200003, hostFiles);
+  assert.equal(get('INN/CAWDOR/CHARKEY.DAT'), 'key');
+  assert.equal(get('INN/PLAYER.LST'), 'Bob\r\n');
+  assert.equal(get('INN/BOB.PER'), 'p');
+  assert.equal(get('INN/ARENA/BOB.LND'), 'l');
+  assert.equal(get('INN/GONE.PER'), undefined, 'PLAYER.LST is authoritative for the Arena\'s personas');
+  assert.equal(get('INN/ARENA/GONE.LND'), undefined);
+  drive({ 'INN/CC/RESOURCE.MAP': 'map' });
+  InnSaves.useView(200003);
+  await sync(200003, hostFiles);
+  assert.deepEqual(snapshot().filter((f) => /CAWDOR|ARENA|\.PER$|PLAYER\.LST/.test(f)), [], 'folders the drive lacks are not made');
+  // The list's format is not known to be text: if it is not, nothing is held back.
+  hostFiles['INN\\PLAYER.LST'] = '\u0001\u0000bob';
+  drive({ 'INN/CC/RESOURCE.MAP': 'map', 'INN/ARENA/GAMELIST.CFG': 'g' });
+  InnSaves.useView(200004);
+  await sync(200004, hostFiles);
+  assert.equal(get('INN/GONE.PER'), 'deleted in the client');
+
+  // Prefetch maps the same way: the listing's INN\PLAYER.DIR lands in CC.
+  drive({ 'INN/CC/RESOURCE.MAP': 'map' });
+  InnSaves.useView(200005);
+  const l5 = { 'INN\\PLAYER.DIR': 'Elaine\r\n', 'INN\\ELAINE.DTA': 'looks', 'INN\\PASS_SET.DTA': 'x' };
+  assert.deepEqual(await InnSaves.prefetch(200005, { files: entries(l5, 2).map((e, i) => ({ ...e, data: b64(Object.values(l5)[i]) })) }, async () => { throw new Error('unused'); }), { restored: 2, failed: 0 });
+  assert.equal(get('INN/CC/ELAINE.DTA'), 'looks');
+  assert.equal(get('INN/CC/PLAYER.DIR'), 'Elaine\r\n');
+  assert.equal(get('INN/ELAINE.DTA'), undefined);
   console.log('test_saves: ok');
 })().catch((e) => { console.error(e); process.exit(1); });

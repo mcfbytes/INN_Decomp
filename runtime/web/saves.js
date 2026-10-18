@@ -1,9 +1,11 @@
 // Server-side game saves for the browser build (docs/web.md "Game saves", host side in the sibling
 // project's docs/server/saves.md). Characters, automaps and persona files in the C: drive are kept per
-// account on the host over the same WebSocket as COM1, as JSON text frames. The runtime hands those
+// account on the host over the same WebSocket as COM1, as JSON text frames. Both client versions are served:
+// the host's paths are the 1994 client's (2.3.18), and on a 1995 (2.4.46) drive the Clubhouse's persona
+// files, which that client keeps in INN\CC, are mapped to and from them (see layout, serverPath, drivePath). The runtime hands those
 // frames to Module.onControlText and sends them with Module.sendControl; closing a file the program
 // wrote arrives as Module.onFileClosed. Each account (and the install's own number) has its own view of the
-// persona files on the drive, PLAYER.DIR and the .DTA files: see useView.
+// persona files on the drive (PLAYER.DIR, PLAYER.LST, the .DTA, .PER and .LND files): see useView.
 'use strict';
 
 const InnSaves = (() => {
@@ -16,15 +18,22 @@ const InnSaves = (() => {
   const STATE_PREFIX = 'inn.saves.';
   const FIXED = ['INN\\YSERBIUS\\MYCHARS.DAT', 'INN\\YSERBIUS\\AUTOMAPS.DAT',
     'INN\\TWINION\\TWINCHAR.DAT', 'INN\\TWINION\\AUTOMAPS.DAT', 'INN\\PLAYER.DIR',
-    'INN\\LL\\PLAYER.DIR', 'INN\\SL\\PLAYER.DIR'];
-  // Personas: the hub's, CasinoLand's (LL) and SierraLand's (SL); the CasinoLand bankroll.
-  const PERSONA = /^INN\\(?:LL\\|SL\\)?([A-Z0-9_$-]{1,8})\.DTA$/;
+    'INN\\LL\\PLAYER.DIR', 'INN\\SL\\PLAYER.DIR',
+    // Only the 1995 client has these: Cawdor, and the Arena's list of its personas.
+    'INN\\CAWDOR\\CAWCHAR.DAT', 'INN\\CAWDOR\\AUTOMAPS.DAT', 'INN\\CAWDOR\\CHARKEY.DAT', 'INN\\PLAYER.LST'];
+  // Personas: the hub's, CasinoLand's (LL) and SierraLand's (SL) .DTA; the Arena's INN\<stem>.PER and
+  // INN\ARENA\<stem>.LND; the CasinoLand bankroll.
+  const STEM = '([A-Z0-9_$-]{1,8})';
+  const PERSONA = new RegExp(`^INN\\\\(?:(?:LL\\\\|SL\\\\)?${STEM}\\.DTA|${STEM}\\.PER|ARENA\\\\${STEM}\\.LND)$`);
   const BANKROLL = /^INN\\LL\$\$[0-9]{1,4}\.DAT$/;
   const PASSWORD_STEM = 'PASS_SET';
   // The drive's persona files belong to one view at a time: the install's own, or one signed-in account's.
   // The other views' files wait in VIEW_DIR/<view>/..., and VIEW_DIR/ACTIVE names the view on the drive.
   const VIEW_DIR = 'INNVIEWS';
-  const PERSONA_DIRS = ['INN', 'INN\\LL', 'INN\\SL'];
+  // The 1995 client runs the Clubhouse from INN\CC, so there (and not in INN) are its PLAYER.DIR and .DTA files;
+  // everything else sits where the 1994 client keeps it. The host has one path per file, the 1994 one.
+  const CLUBHOUSE_DIR = 'INN\\CC';
+  const HUB_PERSONA = /^INN\\(PLAYER\.DIR|[A-Z0-9_$-]{1,8}\.DTA)$/;
 
   let env = null;            // { fs, drive, log, notify, persist, send, status, saved }
   let account = null;        // set by the first manifest of this connection
@@ -41,7 +50,8 @@ const InnSaves = (() => {
 
   // ---- helpers ----
 
-  // The server's allowlist, mirrored so the page does not offer what the host would refuse.
+  // The server's allowlist, mirrored so the page does not offer what the host would refuse. Takes the host's
+  // (1994) form of a path.
   function canonical(raw) {
     const path = raw.replace(/\//g, '\\').toUpperCase().replace(/^\\/, '');
     if (FIXED.includes(path) || BANKROLL.test(path)) return path;
@@ -49,25 +59,60 @@ const InnSaves = (() => {
     return m && m[1] !== PASSWORD_STEM ? path : null;
   }
 
-  // The persona names a PLAYER.DIR lists (the first 8 characters, upper case: the client's file stems). The
-  // list is authoritative for what comes back from the host: a persona the player deleted in the client is
-  // gone from the list, and its .DTA must not return from the host's copy.
-  function listedStems(dirRel) {
-    const dir = readLocal(`${dirRel}\\PLAYER.DIR`);
+  // The drive's layout: 'cc' for the 1995 client (2.4.46), whose Clubhouse runs from INN\CC and so has its own
+  // RESOURCE.MAP there (TSN.PRG's DEFAULT block does `cd CC`); the 1994 client (2.3.18) has no such folder and
+  // runs it from INN. Looked up each time rather than remembered: it is a few directory reads, and an early
+  // answer on a drive that was not loaded yet would stick.
+  const layout = () => (hostPath(`${CLUBHOUSE_DIR}\\RESOURCE.MAP`) ? 'cc' : 'classic');
+
+  // A drive path (as the client or the sweep names it) to the host's path for the file, or null if it is not a
+  // save file. On a 'cc' drive INN\CC\PLAYER.DIR and INN\CC\<name>.DTA are the hub's persona files; copies of
+  // them left in INN are strays (the installer moves them to CC) and are neither sent nor replaced.
+  function serverPath(raw) {
+    const path = raw.replace(/\//g, '\\').toUpperCase().replace(/^\\/, '');
+    if (layout() !== 'cc') return canonical(path);
+    const m = /^INN\\CC\\([^\\]+)$/.exec(path);
+    if (m) return /^(?:PLAYER\.DIR|.*\.DTA)$/.test(m[1]) ? canonical(`INN\\${m[1]}`) : null;
+    return HUB_PERSONA.test(path) ? null : canonical(path);
+  }
+
+  // The reverse: where the host's path lives on this drive.
+  function drivePath(path) {
+    const m = HUB_PERSONA.exec(path);
+    return m && layout() === 'cc' ? `${CLUBHOUSE_DIR}\\${m[1]}` : path;
+  }
+
+  // The folders that hold save files on this drive, for the sweep and the views.
+  const saveDirs = () => [...new Set([layout() === 'cc' ? CLUBHOUSE_DIR : 'INN', 'INN', 'INN\\LL', 'INN\\SL', 'INN\\ARENA'])];
+
+  // The persona names a list file (PLAYER.DIR, or the Arena's PLAYER.LST) holds: the first 8 characters of each
+  // line, upper case (the client's file stems). The list is authoritative for what comes back from the host: a
+  // persona the player deleted in the client is gone from the list, and its files must not return from the
+  // host's copy. A missing list names nobody. With `lenient`, a file that is not plain text gives null (the
+  // list's format is not known to be text; everything may then come back).
+  function listedStems(listPath, lenient) {
+    const dir = readLocal(listPath);
     if (!dir) return new Set();
+    if (lenient && dir.data.some((b) => b !== 9 && b !== 10 && b !== 13 && (b < 32 || b > 126))) return null;
     const names = new TextDecoder('latin1').decode(dir.data).split(/\r?\n/).map((n) => n.trim()).filter(Boolean);
     return new Set(names.map((n) => n.slice(0, 8).toUpperCase()));
   }
 
-  // True for a persona file the host may put back: PLAYER.DIR itself, or a .DTA its PLAYER.DIR names.
+  // True for a file the host may put back: a persona file only if the list beside it names it (PLAYER.DIR for
+  // .DTA, INN\PLAYER.LST for .PER and .LND), and a Cawdor or Arena file only into a drive that has that folder
+  // (the 1994 client has neither, and the page does not make folders for them).
   function mayRestore(path) {
+    if (/^INN\\CAWDOR\\/.test(path) && !hostPath('INN\\CAWDOR')) return false;
+    const arena = path === 'INN\\PLAYER.LST' || /^INN\\ARENA\\|\.PER$/.test(path);
+    if (arena && !hostPath('INN\\ARENA')) return false;
     const m = PERSONA.exec(path);
     if (!m) return true;
-    return listedStems(path.slice(0, path.lastIndexOf('\\'))).has(m[1]);
+    const stems = arena ? listedStems('INN\\PLAYER.LST', true) : listedStems(`${path.slice(0, path.lastIndexOf('\\'))}\\PLAYER.DIR`);
+    return !stems || stems.has(m[1] || m[2] || m[3]);
   }
 
-  // PLAYER.DIR first, so the lists are in place when the .DTA files are judged.
-  const dirsFirst = (paths) => [...paths].sort((a, b) => Number(/PLAYER\.DIR$/.test(b)) - Number(/PLAYER\.DIR$/.test(a)));
+  // The lists first, so they are in place when the persona files are judged.
+  const dirsFirst = (paths) => [...paths].sort((a, b) => Number(/PLAYER\.(?:DIR|LST)$/.test(b)) - Number(/PLAYER\.(?:DIR|LST)$/.test(a)));
 
   function toBase64(bytes) {
     let text = '';
@@ -136,8 +181,9 @@ const InnSaves = (() => {
     return dir;
   }
 
+  // The local file functions take the host's path and find the file on the drive (drivePath).
   function readLocal(rel) {
-    const path = hostPath(rel);
+    const path = hostPath(drivePath(rel));
     if (!path) return null;
     try {
       const st = env.fs.stat(path);
@@ -147,7 +193,9 @@ const InnSaves = (() => {
     } catch { return null; }
   }
 
-  function writeLocal(rel, data, mtime) {
+  function writeLocal(rel, data, mtime) { writeDrive(drivePath(rel), data, mtime); }
+
+  function writeDrive(rel, data, mtime) {
     let path = hostPath(rel);
     if (!path) {
       const parts = rel.split('\\');
@@ -160,14 +208,14 @@ const InnSaves = (() => {
     env.fs.utime(path, mtime, mtime);
   }
 
-  // Every allowlisted file the drive has now.
+  // Every allowlisted file the drive has now, by the host's path.
   function localPaths() {
-    const found = FIXED.filter((rel) => hostPath(rel));
-    for (const dir of ['INN', 'INN\\LL', 'INN\\SL']) {
+    const found = FIXED.filter((rel) => hostPath(drivePath(rel)));
+    for (const dir of saveDirs()) {
       const host = hostPath(dir);
       if (!host) continue;
       for (const name of env.fs.readdir(host)) {
-        const rel = canonical(`${dir}\\${name}`);
+        const rel = serverPath(`${dir}\\${name}`);
         if (rel && !found.includes(rel)) found.push(rel);
       }
     }
@@ -306,7 +354,7 @@ const InnSaves = (() => {
 
   // The program closed a file it wrote, or renamed one onto this DOS path.
   function onFileClosed(dosPath) {
-    const rel = canonical(dosPath.replace(/^[A-Za-z]:/, ''));
+    const rel = serverPath(dosPath.replace(/^[A-Za-z]:/, ''));
     if (rel && account !== null) schedule(rel);
   }
 
@@ -373,25 +421,29 @@ const InnSaves = (() => {
 
   // ---- one view of the persona files at a time ----
 
-  // The client's Select Player lists whatever PLAYER.DIR names in the install, so each signed-in account sees
-  // its own personas, and "my own number" the install's, by keeping only one view's persona files (PLAYER.DIR
-  // and the .DTA files of the hub, CasinoLand and SierraLand; never PASS_SET.DTA) on the drive. The others wait
-  // in INNVIEWS/<view>/, moved there whole with their modification times and never uploaded; INNVIEWS/ACTIVE
-  // names the view on the drive (missing means the install's own, "own"). A view is "own" or an account number.
-  // Returns true when the drive changed (the caller persists it). A new account's view is empty, so Select
-  // Player offers only Create.
+  // The client's Select Player lists whatever PLAYER.DIR names in the install (the Arena's, PLAYER.LST), so each
+  // signed-in account sees its own personas, and "my own number" the install's, by keeping only one view's
+  // persona files on the drive: PLAYER.DIR and the .DTA files of the hub, CasinoLand and SierraLand, and the
+  // Arena's PLAYER.LST, .PER and .LND files; never PASS_SET.DTA. The others wait in INNVIEWS/<view>/, moved
+  // there whole with their modification times and never uploaded; INNVIEWS/ACTIVE names the view on the drive
+  // (missing means the install's own, "own"). A view is "own" or an account number. The stash is laid out by the
+  // host's paths (INNVIEWS/<view>/INN/ZELDA.DTA even for a 1995 drive, where the file lives in INN\CC), so it
+  // does not depend on the layout. Returns true when the drive changed (the caller persists it). A new
+  // account's view is empty, so Select Player offers only Create.
   function activeView() {
     try { return new TextDecoder().decode(env.fs.readFile(`${env.drive}/${VIEW_DIR}/ACTIVE`)).trim() || 'own'; } catch { return 'own'; }
   }
 
+  const isViewFile = (path) => !!path && (/\\PLAYER\.(?:DIR|LST)$/.test(path) || PERSONA.test(path));
+
   function personaFiles() {
     const found = [];
-    for (const dir of PERSONA_DIRS) {
+    for (const dir of saveDirs()) {
       const host = hostPath(dir);
       if (!host) continue;
       for (const name of env.fs.readdir(host)) {
-        const rel = canonical(`${dir}\\${name}`);
-        if (rel && (rel.endsWith('\\PLAYER.DIR') || PERSONA.test(rel))) found.push({ dir, name, from: `${host}/${name}` });
+        const path = serverPath(`${dir}\\${name}`);
+        if (isViewFile(path)) found.push({ path, from: `${host}/${name}` });
       }
     }
     return found;
@@ -411,15 +463,16 @@ const InnSaves = (() => {
     const now = activeView();
     if (now === view) return false;
     const stash = `${env.drive}/${VIEW_DIR}`;
-    for (const f of personaFiles()) moveFile(f.from, `${stash}/${now}/${f.dir.replace(/\\/g, '/')}/${f.name}`);
+    for (const f of personaFiles()) moveFile(f.from, `${stash}/${now}/${f.path.replace(/\\/g, '/')}`);
     const back = `${stash}/${view}`;
-    for (const dir of PERSONA_DIRS) {
+    for (const dir of ['INN', 'INN\\LL', 'INN\\SL', 'INN\\ARENA']) {
       const sub = `${back}/${dir.replace(/\\/g, '/')}`;
       let names = [];
       try { names = env.fs.readdir(sub).filter((n) => n !== '.' && n !== '..'); } catch { names = []; }
-      const into = hostPath(dir) || `${env.drive}/${dir.replace(/\\/g, '/')}`;
       for (const name of names) {
         if (env.fs.isDir(env.fs.stat(`${sub}/${name}`).mode)) continue; // INN\\LL is its own entry
+        const to = drivePath(`${dir}\\${name}`);
+        const into = hostPath(to.slice(0, to.lastIndexOf('\\'))) || `${env.drive}/${to.slice(0, to.lastIndexOf('\\')).replace(/\\/g, '/')}`;
         moveFile(`${sub}/${name}`, `${into}/${name}`);
       }
     }
@@ -461,7 +514,7 @@ const InnSaves = (() => {
         const full = typeof entry.data === 'string' ? entry : await fetchOne(path);
         const data = fromBase64(full.data);
         if (sha256Hex(data) !== entry.hash) throw new Error('the download does not match its hash');
-        if (unrelated) writeLocal(path.replace(/\.[^.\\]*$/, '.OLD'), local.data, local.mtime);
+        if (unrelated) writeDrive(drivePath(path).replace(/\.[^.\\]*$/, '.OLD'), local.data, local.mtime);
         writeLocal(path, data, entry.mtime);
         synced[path] = { version: entry.version, hash: entry.hash };
         result.restored++;
@@ -475,6 +528,6 @@ const InnSaves = (() => {
     return result;
   }
 
-  return { init, reset, config, useView, activeView, prefetch, onControl, onFileClosed, flushAll, flushFinal, sweep, sha256Hex, canonical, lastSaved: () => lastSaved };
+  return { init, reset, config, useView, activeView, prefetch, onControl, onFileClosed, flushAll, flushFinal, sweep, sha256Hex, canonical, serverPath, drivePath, lastSaved: () => lastSaved };
 })();
 if (typeof module !== 'undefined' && module.exports) module.exports = InnSaves;
