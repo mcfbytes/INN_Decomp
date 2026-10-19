@@ -142,7 +142,8 @@ function dialFailed() {
 function httpBase(server) {
   try {
     const url = new URL(server);
-    url.protocol = url.protocol === 'wss:' ? 'https:' : 'http:';
+    // TLS stays TLS: an https:// sign-in server (site.json authServer in production) as well as a wss:// line.
+    url.protocol = url.protocol === 'wss:' || url.protocol === 'https:' ? 'https:' : 'http:';
     return url.origin;
   } catch { return ''; }
 }
