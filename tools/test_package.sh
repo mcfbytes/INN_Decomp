@@ -42,7 +42,7 @@ if [ -n "${1:-}" ]; then
   b=$1
   if "$here/package_web.sh" "$b" "$tmp/pkg" --game wss://play.example.test:2316 --auth https://auth.example.test >"$tmp/log" 2>&1; then ok "packages the public build"; else bad "packages the public build: $(tail -3 "$tmp/log")"; fi
   # nothing outside the expected list, no game data, hashed names, the config is valid and under SWA's 20 KB limit
-  stray=$(cd "$tmp/pkg" && find . -type f | sed 's|^\./||' | grep -Ev '^(inn\.html|site\.json|og\.png|icons/(favicon\.ico|icon\.svg|apple-touch-icon\.png|icon-(192|512)\.png|manifest\.webmanifest)|staticwebapp\.config\.json|legal/(terms|privacy|copyright)\.html|assets/(app|inn|legal)\.[0-9a-f]{10}\.(js|css|wasm)|assets/vt323\.[0-9a-f]{10}\.ttf|assets/worklet\.[0-9a-f]{10}\.js|assets/(scenes|music)/[a-z]+\.[0-9a-f]{10}\.js|assets/shaders/[A-Za-z0-9_+-]+\.[0-9a-f]{10}\.(glsl|png))$')
+  stray=$(cd "$tmp/pkg" && find . -type f | sed 's|^\./||' | grep -Ev '^(index\.html|site\.json|og\.png|icons/(favicon\.ico|icon\.svg|apple-touch-icon\.png|icon-(192|512)\.png|manifest\.webmanifest)|staticwebapp\.config\.json|legal/(terms|privacy|copyright)\.html|assets/(app|inn|legal)\.[0-9a-f]{10}\.(js|css|wasm)|assets/vt323\.[0-9a-f]{10}\.ttf|assets/worklet\.[0-9a-f]{10}\.js|assets/(scenes|music)/[a-z]+\.[0-9a-f]{10}\.js|assets/shaders/[A-Za-z0-9_+-]+\.[0-9a-f]{10}\.(glsl|png))$')
   [ -z "$stray" ] && ok "output holds only expected files" || bad "stray files: $stray"
   [ "$(find "$tmp/pkg" -type f | wc -l)" -ge 20 ] && ok "output file count" || bad "output file count"
   python3 -I - "$tmp/pkg/staticwebapp.config.json" <<'P' && ok "staticwebapp.config.json" || bad "staticwebapp.config.json"
@@ -58,7 +58,7 @@ assert c['mimeTypes']['.wasm'] == 'application/wasm' and c['mimeTypes']['.webman
 assert "manifest-src 'self'" in h['Content-Security-Policy'] and "img-src 'self'" in h['Content-Security-Policy']
 r = {x['route']: x for x in c['routes']}
 assert r['/icons/*']['headers']['Cache-Control'] == 'public, max-age=86400'
-assert 'immutable' in r['/assets/*']['headers']['Cache-Control'] and r['/inn.html']['headers']['Cache-Control'] == 'no-cache' and r['/site.json']['headers']['Cache-Control'] == 'no-cache'
+assert 'immutable' in r['/assets/*']['headers']['Cache-Control'] and r['/index.html']['headers']['Cache-Control'] == 'no-cache' and r['/']['headers']['Cache-Control'] == 'no-cache' and r['/inn.html']['redirect'] == '/' and r['/inn.html']['statusCode'] == 301 and r['/site.json']['headers']['Cache-Control'] == 'no-cache'
 P
   # the icons ship: the .ico holds 16, 32 and 48 px images, the manifest parses and names files that exist, and every page's
   # icon links resolve (the legal pages one level down), with no inline icon left and no Sierra or INN name in the manifest
@@ -81,7 +81,7 @@ assert not re.search(r'sierra|imagination|tsn|\binn\b', json.dumps(m), re.I)
 for i in m['icons']:
     assert os.path.isfile(os.path.join(d, 'icons', i['src'])), i
 assert os.path.isdir(os.path.normpath(os.path.join(d, 'icons', m['start_url'])))
-for f, up in (('inn.html', ''), ('legal/terms.html', '../'), ('legal/privacy.html', '../'), ('legal/copyright.html', '../')):
+for f, up in (('index.html', ''), ('legal/terms.html', '../'), ('legal/privacy.html', '../'), ('legal/copyright.html', '../')):
     h = open(os.path.join(d, f)).read()
     assert 'href="data:' not in h and "href=data:" not in h, f
     at = lambda a, k: (re.search(r'\b' + k + r'=(?:"([^"]*)"|([^\s>"]+))', a) or [None] * 3)
@@ -92,9 +92,9 @@ for f, up in (('inn.html', ''), ('legal/terms.html', '../'), ('legal/privacy.htm
         assert href.startswith(up + 'icons/') and os.path.isfile(os.path.normpath(os.path.join(d, os.path.dirname(f), href))), (f, href)
 P
   # the runtime is not in the page: no script tag for it, inn.js is in the asset map (page.js inserts it), the page is the lazy kind
-  python3 -I - "$tmp/pkg" <<'P' && ok "inn.html loads the runtime lazily" || bad "inn.html loads the runtime lazily"
+  python3 -I - "$tmp/pkg" <<'P' && ok "index.html loads the runtime lazily" || bad "index.html loads the runtime lazily"
 import json, os, re, sys
-d = sys.argv[1]; h = open(os.path.join(d, 'inn.html')).read()
+d = sys.argv[1]; h = open(os.path.join(d, 'index.html')).read()
 assert not re.search(r'<script[^>]*src=[^>]*inn\.', h) and '<template' not in h
 assert 'data-runtime="lazy"' in h or 'data-runtime=lazy' in h
 m = json.loads(re.search(r'id="inn-assets">([^<]*)<', h).group(1))
@@ -105,7 +105,7 @@ P
   # and the page's scripts carry no remote loads or eval
   python3 -I - "$tmp/pkg" <<'P' && ok "the display-filter shaders are hashed assets" || bad "the display-filter shaders are hashed assets"
 import json, os, re, sys
-d = sys.argv[1]; h = open(os.path.join(d, 'inn.html')).read()
+d = sys.argv[1]; h = open(os.path.join(d, 'index.html')).read()
 m = json.loads(re.search(r'id="inn-assets">([^<]*)<', h).group(1))
 sh = {k: v for k, v in m.items() if k.startswith('shaders/')}
 for need in ('xbr-lv2.glsl', 'xbrz-freescale.glsl', 'scalefx-pass0.glsl', 'hqx-pass2.glsl', 'hq4x.png', 'fsr-pass0.glsl', 'crt-lottes.glsl', 'supereagle.glsl', '2xsai.glsl', 'Anime4K_Upscale_CNN_x2_S.glsl'):
@@ -122,7 +122,7 @@ P
   # the audio worklet module is a hashed same-origin asset in the map (script-src 'self' covers addModule)
   python3 -I - "$tmp/pkg" <<'P' && ok "the audio worklet is a hashed asset" || bad "the audio worklet is a hashed asset"
 import json, os, re, sys
-d = sys.argv[1]; h = open(os.path.join(d, 'inn.html')).read()
+d = sys.argv[1]; h = open(os.path.join(d, 'index.html')).read()
 m = json.loads(re.search(r'id="inn-assets">([^<]*)<', h).group(1))
 w = m['audio-worklet.js']
 assert re.fullmatch(r'assets/worklet\.[0-9a-f]{10}\.js', w)
@@ -153,7 +153,7 @@ import os, re, sys
 d = sys.argv[1]
 for f in ('robots.txt', 'sitemap.xml'): assert not os.path.exists(os.path.join(d, f)), f
 assert os.path.getsize(os.path.join(d, 'og.png')) > 1000
-for f in ('inn.html', 'legal/terms.html', 'legal/privacy.html', 'legal/copyright.html'):
+for f in ('index.html', 'legal/terms.html', 'legal/privacy.html', 'legal/copyright.html'):
     h = open(os.path.join(d, f)).read()
     assert 'rel="canonical"' not in h and 'og:url' not in h and 'og:image' not in h, f
     assert 'rel=canonical' not in h and '<title>' in h and 'name="description"' in h, f
@@ -175,15 +175,15 @@ assert rd('robots.txt') == 'User-agent: *\nAllow: /\n\nSitemap: https://example.
 assert re.findall(r'<loc>([^<]*)</loc>', rd('sitemap.xml')) == ['https://example.org/', 'https://example.org/legal/terms.html', 'https://example.org/legal/privacy.html', 'https://example.org/legal/copyright.html']
 png = open(os.path.join(d, 'og.png'), 'rb').read()
 assert png[:8] == b'\x89PNG\r\n\x1a\n' and int.from_bytes(png[16:20], 'big') == 1200 and int.from_bytes(png[20:24], 'big') == 630
-for f, path in (('inn.html', '/'), ('legal/terms.html', '/legal/terms.html'), ('legal/privacy.html', '/legal/privacy.html'), ('legal/copyright.html', '/legal/copyright.html')):
+for f, path in (('index.html', '/'), ('legal/terms.html', '/legal/terms.html'), ('legal/privacy.html', '/legal/privacy.html'), ('legal/copyright.html', '/legal/copyright.html')):
     h = rd(f); url = 'https://example.org' + path
     assert f'<link rel="canonical" href="{url}">' in h, f
     assert f'<meta property="og:url" content="{url}">' in h, f
     assert 'content="https://example.org/og.png"' in h and h.count('twitter:card') == 1 and 'summary_large_image' in h, f
-    assert re.search(r'<title>[^<]*Example Site</title>' if f != 'inn.html' else r'<title>Example Site: [^<]+</title>', h), f
+    assert re.search(r'<title>[^<]*Example Site</title>' if f != 'index.html' else r'<title>Example Site: [^<]+</title>', h), f
     assert 'name="description"' in h and 'name="theme-color"' in h and 'og:title' in h and 'twitter:image' in h, f
     assert 'content="noindex"' not in h, f
-h = rd('inn.html')
+h = rd('index.html')
 assert len(re.findall(r'<h1\b', h)) == 1 and '<noscript>' in h
 ld = json.loads(re.search(r'<script type="application/ld\+json">(.*?)</script>', h).group(1))
 assert ld['@type'] == 'WebApplication' and ld['applicationCategory'] == 'GameApplication' and ld['name'] == 'Example Site' and ld['image'] == 'https://example.org/og.png'
@@ -195,7 +195,7 @@ cs = csp.split('connect-src ')[1].split(';')[0].split()
 assert 'https://eastus-8.in.applicationinsights.azure.com' in cs and not {'https:', 'wss:', 'ws:', '*'} & set(cs), cs
 assert "script-src 'self' 'wasm-unsafe-eval' 'sha256-" in csp and "'unsafe-inline'" not in csp.split('script-src')[1].split(';')[0]
 r = {x['route']: x for x in c['routes']}
-assert r['/']['rewrite'] == '/inn.html' and '/robots.txt' in r and '/sitemap.xml' in r and '/og.png' in r
+assert 'rewrite' not in r['/'] and '/robots.txt' in r and '/sitemap.xml' in r and '/og.png' in r
 P
   # refusals: a bad connection string, and a site address with a path
   cp -r "$b" "$tmp/badcs" && python3 -I -c "

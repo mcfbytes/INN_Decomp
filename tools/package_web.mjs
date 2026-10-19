@@ -189,7 +189,8 @@ if (/<template\b|<script[^>]*\bsrc=["']?inn\.js/.test(main)) fail('inn.html stil
 if (!/data-runtime=["']?lazy/.test(main)) fail('inn.html is not a lazy-runtime page (data-runtime)');
 // The asset map goes before the first script (site.js reads it); JSON is data, so the CSP ignores it.
 main = main.replace(/<script\b/, `<script type="application/json" id="inn-assets">${JSON.stringify(assetMap)}</script><script`);
-put('inn.html', seo(main, 'inn.html'));
+// Written as index.html: Static Web Apps' upload refuses a folder without one, and serves it at / itself.
+put('index.html', seo(main, 'inn.html'));
 for (const f of ['terms', 'privacy', 'copyright']) put(`legal/${f}.html`, seo(page(`legal/${f}.html`, '../'), `legal/${f}.html`));
 
 // ---- the preview image, robots.txt and sitemap.xml ----
@@ -231,8 +232,10 @@ const noCache = { 'Cache-Control': 'no-cache' };
 const config = {
   routes: [
     { route: '/assets/*', headers: { 'Cache-Control': 'public, max-age=31536000, immutable' } },
-    { route: '/', rewrite: '/inn.html', headers: noCache },
-    { route: '/inn.html', headers: noCache },
+    { route: '/', headers: noCache },
+    { route: '/index.html', headers: noCache },
+    // The dev build's name for the page (docs/web.md); the deployed one is index.html.
+    { route: '/inn.html', redirect: '/', statusCode: 301 },
     { route: '/site.json', headers: noCache },
     { route: '/legal/*', headers: noCache },
     { route: '/robots.txt', headers: noCache },
@@ -255,7 +258,7 @@ const config = {
 put('staticwebapp.config.json', JSON.stringify(config, null, 2) + '\n');
 
 // ---- guard: nothing outside the expected list ships, and nothing that looks like game data ----
-const ALLOWED = [/^inn\.html$/, /^site\.json$/, /^og\.png$/, /^icons\/(favicon\.ico|icon\.svg|apple-touch-icon\.png|icon-(192|512)\.png|manifest\.webmanifest)$/, /^robots\.txt$/, /^sitemap\.xml$/, /^staticwebapp\.config\.json$/, /^legal\/(terms|privacy|copyright)\.html$/,
+const ALLOWED = [/^index\.html$/, /^site\.json$/, /^og\.png$/, /^icons\/(favicon\.ico|icon\.svg|apple-touch-icon\.png|icon-(192|512)\.png|manifest\.webmanifest)$/, /^robots\.txt$/, /^sitemap\.xml$/, /^staticwebapp\.config\.json$/, /^legal\/(terms|privacy|copyright)\.html$/,
   /^assets\/(app|inn|legal)\.[0-9a-f]{10}\.(js|css|wasm)$/, /^assets\/vt323\.[0-9a-f]{10}\.ttf$/, /^assets\/worklet\.[0-9a-f]{10}\.js$/, /^assets\/(scenes|music)\/\w+\.[0-9a-f]{10}\.js$/,
   /^assets\/shaders\/[\w+-]+\.[0-9a-f]{10}\.(glsl|png)$/];
 for (const [p, buf] of emitted) {

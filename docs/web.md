@@ -1074,8 +1074,8 @@ company or network names, in metadata too.
   `tools/make_og.mjs` (headless Chromium through playwright-core; the usage is at the top of the file). Re-run it if
   a scene or the wording changes. The CMake copy list and the packager's allowed list include it; the packager
   checks its size. It is not content-hashed (link previews need a stable address) and is cached for a day.
-- **Crawlers see `/`** with a 200: `staticwebapp.config.json` rewrites `/` to `/inn.html` (a rewrite, not a
-  redirect), and `canonical` names `/` so `/inn.html` is not a duplicate.
+- **Crawlers see `/`** with a 200: the packager writes the page as `index.html`, which Static Web Apps serves at `/`
+  (its upload refuses a folder without one), and `/inn.html`, the dev build's name, redirects to `/` (301).
 
 ### Diagnostics
 
@@ -1125,7 +1125,7 @@ endpoint that logs POSTs and answers CORS.
 ### Output and headers
 
 ```
-inn.html  site.json  staticwebapp.config.json  og.png  [robots.txt  sitemap.xml: with a site address]
+index.html  site.json  staticwebapp.config.json  og.png  [robots.txt  sitemap.xml: with a site address]
 legal/{terms,privacy,copyright}.html
 assets/{app,inn,legal}.<hash>.{js,css,wasm}   assets/vt323.<hash>.ttf   assets/scenes/<id>.<hash>.js   assets/music/<id>.<hash>.js
 ```
@@ -1133,7 +1133,7 @@ assets/{app,inn,legal}.<hash>.{js,css,wasm}   assets/vt323.<hash>.ttf   assets/s
 `staticwebapp.config.json` (SWA reads it from the root; its limit is 20 KB):
 
 - **Caching.** `/assets/*`: `public, max-age=31536000, immutable` (every name is content-hashed, so a new
-  build is a new URL). `/`, `/inn.html`, `/site.json`, `/legal/*`, `/robots.txt`, `/sitemap.xml`: `no-cache`; `/og.png`: one day. `/` is rewritten to `/inn.html`.
+  build is a new URL). `/`, `/index.html`, `/site.json`, `/legal/*`, `/robots.txt`, `/sitemap.xml`: `no-cache`; `/og.png`: one day. The page is `index.html` in the package (`inn.html` in the build); `/inn.html` redirects to `/`.
   There is no `navigationFallback`: the page has no client-side routes, so an unknown path is a plain 404.
 - **MIME.** `.wasm` is `application/wasm`, which `WebAssembly.instantiateStreaming` requires (Emscripten uses
   it; the packaged run logged no fallback warning).
