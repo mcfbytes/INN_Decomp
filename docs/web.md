@@ -1176,6 +1176,70 @@ assets/{app,inn,legal}.<hash>.{js,css,wasm}   assets/vt323.<hash>.ttf   assets/s
    `skip_app_build: true`. Nothing here contacts Azure; the deployment is the operator's step.
 4. The game server and the sign-in server must list the page's origin: `innkeeperd --page-origin https://<site>`.
 
+### Automated deployment (GitHub Actions)
+
+`.github/workflows/deploy-page.yml` does the steps above. It runs on `workflow_dispatch`, and on a push to `main`
+that touches `runtime/`, `third_party/`, `tools/package_web*`, `tools/make_site_json.py`, `tools/test_package.sh`,
+`CMakeLists.txt` or the workflow itself. There is no `pull_request` trigger. A push deploys only when the repository
+variable `PAGE_AUTO_DEPLOY` is `true`; a manual run always deploys. Until the operator sets that variable, merging the
+workflow does nothing.
+
+Two jobs:
+
+- **build** has no environment and no secrets. It installs ninja and emsdk 6.0.12 (cloned at a pinned commit and
+  cached), configures with `-DINN_LIFTED_DIR=/nonexistent`, builds, runs `tools/test_package.sh` on the result and
+  uploads the build directory (without `CMakeFiles` and the object files) as a one-day artifact. The test runs
+  here, before any production `site.json` exists.
+- **deploy** (`needs: build`, `environment: production`) stops with a message if `SITE_URL`, `SITE_AUTH_SERVER` or the
+  secret is empty, downloads the artifact, writes `build-web/site.json` with `tools/make_site_json.py`, runs
+  `tools/package_web.sh build-web dist --site-url "$SITE_URL"`, writes a job summary (the fields left empty and the
+  file table, never the connection string) and uploads `dist` with `Azure/static-web-apps-deploy` (`skip_app_build`
+  and `skip_api_build`, so nothing is rebuilt there). Variables reach the scripts as environment variables, never
+  through `${{ }}` inside a `run:` script. Every action is pinned by commit SHA.
+
+Set up, in the repository's settings:
+
+- Create the environment `production`. Restrict its deployment branches to `main`, and add required reviewers if a
+  deploy should wait for a person. A workflow run on any other branch then cannot read its variables or its secret.
+- Secret `AZURE_STATIC_WEB_APPS_API_TOKEN` (on the environment): the Static Web App's deployment token.
+- Variables (on the environment, except `PAGE_AUTO_DEPLOY`, which is a repository variable), below. Every one is
+  optional except `SITE_URL` and `SITE_AUTH_SERVER`, which the job requires. A blank variable takes the default.
+
+| Variable | `site.json` field | Default | Check |
+| --- | --- | --- | --- |
+| `SITE_NAME` | `siteName` | empty | |
+| `SITE_OPERATOR_NAME` | `operatorName` | empty | |
+| `SITE_CONTACT_EMAIL` | `contactEmail` | empty | email |
+| `SITE_PRIVACY_EMAIL` | `privacyEmail` | empty | email |
+| `SITE_DMCA_NAME` | `dmcaAgent.name` | empty | |
+| `SITE_DMCA_ADDRESS` | `dmcaAgent.address` | empty | |
+| `SITE_DMCA_EMAIL` | `dmcaAgent.email` | empty | email |
+| `SITE_DMCA_PHONE` | `dmcaAgent.phone` | empty | |
+| `SITE_GOVERNING_LAW` | `governingLaw` | empty | |
+| `SITE_SERVER_LOCATION` | `serverLocation` | empty | |
+| `SITE_EFFECTIVE_DATE` | `effectiveDate` | empty | |
+| `SITE_TERMS_VERSION` | `termsVersion` | 1 | positive integer |
+| `SITE_MINIMUM_AGE` | `minimumAge` | 18 | positive integer |
+| `SITE_AUDIT_RETENTION_DAYS` | `auditRetentionDays` | 90 | positive integer |
+| `SITE_TELEMETRY_RETENTION_DAYS` | `telemetryRetentionDays` | 90 | positive integer |
+| `SITE_AUTH_SERVER` | `authServer` | empty (required) | `https://host[:port]`, no path |
+| `SITE_GAME_SERVER` | `gameServer` | empty | `wss://host[:port]`, no path |
+| `SITE_URL` | `siteUrl` | empty (required) | `https://host`, no path |
+| `SITE_TELEMETRY_CONNECTION_STRING` | `telemetry.connectionString` | empty (no diagnostics) | checked by `package_web` |
+| `PAGE_AUTO_DEPLOY` | none | unset | `true` enables deploys on push |
+
+`tools/make_site_json.py` rejects control characters and newlines in any value, and names the variable that failed.
+It does not echo `SITE_TELEMETRY_CONNECTION_STRING`. The telemetry string is a variable, not a secret, because it
+ships in the page (see "Diagnostics"). Set it after the infrastructure deployment prints
+`webTelemetryConnectionString`; until then the page sends no diagnostics. Run `python3 -I tools/test_make_site_json.py`
+to test the generator.
+
+The values must equal what the servers run with, since the page states them to visitors: `termsVersion` is the server's
+`--terms-version`, `minimumAge` its `--minimum-age`, `auditRetentionDays` its `--audit-retention-days`, and
+`telemetryRetentionDays` the retention of the diagnostics workspace (the generator writes 90 when the variable is blank; a site.json without the field shows 365). `docs/legal.md` describes each field and what
+the legal pages do with it. `SITE_URL`, `SITE_AUTH_SERVER` and `SITE_GAME_SERVER` also feed the CSP, so change them
+only together with the servers' `--page-origin`.
+
 ### The IP guard
 
 This repository is public. Only the hybrid build (the original program on the emulator, no Sierra-derived code

@@ -1,0 +1,194 @@
+# Builds the public (hybrid) web page and deploys it to Azure Static Web Apps.
+# docs/web.md, "Automated deployment (GitHub Actions)", lists every variable and the secret this needs.
+#
+# - workflow_dispatch always deploys.
+# - A push to main deploys only when the repository variable PAGE_AUTO_DEPLOY is 'true'.
+# - There is no pull_request trigger: this is a public repository and a fork's code must never reach the
+#   `production` environment's variables or the deployment token.
+name: Deploy page
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'runtime/**'
+      - 'third_party/**'
+      - 'tools/package_web*'
+      - 'tools/make_site_json.py'
+      - 'tools/test_package.sh'
+      - 'CMakeLists.txt'
+      - '.github/workflows/deploy-page.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-page
+  cancel-in-progress: false
+
+env:
+  EMSDK_VERSION: '6.0.12'
+  # emscripten-core/emsdk tag 6.0.12 (the tag name is the SDK version it installs)
+  EMSDK_COMMIT: 35ff8a6d150541276abbc6bae512ca90bcfbe220
+
+jobs:
+  # No environment and no secrets: it compiles repository code only. It has the same `if` as deploy, so a
+  # push that will not deploy does not spend a build either.
+  build:
+    if: github.event_name == 'workflow_dispatch' || vars.PAGE_AUTO_DEPLOY == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      - name: Install ninja
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build
+
+      - name: Cache emsdk
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/emsdk
+          key: emsdk-${{ env.EMSDK_VERSION }}-${{ env.EMSDK_COMMIT }}-${{ runner.os }}
+
+      - name: Set up emsdk
+        run: |
+          set -euo pipefail
+          if [ ! -d "$HOME/emsdk/.git" ]; then
+            git clone https://github.com/emscripten-core/emsdk.git "$HOME/emsdk"
+          fi
+          cd "$HOME/emsdk"
+          git fetch --depth 1 origin "$EMSDK_COMMIT"
+          git checkout --detach "$EMSDK_COMMIT"
+          ./emsdk install "$EMSDK_VERSION"
+          ./emsdk activate "$EMSDK_VERSION"
+
+      # INN_LIFTED_DIR names a directory that does not exist, so no lifted code is compiled whatever the
+      # checkout holds; tools/package_web.sh refuses the build otherwise.
+      - name: Build
+        run: |
+          set -euo pipefail
+          source "$HOME/emsdk/emsdk_env.sh"
+          emcc --version | head -n1
+          emcmake cmake -S . -B build-web -G Ninja -DINN_LIFTED_DIR=/nonexistent
+          cmake --build build-web
+
+      # Before the production site.json is written: the test assumes the repository's empty one.
+      - name: Test the packager
+        run: tools/test_package.sh build-web
+
+      # package_web.sh reads CMakeCache.txt, lifted_table.c, inn.html, inn.js, inn.wasm and the page files.
+      # Object files, the static library and the ninja bookkeeping are not needed. Hidden files (.ninja_*)
+      # are not uploaded by default.
+      - name: Upload the build
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: build-web
+          path: |
+            build-web/
+            !build-web/CMakeFiles/**
+            !build-web/libdosrt.a
+            !build-web/build.ninja
+            !build-web/cmake_install.cmake
+            !build-web/compile_commands.json
+          if-no-files-found: error
+          retention-days: 1
+
+  deploy:
+    needs: build
+    if: github.event_name == 'workflow_dispatch' || vars.PAGE_AUTO_DEPLOY == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # The SITE_* variables and the secret AZURE_STATIC_WEB_APPS_API_TOKEN belong to this environment.
+    environment: production
+    steps:
+      # Every value reaches a script through env:, never through ${{ }} inside run: (script injection).
+      - name: Check the settings
+        env:
+          SITE_URL: ${{ vars.SITE_URL }}
+          SITE_AUTH_SERVER: ${{ vars.SITE_AUTH_SERVER }}
+          DEPLOYMENT_TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+        run: |
+          missing=0
+          [ -n "${SITE_URL// /}" ] || { echo "::error::The variable SITE_URL is empty (the page's public https origin)."; missing=1; }
+          [ -n "${SITE_AUTH_SERVER// /}" ] || { echo "::error::The variable SITE_AUTH_SERVER is empty (the sign-in server's https origin)."; missing=1; }
+          [ -n "$DEPLOYMENT_TOKEN" ] || { echo "::error::The secret AZURE_STATIC_WEB_APPS_API_TOKEN is empty."; missing=1; }
+          exit "$missing"
+
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: build-web
+          path: build-web
+
+      # The CSP is built from site.json, so it is final before packaging. The connection string is a
+      # variable, not a secret: it ships in the page.
+      - name: Write site.json
+        env:
+          SITE_NAME: ${{ vars.SITE_NAME }}
+          SITE_OPERATOR_NAME: ${{ vars.SITE_OPERATOR_NAME }}
+          SITE_CONTACT_EMAIL: ${{ vars.SITE_CONTACT_EMAIL }}
+          SITE_PRIVACY_EMAIL: ${{ vars.SITE_PRIVACY_EMAIL }}
+          SITE_DMCA_NAME: ${{ vars.SITE_DMCA_NAME }}
+          SITE_DMCA_ADDRESS: ${{ vars.SITE_DMCA_ADDRESS }}
+          SITE_DMCA_EMAIL: ${{ vars.SITE_DMCA_EMAIL }}
+          SITE_DMCA_PHONE: ${{ vars.SITE_DMCA_PHONE }}
+          SITE_GOVERNING_LAW: ${{ vars.SITE_GOVERNING_LAW }}
+          SITE_SERVER_LOCATION: ${{ vars.SITE_SERVER_LOCATION }}
+          SITE_EFFECTIVE_DATE: ${{ vars.SITE_EFFECTIVE_DATE }}
+          SITE_TERMS_VERSION: ${{ vars.SITE_TERMS_VERSION }}
+          SITE_MINIMUM_AGE: ${{ vars.SITE_MINIMUM_AGE }}
+          SITE_AUDIT_RETENTION_DAYS: ${{ vars.SITE_AUDIT_RETENTION_DAYS }}
+          SITE_TELEMETRY_RETENTION_DAYS: ${{ vars.SITE_TELEMETRY_RETENTION_DAYS }}
+          SITE_AUTH_SERVER: ${{ vars.SITE_AUTH_SERVER }}
+          SITE_GAME_SERVER: ${{ vars.SITE_GAME_SERVER }}
+          SITE_URL: ${{ vars.SITE_URL }}
+          SITE_TELEMETRY_CONNECTION_STRING: ${{ vars.SITE_TELEMETRY_CONNECTION_STRING }}
+        run: |
+          set -euo pipefail
+          python3 -I tools/make_site_json.py build-web/site.json | tee site-summary.txt
+
+      - name: Package
+        env:
+          SITE_URL: ${{ vars.SITE_URL }}
+        run: |
+          set -euo pipefail
+          tools/package_web.sh build-web dist --site-url "$SITE_URL" 2>&1 | tee package.log
+
+      # The summary lists the empty fields and the file table; the telemetry string is never printed.
+      - name: Job summary
+        run: |
+          {
+            echo '## Page packaged'
+            echo
+            echo 'Left empty in site.json (the legal pages say so):'
+            echo
+            echo '```'
+            sed -n 's/^.*; empty: //p' site-summary.txt
+            echo '```'
+            echo
+            echo 'Files:'
+            echo
+            echo '```'
+            grep -v -i 'connectionString\|InstrumentationKey' package.log || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # The action rather than the SWA CLI: it is the supported path from GitHub Actions and needs no
+      # download of a pinned npm package. With skip_app_build and skip_api_build it uploads dist as it is
+      # and does not run Oryx. deployment_environment is left out, which deploys to production.
+      - name: Deploy to Static Web Apps
+        uses: Azure/static-web-apps-deploy@1a947af9992250f3bc2e68ad0754c0b0c11566c9 # v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+          action: upload
+          app_location: dist
+          skip_app_build: true
+          skip_api_build: true
