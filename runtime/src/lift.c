@@ -7,6 +7,7 @@
 #include "bios_internal.h"
 #include "lift_internal.h"
 #include "native.h"
+#include "native_exec.h"
 
 void lift_set_hook_bit(Machine *m, uint32_t linear, bool on)
 {
@@ -58,6 +59,8 @@ void lift_init(Machine *m)
     const char *synth = getenv("INN_SYNTH");
     if (synth && *synth)
         lift_synth_load(m, synth);
+    lift_state(m)->dump_far_calls = native_dump_far_call_points();
+    lift_update_probe(m);
 }
 
 static void log_verify_line(const LiftedEntry *e, const HookStats *st)
@@ -271,6 +274,79 @@ uint16_t lift_module_base(Machine *m, const char *module)
     return 0;
 }
 
+/* ---- images the program loads by itself (docs/lifting.md, "Images loaded by the program") ---- */
+
+/* The far call probe costs a test per far call only while an image waits or a dump point is set. */
+void lift_update_probe(Machine *m)
+{
+    LiftState *s = lift_state(m);
+    bool waiting = s->dump_far_calls;
+    for (int i = 0; i < s->image_count && !waiting; i++)
+        waiting = s->images[i].load_seg == 0;
+    m->far_call_probe = waiting;
+}
+
+static int image_index(const LiftState *s, const char *module)
+{
+    for (int i = 0; i < s->image_count; i++)
+        if (!strcmp(s->images[i].image->module, module))
+            return i;
+    return -1;
+}
+
+void lift_add_image(Machine *m, const LiftedImage *image)
+{
+    LiftState *s = lift_state(m);
+    if (s->image_count == MAX_IMAGES)
+        fatal("too many lifted images");
+    s->images[s->image_count].image = image;
+    s->images[s->image_count++].load_seg = 0;
+    lift_update_probe(m);
+}
+
+static bool image_head_at(Machine *m, const LiftedImage *image, uint32_t linear)
+{
+    for (int i = 0; i < LIFT_IMAGE_HEAD_LEN; i++)
+        if ((image->head_mask >> i & 1) && mem_rd8(m, linear + (uint32_t)i) != image->head[i])
+            return false;
+    return true;
+}
+
+/* Whether seg is where a program, driver or announced image starts: its offset 0 is that module's. */
+static bool is_module_start(const LiftState *s, uint16_t seg)
+{
+    for (int i = 0; i < s->image_count; i++)
+        if (s->images[i].load_seg == seg)
+            return true;
+    for (int i = 0; i < s->module_count; i++)
+        if (s->modules[i].load_seg == seg && image_index(s, s->modules[i].name) < 0)
+            return true;
+    return false;
+}
+
+void lift_far_call_probe(Machine *m)
+{
+    LiftState *s = lift_state(m);
+    if (!s)
+        return;
+    if (s->dump_far_calls)
+        native_dump_far_call(m);
+    uint16_t seg = m->cpu.seg[S_CS];
+    if ((m->cpu.eip & 0xFFFF) != 0 || s->image_count == 0 || is_module_start(s, seg))
+        return;
+    uint32_t linear = real_addr(seg, 0);
+    for (int i = 0; i < s->image_count; i++) {
+        const LiftedImage *image = s->images[i].image;
+        if (linear + image->bytes > MEM_ONE_MEG || !image_head_at(m, image, linear))
+            continue;
+        if (s->images[i].load_seg)
+            disarm_module(m, image->module); /* the program loaded it again elsewhere */
+        log_msg("lift: image %s found at %04X (%u bytes)", image->module, seg, image->bytes);
+        lift_module_loaded(m, image->module, seg, image->bytes);
+        return;
+    }
+}
+
 void lift_module_loaded(Machine *m, const char *module, uint16_t load_seg, uint32_t image_bytes)
 {
     LiftState *s = lift_state(m);
@@ -282,6 +358,11 @@ void lift_module_loaded(Machine *m, const char *module, uint16_t load_seg, uint3
     arm_module(m, module, load_seg, image_bytes, load_seg, false);
     lift_coverage_module(m, module, load_seg, image_bytes, false);
     lift_synth_module(m, module, load_seg);
+    int image = image_index(s, module); /* a lifted loader may announce an image itself */
+    if (image >= 0) {
+        s->images[image].load_seg = load_seg;
+        lift_update_probe(m);
+    }
 }
 
 void lift_overlay_loaded(Machine *m, const char *module, uint16_t load_seg, uint32_t image_bytes,
@@ -314,6 +395,16 @@ void lift_module_unloaded(Machine *m, uint16_t load_seg, uint32_t paragraphs)
     }
     s->active_count = kept;
     lift_synth_unloaded(m, lo, hi);
+    bool images_gone = false;
+    for (int i = 0; i < s->image_count; i++) {
+        uint32_t at = real_addr(s->images[i].load_seg, 0);
+        if (s->images[i].load_seg && at >= lo && at < hi) {
+            s->images[i].load_seg = 0; /* the next load is found again */
+            images_gone = true;
+        }
+    }
+    if (images_gone)
+        lift_update_probe(m);
 }
 
 static ActiveHook *find_hook(LiftState *s, uint32_t linear)
@@ -681,6 +772,7 @@ void lift_dispatch_far_at(Machine *m, uint16_t seg, uint16_t off)
     uint16_t sp_after_return = (uint16_t)(m->cpu.r[R_SP].w + 4);
     cpu_set_seg(&m->cpu, S_CS, seg);
     m->cpu.eip = off;
+    lift_far_call_landed(m);
     lift_coverage_hit(m, LIFT_COVERAGE_CALL);
     bool direct = call_direct(m, s);
     bool back = m->cpu.seg[S_CS] == CALLBACK_SEG && (uint16_t)m->cpu.eip == stub_off;

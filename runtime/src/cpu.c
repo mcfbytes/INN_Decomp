@@ -1033,6 +1033,7 @@ static void group_ff(Machine *m, Insn *in, int size)
         push_op(m, in, c->seg[S_CS]);
         push_op(m, in, c->eip);
         far_jump(m, mem_rd16(m, operand_part(in, &op, (uint32_t)size)), v);
+        lift_far_call_landed(m);
         lift_coverage_hit(m, LIFT_COVERAGE_CALL);
         break;
     case 4:
@@ -1329,6 +1330,7 @@ static void exec_one(Machine *m)
         push_op(m, &in, c->seg[S_CS]);
         push_op(m, &in, c->eip);
         far_jump(m, (uint16_t)w, v);
+        lift_far_call_landed(m);
         lift_coverage_hit(m, LIFT_COVERAGE_CALL);
         return;
     case 0x9B:
