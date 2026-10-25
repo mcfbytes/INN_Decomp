@@ -26,7 +26,8 @@ def flatten(data):
         raise SystemExit('no Borland overlays in this file')
     header = struct.unpack_from('<H', data, 8)[0] * 16
     count, table = struct.unpack_from('<HH', data, 6)[0], struct.unpack_from('<H', data, 0x18)[0]
-    relocs = [struct.unpack_from('<HH', data, table + 4 * i) for i in range(count)]
+    # MZ rows are (offset, segment); keep (segment, offset) like the overlay rows added below.
+    relocs = [struct.unpack_from('<HH', data, table + 4 * i)[::-1] for i in range(count)]
     image = bytearray(data[header:borland_overlay.module_end(data)])
     min_paras = struct.unpack_from('<H', data, 0x0A)[0]
     # Leave the BSS and stack the loader would add free, so data references never hit overlay code.

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # usage: export_module.sh <exe> <MODULE_NAME> <out_dir> [names.tsv]
 #        export_module.sh --raw <image_file_offset> <file> <MODULE_NAME> <out_dir> [names.tsv]
+# EXPORT_RESUME=1 continues an export that a timeout cut short (written functions are kept).
 set -euo pipefail
 
 usage() {
@@ -80,8 +81,11 @@ fi
 rm -rf "$PROJ_DIR/$MODULE.gpr" "$PROJ_DIR/$MODULE.rep" \
     "$PROJ_DIR/$MODULE.lock" "$PROJ_DIR/$MODULE.lock~" \
     "$PROJ_DIR/headless.log" "$PROJ_DIR/script.log" "$PROJ_DIR/console.log"
-find "$OUT_DIR" -maxdepth 1 -type f \
-    \( -name '*.c' -o -name '*.asm' -o -name 'index.tsv' \) -delete
+# EXPORT_RESUME=1 keeps the functions an interrupted run already wrote and exports only the rest.
+if [[ "${EXPORT_RESUME:-}" != 1 ]]; then
+    find "$OUT_DIR" -maxdepth 1 -type f \
+        \( -name '*.c' -o -name '*.asm' -o -name 'index.tsv' \) -delete
+fi
 
 POST=(ExportFunctions.java "$OUT_DIR")
 if [[ -n "$NAMES" ]]; then
