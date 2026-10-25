@@ -188,6 +188,8 @@ with file not found.
 10000 shot work/e2e/select.ppm   # screenshot
 11000 click 285 59               # move, press and release the left button (frame pixels)
 12000 move 100 50
+12500 mdown                       # hold the left button at the pointer (a drag: move, then mup)
+12900 mup
 13000 key 1C                     # set-1 make code, pressed and released
 13500 down 48                    # held until the matching "up" (flight controls)
 13900 up 48

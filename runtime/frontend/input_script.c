@@ -108,6 +108,8 @@ static int parse_line(InputScript *s, char *line)
             add_event(s, at + HOLD_US, EV_BUTTON_DOWN, 0, 0);
             add_event(s, at + 2 * HOLD_US, EV_BUTTON_UP, 0, 0);
         }
+    } else if ((!strcmp(verb, "mdown") || !strcmp(verb, "mup")) && !*rest) {
+        add_event(s, at, verb[1] == 'd' ? EV_BUTTON_DOWN : EV_BUTTON_UP, 0, 0);
     } else if (!strcmp(verb, "shot") && *rest) {
         Event *e = add_event(s, at, EV_SHOT, 0, 0);
         if (e)
