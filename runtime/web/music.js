@@ -435,8 +435,9 @@ const InnMusic = (() => {
   }
 
   // ---------- the page: when to play, fade, pause and stop ----------
-  // Nothing touches audio before a user gesture. The first click or key press once the age notice is
-  // answered (the "I am 18 or older" click counts) creates the AudioContext and starts the scene's song.
+  // The music starts as soon as the landing is up and the age notice is answered: at page load for a
+  // returning visitor, with the "I am 18 or older" click for a new one. A browser that refuses sound before
+  // any interaction leaves the context suspended, and the first press, touch or key resumes it.
   const songs = {};
   const listeners = [];
   const S = { ctx: null, eng: null, cur: null, old: [], timer: 0, gestured: false, dead: false, want: '', loading: 0, mem: null };
@@ -519,11 +520,18 @@ const InnMusic = (() => {
     emit('track', song);
   }
 
-  function gesture() {
+  // Try to start now; with autoplay refused the context waits, suspended, for a gesture.
+  function start() {
     if (S.gestured || S.dead) return;
     if (blocked() || !landing()) return;
     S.gestured = true;
     if (enabled() && ensureCtx()) sync();
+  }
+
+  function gesture() {
+    if (S.dead) return;
+    if (!S.gestured) { start(); return; }
+    if (S.ctx && S.ctx.state === 'suspended' && canPlay()) S.ctx.resume().catch(() => {});
   }
 
   function toggle(on) {
@@ -581,6 +589,9 @@ const InnMusic = (() => {
     // answers the notice (and so unblocks us) in its handler.
     document.addEventListener('click', gesture, true);
     document.addEventListener('click', gesture);
+    // A press or touch counts as soon as it lands (the browser's own activation rule), before any click.
+    document.addEventListener('pointerdown', gesture, true);
+    document.addEventListener('touchend', gesture, true);
     document.addEventListener('keydown', (e) => {
       if (e.ctrlKey || e.metaKey || e.altKey || ['Shift', 'Control', 'Alt', 'Meta', 'CapsLock'].includes(e.key)) return;
       if ((e.key === 'm' || e.key === 'M') && !e.repeat) {
@@ -600,7 +611,13 @@ const InnMusic = (() => {
       if (S.dead) return;
       if (!landing()) leave(300);
       else if (typeof Site !== 'undefined' && Site.refused && Site.refused()) leave(300);
+      else start();
     }).observe(document.body, { attributes: true, attributeFilter: ['data-view', 'class'] });
+    // The landing (adv.js) and the stored age answer (site.js, asynchronous) come after this script: keep
+    // trying for a few seconds after load, then leave it to the gestures.
+    const retry = (n) => { start(); if (!S.gestured && !S.dead && n > 0) setTimeout(() => retry(n - 1), 250); };
+    if (document.readyState === 'complete') retry(40);
+    else window.addEventListener('load', () => retry(40));
   }
   if (typeof document !== 'undefined' && document.body) wire();
   else if (typeof document !== 'undefined') document.addEventListener('DOMContentLoaded', wire);

@@ -153,9 +153,11 @@ To check it without listening, render it: `parse` errors (bars that do not add u
 
 ### Playback rules
 
-- Nothing is created before a user gesture and there is no "enable audio" prompt. The first click or key press once the
-  18+ notice has been answered starts it, and that includes the "I am 18 or older" click; a returning visitor starts it
-  with their first click or key press. It stays silent on the refusal screen.
+- It starts as soon as the landing is up and the 18+ notice is answered: at page load for a returning visitor, with the
+  "I am 18 or older" click for a new one. There is no "enable audio" prompt. A browser that refuses sound before any
+  interaction (its autoplay policy; Chrome often allows it on a site the visitor has used, Firefox and Safari usually
+  do not) keeps the context suspended, and the first press, touch, click or key resumes it. It stays silent on the
+  refusal screen.
 - Changing the scene crossfades to the new scene's track in about a second. When the iris into the game starts it fades out
   over 1.5 s (0.3 s with reduced motion), then the context is closed for good, so it never overlaps the game's own sound.
 - While the tab is hidden the context is suspended; it resumes when the tab is shown.
