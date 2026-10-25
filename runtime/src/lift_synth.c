@@ -99,7 +99,8 @@ static char *trim(char *s)
     return s;
 }
 
-/* Cuts a comment that starts outside a string. */
+/* Cuts a comment that starts outside a string. A '#' inside a word is part of it (overlay modules are
+ * named PROG.EXE#stub), so a comment starts at the line start or after a blank. */
 static void cut_comment(char *s)
 {
     bool quoted = false;
@@ -108,7 +109,7 @@ static void cut_comment(char *s)
             p++;
         else if (*p == '"')
             quoted = !quoted;
-        else if (*p == '#' && !quoted) {
+        else if (*p == '#' && !quoted && (p == s || isspace((unsigned char)p[-1]))) {
             *p = 0;
             return;
         }
