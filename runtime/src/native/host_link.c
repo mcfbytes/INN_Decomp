@@ -94,6 +94,7 @@ int host_link_open(Machine *m, const char *spec)
         name[colon - spec] = 0;
         link = serial_link_tcp(name, atoi(colon + 1));
     }
+    link = serial_link_settle_env(m, link);
     if (host_link_attach(m, link) != 0)
         return -1;
     return 0;

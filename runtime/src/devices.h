@@ -166,6 +166,12 @@ SerialLink serial_link_ws(const char *url);
 /* Moves what the peer has sent into the link's own queue, served first by recv, so a client held still
  * (an input script's "wait") leaves nothing backed up at the peer. Only the TCP link queues. */
 void serial_link_drain(SerialLink *link);
+/* Headless repeatability (docs/runtime.md, "Link settling"): what the host sends after the guest
+ * has sent reaches the guest window_us of emulated time after the guest's last byte, once the host has
+ * been quiet for quiet_ms of wall time. serial_link_settle_env applies it when INN_LINK_SETTLE_MS is
+ * set (INN_LINK_SETTLE_WINDOW_MS, default 3, sets the window) and otherwise returns inner. */
+SerialLink serial_link_settle(Machine *m, SerialLink inner, uint32_t quiet_ms, uint32_t window_us);
+SerialLink serial_link_settle_env(Machine *m, SerialLink inner);
 /* Raw TCP client link to e.g. innkeeperd's line port; 0 on success, -1 on failure. */
 int uart_attach_tcp(Machine *m, int com, const char *host, int port);
 /* Browser builds: WebSocket link (ws:// or wss:// URL, binary frames of raw bytes); the native
