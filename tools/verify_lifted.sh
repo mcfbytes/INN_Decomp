@@ -51,7 +51,13 @@ COVERAGE=${INN_COVERAGE:-}
 [ "$COVERAGE" = 1 ] && COVERAGE=$OUT/coverage.txt
 INN_COVERAGE=$COVERAGE INN_VERIFY_LIFTED=$CALLS timeout 900 "$BUILD/inn" ${INN_ARGS:-} --headless \
     --run-ms "$RUN_MS" --script "$OUT/play.txt" "${HOST_ARGS[@]}" "$DRIVE" "${PROGRAM[@]}" \
-    > "$OUT/client.log" 2>&1 || true
+    2>&1 | { head -c 256M > "$OUT/client.log"; tail -c 64M > "$OUT/client.tail"; } || true
+# A run that logs without end (a mismatch on every call) keeps its first 256 MiB and last 64 MiB only.
+if [ -s "$OUT/client.tail" ]; then
+    echo "[client.log cut: the first 256 MiB, then the last 64 MiB]" >> "$OUT/client.log"
+    cat "$OUT/client.tail" >> "$OUT/client.log"
+fi
+rm -f "$OUT/client.tail"
 python3 -I "$ROOT/tools/ppm2png.py" "$OUT/map.ppm" "$OUT/map.png" 2>/dev/null || true
 grep -E '^verify:' "$OUT/client.log" | sort | uniq -c | sort -rn | head -200 || true
 [ -n "$COVERAGE" ] && echo "coverage: $COVERAGE"
