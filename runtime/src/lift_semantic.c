@@ -26,7 +26,18 @@ enum {
     PIT_CONTROL_ACCESS_MASK = 0x30,
     PIC_NON_SPECIFIC_EOI = 0x20,
     KBD_ACK_STROBE = 0x80,
+    /* 8237 channel 1 and the Sound Blaster DSP (base 220h, DMA 1) */
+    DMA_ADDRESS1 = 0x02, DMA_COUNT1 = 0x03, DMA_SINGLE_MASK = 0x0A, DMA_MODE = 0x0B, DMA_CLEAR_FLIPFLOP = 0x0C,
+    DMA_MASTER_CLEAR = 0x0D, DMA_PAGE1 = 0x83, DMA_LAST_REG = 0x0F, DMA_CHANNEL1 = 1, DMA_MASK_BIT = 0x04,
+    DMA_HAVE_MODE = 1, DMA_HAVE_ADDR_LO = 2, DMA_HAVE_ADDR_HI = 4, DMA_HAVE_COUNT_LO = 8, DMA_HAVE_COUNT_HI = 16,
+    DMA_HAVE_PAGE = 32, DMA_HAVE_ALL = 63,
+    SB_RESET_PORT = 0x226, SB_READ_PORT = 0x22A, SB_WRITE_PORT = 0x22C, SB_STATUS_PORT = 0x22E,
+    DSP_DMA_SINGLE = 0x14, DSP_DMA_AUTO = 0x1C, DSP_TIME_CONSTANT = 0x40, DSP_BLOCK_SIZE = 0x48,
+    DSP_HS_AUTO = 0x90, DSP_HS_SINGLE = 0x91, DSP_HALT = 0xD0, DSP_SPEAKER_ON = 0xD1, DSP_SPEAKER_OFF = 0xD3,
+    DSP_CONTINUE = 0xD4, DSP_EXIT_AUTO = 0xDA, DSP_IDENTIFY = 0xE0, DSP_VERSION = 0xE1,
 };
+
+static const uint32_t SB_NO_BLOCK = 0xFFFFFFFFu;
 
 static const uint16_t OPL_INDEX_PORTS[OPL_PORTS] = { 0x388, 0x228, 0x220, 0x222 };
 
@@ -69,6 +80,7 @@ void sem_trace_init(SemTrace *t)
     t->capsem = capsem;
     t->capraw = capraw;
     t->crtc_selected = -1;
+    t->sb_block = SB_NO_BLOCK;
 }
 
 void sem_trace_free(SemTrace *t)
@@ -263,11 +275,178 @@ static bool kbd_port(SemTrace *t, uint16_t port, int size, uint32_t value, bool 
     return true;
 }
 
+/* ---- 8237 channel 1: mask writes are events; the flip-flop clear, mode, both address and count bytes and
+ * the page are held, in any order, until all are in and become one program event ---- */
+
+static void dma_flush(SemTrace *t)
+{
+    for (int i = 0; i < t->dma_n; i++)
+        push_raw(t, t->dma_ev[i]);
+    t->dma_n = 0;
+    t->dma_have = 0;
+}
+
+/* One access of the program group; have is the part it sets (0 for the flip-flop clear). */
+static void dma_hold(SemTrace *t, uint16_t port, uint32_t value, uint8_t have)
+{
+    if ((t->dma_have & have) || t->dma_n == (int)(sizeof t->dma_ev / sizeof t->dma_ev[0]))
+        dma_flush(t); /* a part written twice: what was held does not form a program */
+    t->dma_ev[t->dma_n++] = (SemRaw){ port, 1, true, value };
+    t->dma_have |= have;
+    if (t->dma_have != DMA_HAVE_ALL)
+        return;
+    sem_trace_event(t, SEM_DMA_PROGRAM, (uint32_t)t->dma_mode << 24 | (uint32_t)t->dma_page << 16 | t->dma_addr,
+                    t->dma_count);
+    t->dma_n = 0;
+    t->dma_have = 0;
+}
+
+static void dma_word_byte(SemTrace *t, uint16_t port, uint8_t v)
+{
+    bool hi = t->dma_flipflop;
+    t->dma_flipflop = !t->dma_flipflop;
+    uint16_t *word = port == DMA_ADDRESS1 ? &t->dma_addr : &t->dma_count;
+    uint8_t lo_bit = port == DMA_ADDRESS1 ? DMA_HAVE_ADDR_LO : DMA_HAVE_COUNT_LO;
+    *word = hi ? (uint16_t)((*word & 0x00FF) | v << 8) : (uint16_t)((*word & 0xFF00) | v);
+    dma_hold(t, port, v, hi ? (uint8_t)(lo_bit << 1) : lo_bit);
+}
+
+static bool dma_port(SemTrace *t, uint16_t port, int size, uint32_t value, bool is_out)
+{
+    if (port > DMA_LAST_REG && port != DMA_PAGE1)
+        return false;
+    uint8_t v = (uint8_t)value;
+    if (port < 0x08) { /* address and count registers: every access steps the flip-flop */
+        bool ours = is_out && size == 1 && (port == DMA_ADDRESS1 || port == DMA_COUNT1);
+        if (ours) {
+            dma_word_byte(t, port, v);
+            return true;
+        }
+        t->dma_flipflop = !t->dma_flipflop;
+        return false;
+    }
+    if (!is_out || size != 1)
+        return false;
+    switch (port) {
+    case DMA_SINGLE_MASK:
+        if ((v & 3) != DMA_CHANNEL1)
+            return false;
+        sem_trace_event(t, SEM_DMA_MASK, DMA_CHANNEL1, (v & DMA_MASK_BIT) != 0);
+        return true;
+    case DMA_MODE:
+        if ((v & 3) != DMA_CHANNEL1)
+            return false;
+        t->dma_mode = v;
+        dma_hold(t, port, v, DMA_HAVE_MODE);
+        return true;
+    case DMA_CLEAR_FLIPFLOP:
+        t->dma_flipflop = false;
+        dma_hold(t, port, v, 0);
+        return true;
+    case DMA_PAGE1:
+        t->dma_page = v;
+        dma_hold(t, port, v, DMA_HAVE_PAGE);
+        return true;
+    case DMA_MASTER_CLEAR:
+        t->dma_flipflop = false;
+        return false;
+    default:
+        return false;
+    }
+}
+
+/* ---- Sound Blaster DSP: 226h 1 then 0 is a reset; 22Ch writes form commands with their argument bytes;
+ * 22Ah reads are data; 22Ch and 22Eh reads (write-ready and data-ready polls, the IRQ acknowledge) are
+ * dropped ---- */
+
+static int dsp_args(uint8_t cmd)
+{
+    switch (cmd) {
+    case 0x10: case DSP_TIME_CONSTANT: case DSP_IDENTIFY: case 0xE4: case 0x38:
+        return 1;
+    case DSP_DMA_SINGLE: case DSP_BLOCK_SIZE:
+    case 0x16: case 0x17: case 0x24: case 0x74: case 0x75: case 0x76: case 0x77: case 0x80:
+        return 2;
+    default:
+        return 0;
+    }
+}
+
+static uint32_t hold_word(const SemHold *h) { return (h->ev[1].value & 0xFF) | (h->ev[2].value & 0xFF) << 8; }
+
+/* A complete command: its event, or its bytes as raw accesses when it has no meaning here. */
+static void dsp_command(SemTrace *t)
+{
+    SemHold *h = &t->sb_cmd;
+    uint8_t cmd = (uint8_t)h->ev[0].value;
+    switch (cmd) {
+    case DSP_TIME_CONSTANT: sem_trace_event(t, SEM_SB_TIME_CONSTANT, h->ev[1].value & 0xFF, 0); break;
+    case DSP_BLOCK_SIZE:
+        t->sb_block = hold_word(h);
+        sem_trace_event(t, SEM_SB_BLOCK_SIZE, t->sb_block, 0);
+        break;
+    case DSP_DMA_SINGLE: sem_trace_event(t, SEM_SB_PCM_START, 0, hold_word(h)); break;
+    case DSP_HS_SINGLE: sem_trace_event(t, SEM_SB_PCM_START, 0, t->sb_block); break;
+    case DSP_DMA_AUTO: case DSP_HS_AUTO: sem_trace_event(t, SEM_SB_PCM_START, 1, t->sb_block); break;
+    case DSP_HALT: sem_trace_event(t, SEM_SB_PCM_STOP, 0, 0); break;
+    case DSP_EXIT_AUTO: sem_trace_event(t, SEM_SB_PCM_STOP, 1, 0); break;
+    case DSP_CONTINUE: sem_trace_event(t, SEM_SB_PCM_CONTINUE, 0, 0); break;
+    case DSP_SPEAKER_ON: sem_trace_event(t, SEM_SB_SPEAKER, 1, 0); break;
+    case DSP_SPEAKER_OFF: sem_trace_event(t, SEM_SB_SPEAKER, 0, 0); break;
+    case DSP_IDENTIFY: sem_trace_event(t, SEM_SB_IDENT, DSP_IDENTIFY, h->ev[1].value & 0xFF); break;
+    case DSP_VERSION: sem_trace_event(t, SEM_SB_IDENT, DSP_VERSION, 0); break;
+    default: hold_flush(t, h); return;
+    }
+    h->n = 0;
+}
+
+static bool sb_port(SemTrace *t, uint16_t port, int size, uint32_t value, bool is_out)
+{
+    if (size != 1)
+        return false;
+    switch (port) {
+    case SB_RESET_PORT:
+        if (!is_out)
+            return false;
+        if (value & 1) {
+            hold_flush(t, &t->sb_reset);
+            hold_add(&t->sb_reset, port, size, value, true);
+            return true;
+        }
+        if (!t->sb_reset.n)
+            return false;
+        t->sb_reset.n = 0;
+        hold_flush(t, &t->sb_cmd); /* an unfinished command is abandoned */
+        t->sb_args_needed = 0;
+        sem_trace_event(t, SEM_SB_RESET, 0, 0);
+        return true;
+    case SB_READ_PORT:
+        if (is_out)
+            return false;
+        sem_trace_event(t, SEM_SB_DATA, 0, value & 0xFF);
+        return true;
+    case SB_STATUS_PORT:
+        return !is_out; /* data-ready poll and IRQ acknowledge */
+    case SB_WRITE_PORT:
+        if (!is_out)
+            return true; /* write-ready poll */
+        if (!t->sb_cmd.n)
+            t->sb_args_needed = dsp_args((uint8_t)value);
+        hold_add(&t->sb_cmd, port, size, value, true);
+        if (t->sb_cmd.n > t->sb_args_needed)
+            dsp_command(t);
+        return true;
+    default:
+        return false;
+    }
+}
+
 void sem_trace_port(SemTrace *t, uint16_t port, int size, uint32_t value, bool is_out)
 {
     if (opl_port(t, port, size, value, is_out) || dac_port(t, port, size, value, is_out) ||
         crtc_port(t, port, size, value, is_out) || pit_port(t, port, size, value, is_out) ||
-        pic_port(t, port, size, value, is_out) || kbd_port(t, port, size, value, is_out))
+        pic_port(t, port, size, value, is_out) || kbd_port(t, port, size, value, is_out) ||
+        dma_port(t, port, size, value, is_out) || sb_port(t, port, size, value, is_out))
         return;
     if (port == 0x3DA && !is_out)
         return; /* input status: retrace polling */
@@ -284,6 +463,10 @@ void sem_trace_finish(SemTrace *t)
     hold_flush(t, &t->crtc_reg[1]);
     hold_flush(t, &t->pit);
     hold_flush(t, &t->kbd61);
+    dma_flush(t);
+    hold_flush(t, &t->sb_reset);
+    hold_flush(t, &t->sb_cmd);
+    t->sb_args_needed = 0;
 }
 
 bool sem_trace_next_read(SemTrace *t, SemKind kind, uint32_t *b)
@@ -301,9 +484,11 @@ bool sem_trace_next_read(SemTrace *t, SemKind kind, uint32_t *b)
 
 static const char *const KIND_NAME[SEM_KIND_COUNT] = {
     "opl_write", "dac_set", "dac_get", "crtc_start", "pit_divisor", "pic_eoi", "pic_mask", "kbd_data", "kbd_ack",
+    "dma_mask", "dma_program", "sb_reset", "sb_data", "sb_ident", "sb_time_constant", "sb_block_size",
+    "sb_pcm_start", "sb_pcm_stop", "sb_pcm_continue", "sb_speaker",
 };
 
-static bool is_read_kind(SemKind k) { return k == SEM_DAC_GET || k == SEM_KBD_DATA; }
+static bool is_read_kind(SemKind k) { return k == SEM_DAC_GET || k == SEM_KBD_DATA || k == SEM_SB_DATA; }
 
 static void describe_sem(const SemEvent *e, char *out, size_t cap)
 {
