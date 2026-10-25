@@ -1,4 +1,4 @@
-/* Announces code that programs load with plain file reads (LSCI drivers and DLLs: TSN-INN-Decomp
+/* Announces code that programs load with plain file reads (LSCI drivers and DLLs, Miles .ADV drivers: TSN-INN-Decomp
  * docs/lsci/interpreter.md 3.5; Borland overlays: docs/lifting.md), so its lifted functions get armed. */
 #include <ctype.h>
 #include <stdio.h>
@@ -23,10 +23,10 @@ static bool has_extension(const char *path, const char *ext)
     return true;
 }
 
-/* File offset where the code image starts: drivers are raw images, DLLs follow their relocations. */
+/* File offset where the code image starts: drivers (.DRV, Miles .ADV) are raw images, DLLs follow their relocations. */
 static bool image_start(const DosFile *f, off_t *start)
 {
-    if (has_extension(f->dos_path, ".DRV")) {
+    if (has_extension(f->dos_path, ".DRV") || has_extension(f->dos_path, ".ADV")) {
         *start = 0;
         return true;
     }
