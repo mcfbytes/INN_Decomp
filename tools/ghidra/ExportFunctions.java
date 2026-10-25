@@ -310,6 +310,9 @@ public class ExportFunctions extends GhidraScript {
                 rename(existing, name);
                 return existing;
             }
+            if (name != null) {
+                splitOverlap(addr);
+            }
             Function owner = getFunctionContaining(addr);
             if (owner != null && name != null) {
                 carve(owner, addr);
@@ -337,6 +340,32 @@ public class ExportFunctions extends GhidraScript {
         }
     }
 
+    // Hand-written code enters in the middle of an instruction (80 CF 00: OR BH,0 hides an IRET at +1).
+    // Replace that instruction by one starting at addr and take addr's bytes out of the owner.
+    private void splitOverlap(Address addr) throws Exception {
+        Instruction mid = currentProgram.getListing().getInstructionContaining(addr);
+        if (mid == null || mid.getAddress().equals(addr)) {
+            return;
+        }
+        Function owner = getFunctionContaining(mid.getAddress());
+        clearListing(mid.getMinAddress(), mid.getMaxAddress());
+        disassemble(addr);
+        Instruction ins = getInstructionAt(addr);
+        if (owner == null || ins == null) {
+            return;
+        }
+        AddressSet body = new AddressSet(owner.getBody());
+        body.delete(new AddressSet(ins.getMinAddress(), ins.getMaxAddress()));
+        int tx = currentProgram.startTransaction("split");
+        boolean ok = false;
+        try {
+            owner.setBody(body);
+            ok = true;
+        } finally {
+            currentProgram.endTransaction(tx, ok);
+        }
+    }
+
     private void rename(Function fn, String name) throws Exception {
         if (name == null || name.equals(fn.getName())) {
             return;
@@ -357,7 +386,7 @@ public class ExportFunctions extends GhidraScript {
         if (body.getRangeContaining(addr) == null) {
             return;
         }
-        body.deleteFromMin(addr);
+        body.delete(new AddressSet(addr, body.getMaxAddress()));
         int tx = currentProgram.startTransaction("carve");
         boolean ok = false;
         try {
