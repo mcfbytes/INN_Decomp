@@ -114,7 +114,8 @@ the 4 ms clamp of nested `setTimeout` is avoided). While suspended, WebSocket me
 stacks (VM, kernel, driver, nested InvokeMethod) and the indirect calls through lifted-entry tables are
 fine. The native web build requires JSPI (Chromium-based browsers today). Asyncify with
 `ASYNCIFY_IGNORE_INDIRECT` cannot work here (lifted code is entered through function pointers);
-full-instrumentation Asyncify stays a possible fallback for other browsers, to be measured (package 9).
+full-instrumentation Asyncify, linked as a second variant from the same objects, is the fallback for
+other browsers ([asyncify.md](asyncify.md)).
 
 `setjmp`/`longjmp` (process exit unwinds the native C stack to the EXEC that started the program, and
 the VM's Restart kernel) must use WebAssembly exception handling (`-fwasm-exceptions
@@ -126,7 +127,8 @@ scope, then longjmps out and dispatches again (Node 24 with `--experimental-wasm
 pattern passes in headless Chromium 153).
 
 The native web build requires JSPI, so it runs in Chromium-based browsers (Chrome, Edge) and not in
-browsers that only have Asyncify. Full-instrumentation Asyncify has not been measured as a fallback.
+browsers that only have Asyncify, until the Asyncify variant is built. Its measurements, flags and
+page-level choice are in [asyncify.md](asyncify.md).
 
 **Natively (SDL2)** the same waits call `SDL_Delay` and pump SDL events. **Headless** runs use a
 deterministic virtual clock (section 5) and no platform at all: waits jump the clock, the input
@@ -569,7 +571,7 @@ starts from it.
 | The VM kernel-call epilogue and the opcode re-entry are hand-written from disassembly | package 3 | the native VM driver is the body of the lifted InvokeMethod, which is shadow-verified on every scenario in the hybrid build with `INN_NATIVE_CONTROL=1`; the region lift keeps its own verification |
 | Interrupt latency differs: ISRs run only at safe points | package 11 | safe points at every call boundary are denser than the original's interrupt windows matter for; device replay already accepts this rule; differential runs catch timing-dependent behaviour |
 | Work charge too small or too large changes the scripts' speed measurement and animation detail | package 11 | charge configurable; differential screens on animated scenes; compare the speed-dependent script results in both builds |
-| JSPI unavailable (non-Chromium browsers), or wasm exceptions with JSPI misbehave | package 11 | prove suspension inside a setjmp scope early (unit test under Node with JSPI); keep the hybrid web build as the fallback product; measure full Asyncify |
+| JSPI unavailable (non-Chromium browsers), or wasm exceptions with JSPI misbehave | package 11 | prove suspension inside a setjmp scope early (unit test under Node with JSPI); keep the hybrid web build as the fallback product; without JSPI, the Asyncify variant of [asyncify.md](asyncify.md) |
 | The link without UART pacing: bursts where the original trickled at 2400 baud | package 7 | the dial's own delays stay; `innkeeperd` takes any rate; traffic compared message by message |
 | Mixed-mode hand-off leaves device state inconsistent (PIT rate, masks, video mode, a vector into freed memory) | package 10b | explicit hand-off lists both ways; game scenarios end to end; vectors checked on return |
 | Hidden port I/O or interpretation left in a rarely used path (Shake, Scroll, error paths) | packages 4, 9 | strict mode makes it fatal with the address and module; VGA320's unlifted Shake and Scroll, which no INN script calls, are reported if ever reached |
