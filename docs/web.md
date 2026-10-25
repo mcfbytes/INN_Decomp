@@ -691,8 +691,8 @@ and `legal/` next to `inn.html`.
 
 `legal/terms.html`, `privacy.html` and `copyright.html` are standalone documents. `legal/legal.js` fills their
 placeholders from `../site.json`; a missing value shows a highlighted `[operator: set <field> in site.json]` and a
-banner says the deployment has not filled in its operator details. Each page says it is not legal advice and should be
-reviewed by a lawyer before a public launch.
+banner says the deployment has not filled in its operator details. The pages were written without a lawyer
+(docs/legal.md); they carry no disclaimer box, at the operator's choice (2026-10-24).
 
 Where the links are: the Help menu (Terms of Use, Privacy, Copyright & takedown, each in a new tab with
 `rel="noopener"`); Help, About (operator, contact, terms version and the links); a small always-visible
