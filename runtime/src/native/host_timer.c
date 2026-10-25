@@ -1,4 +1,5 @@
 /* PIT channel 0 as a host timer: IRQ 0 every divisor / 1193182 s of the native clock. */
+#include "devices.h"
 #include "host_timer.h"
 #include "native_internal.h"
 
@@ -50,9 +51,14 @@ uint64_t host_timer_next_due_us(const Machine *m)
     return (n->timer_due_ns + 999) / 1000;
 }
 
+enum { PORT61_SPEAKER_GATES = 0x03 };
+
+/* Port 61h's gate bits as native code reads them back, and the PIT device's channel 2 for the mixer. */
 void host_timer_speaker(Machine *m, uint16_t divisor, bool on)
 {
-    (void)m, (void)divisor, (void)on; /* no INN code drives the speaker */
+    uint8_t gates = on ? PORT61_SPEAKER_GATES : 0;
+    native_set_port61(m, (uint8_t)((native_port61(m) & ~PORT61_SPEAKER_GATES) | gates));
+    pit_set_speaker(m, divisor, on);
 }
 
 void host_timer_poll(Machine *m)
