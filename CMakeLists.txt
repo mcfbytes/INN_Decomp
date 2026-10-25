@@ -161,4 +161,7 @@ else()
     target_link_libraries(${test_name} dosrt)
     add_test(NAME ${test_name} COMMAND ${test_name})
   endforeach()
+  # The rule parser lives in the frontend; the test supplies its own exec_stub stand-ins.
+  target_sources(test_host_rules PRIVATE runtime/frontend/host_rules.c)
+  target_include_directories(test_host_rules PRIVATE runtime/frontend)
 endif()

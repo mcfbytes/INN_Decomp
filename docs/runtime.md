@@ -215,7 +215,22 @@ reply 24 02 => 24 02 T              # T: host time (year-1900, month, day, hour,
 reply 1c => 02 00 @1 @2 @1 @2 @9-   # @N: request byte N; @N-: the request from byte N on
 ```
 
-Every rule whose pattern (hex, `..` any byte) prefixes a client message queues its reply. Run the game
+Every rule whose pattern (hex, `..` any byte) prefixes a client message queues its reply. More forms:
+
+```
+reply once 1c => ...          # answers the first matching message only
+reply nth 3 1c => ...         # answers only the 3rd matching message
+reply 1c => 02 00 @1 @2 @9w+10 @11w-2 @13d+1    # @Nw+K / @Nw-K: the little-endian word at request offset N
+                                                  # plus or minus the hex K, as 2 bytes; @Nd+K likewise, 4 bytes
+at 20000 => 02 00 ...         # queued once when emulated time passes 20000 ms
+```
+
+Sums wrap at 16 (32) bits; bytes past the request read as 0. An `at` rule has no request, so `@` items in it
+read 0; it is checked at each stand-in Send, Receive and Poll callback (`exec_stub_set_poll_hook`), so it
+fires as soon as the client next talks to the host, in queue order after earlier replies. Time counts from
+emulated power-on (`virtual_us`), which is within a second of the program start. `tests/test_host_rules.c`
+covers the forms.
+ Run the game
 itself, not `TSNEXEC.EXE`: `inn --tsn-host rules.txt <drive> 'INN\BARON\RB.EXE' '-C..\LSCI.CFG'`
 ([redbaron.md](redbaron.md)).
 
