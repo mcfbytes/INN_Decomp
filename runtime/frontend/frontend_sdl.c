@@ -54,7 +54,7 @@ typedef struct Options {
     int trace;
     uint64_t ips;
     const char *com1;
-    bool headless, perf;
+    bool headless, perf, audiotap;
     uint64_t run_ms;
     const char *screenshot;
     const char *script;
@@ -397,6 +397,8 @@ static int start_windowed(Frontend *f, const Options *o)
     }
     f->frame_w = 320, f->frame_h = 200;
     frontend_audio_open(f->m, true, o->wav);
+    if (o->audiotap)
+        audio_tap_enable(f->m, true);
     frame_clock_start(&f->clock, f->m, o->perf);
     f->perf = o->perf;
     g_frontend = f;
@@ -472,6 +474,8 @@ static int start_headless(Frontend *f, const Options *o)
         input_script_set_sync(f->script, o->sync_dir, hold_link, f->m);
     if (o->wav && frontend_audio_open(f->m, false, o->wav) != 0)
         return -1;
+    if (o->audiotap)
+        audio_tap_enable(f->m, true);
     g_frontend = f;
     return 0;
 }
@@ -704,7 +708,7 @@ static int run_native(Frontend *f)
 
 static void usage(void)
 {
-    fprintf(stderr, "usage: inn [--trace N] [--ips N] [--com1 host:port|ws://host:port] [--perf] [--wav out.wav] [--conv-kb N] [--no-fpu] [--no-idle-skip] [--tsn-host rules.txt] "
+    fprintf(stderr, "usage: inn [--trace N] [--ips N] [--com1 host:port|ws://host:port] [--perf] [--audiotap] [--wav out.wav] [--conv-kb N] [--no-fpu] [--no-idle-skip] [--tsn-host rules.txt] "
                     "[--headless --run-ms N --screenshot out.ppm --script input.txt [--sync-dir dir]] <c-drive-dir> <program> [args]\n");
 }
 
@@ -716,6 +720,7 @@ static int parse_args(int argc, char **argv, Options *o)
         const char *a = argv[i], *next = i + 1 < argc ? argv[i + 1] : NULL;
         if (!strcmp(a, "--headless")) { o->headless = true; continue; }
         if (!strcmp(a, "--perf")) { o->perf = true; continue; }
+        if (!strcmp(a, "--audiotap")) { o->audiotap = true; continue; }
         if (!strcmp(a, "--no-fpu")) { o->no_fpu = true; continue; }
         if (!strcmp(a, "--no-idle-skip")) { o->no_idle_skip = true; continue; }
         if (!next)

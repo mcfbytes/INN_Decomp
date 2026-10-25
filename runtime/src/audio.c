@@ -1,5 +1,7 @@
 /* Audio mixer. Output frame n is emulated time base_ns + n / rate, so sound follows the emulated
  * clock; sources render lazily, before each change to their sound (audio_sync) and on reads. */
+#include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -16,7 +18,18 @@ static const double ERROR_SMOOTHING = 0.05; /* per paced read, about 60 per seco
 static const double STRETCH_GAIN = 0.01;    /* relative stretch per unit of queue error */
 static const double RESYNC_ERROR = 0.5;     /* a sustained excess the stretch would take seconds to drain */
 
+typedef struct TapSource {
+    const char *name;
+    uint64_t frames, sq_sum; /* this second: frames, and the sum of squared samples (both channels) */
+    int32_t peak;            /* this second */
+    uint64_t total_frames;
+    int32_t max_peak;
+} TapSource;
+
 typedef struct Audio {
+    bool tap;
+    uint64_t tap_next; /* frames_done at which the next tap line is due */
+    TapSource tapped[AUDIO_MAX_SOURCES];
     int rate;
     AudioStats stats;
     int target_ms; /* 0: AUDIO_TARGET_MS */
@@ -68,17 +81,85 @@ static const int16_t *ring_at(const Audio *a, int i)
     return &a->ring[(a->read + i) % AUDIO_RING_FRAMES * AUDIO_CHANNELS];
 }
 
+static void tap_account(TapSource *t, const int32_t *before, const int32_t *after, int n)
+{
+    for (int i = 0; i < n * AUDIO_CHANNELS; i++) {
+        int32_t v = after[i] - before[i], av = v < 0 ? -v : v;
+        if (av > t->peak)
+            t->peak = av;
+        t->sq_sum += (uint64_t)((int64_t)v * v);
+    }
+    t->frames += (uint64_t)n;
+}
+
+static void tap_report(Audio *a)
+{
+    char line[256];
+    int len = snprintf(line, sizeof line, "audio: tap t=%llu", (unsigned long long)(a->frames_done / (uint64_t)a->rate));
+    for (int s = 0; s < a->source_count; s++) {
+        TapSource *t = &a->tapped[s];
+        double rms = t->frames ? sqrt((double)t->sq_sum / (double)(t->frames * AUDIO_CHANNELS)) : 0.0;
+        t->total_frames += t->frames;
+        if (t->peak > t->max_peak)
+            t->max_peak = t->peak;
+        if (len < (int)sizeof line)
+            len += snprintf(line + len, sizeof line - (size_t)len, " %s frames=%llu peak=%d rms=%.0f total=%llu max=%d",
+                            t->name ? t->name : "src", (unsigned long long)t->frames, t->peak, rms,
+                            (unsigned long long)t->total_frames, t->max_peak);
+        t->frames = t->sq_sum = 0;
+        t->peak = 0;
+    }
+    log_msg("%s", line);
+}
+
+void audio_tap_enable(Machine *m, bool on)
+{
+    Audio *a = audio_state(m);
+    a->tap = on;
+    a->tap_next = a->frames_done + (uint64_t)a->rate;
+}
+
+void audio_name_source(Machine *m, int source, const char *name)
+{
+    if (source >= 0 && source < AUDIO_MAX_SOURCES)
+        audio_state(m)->tapped[source].name = name;
+}
+
+int32_t audio_tap_peak(Machine *m, const char *name)
+{
+    const Audio *a = audio_state(m);
+    for (int s = 0; s < a->source_count; s++) {
+        const TapSource *t = &a->tapped[s];
+        if (t->name && !strcmp(t->name, name))
+            return t->peak > t->max_peak ? t->peak : t->max_peak;
+    }
+    return 0;
+}
+
 static void render(Machine *m, Audio *a, uint64_t frames)
 {
     int32_t mix[CHUNK_FRAMES * AUDIO_CHANNELS];
     while (frames > 0) {
         int n = frames < CHUNK_FRAMES ? (int)frames : CHUNK_FRAMES;
         memset(mix, 0, sizeof mix);
-        for (int s = 0; s < a->source_count; s++)
-            a->sources[s](m, mix, n);
+        if (a->tap) {
+            int32_t before[CHUNK_FRAMES * AUDIO_CHANNELS];
+            for (int s = 0; s < a->source_count; s++) {
+                memcpy(before, mix, sizeof(int32_t) * AUDIO_CHANNELS * (size_t)n);
+                a->sources[s](m, mix, n);
+                tap_account(&a->tapped[s], before, mix, n);
+            }
+        } else {
+            for (int s = 0; s < a->source_count; s++)
+                a->sources[s](m, mix, n);
+        }
         ring_push(a, mix, n);
         a->frames_done += (uint64_t)n;
         frames -= (uint64_t)n;
+        if (a->tap && a->frames_done >= a->tap_next) {
+            tap_report(a);
+            a->tap_next += (uint64_t)a->rate;
+        }
     }
 }
 
@@ -322,6 +403,7 @@ void audio_set_rate(Machine *m, int rate)
     a->rate = rate;
     a->base_ns = machine_now_ns(m);
     a->frames_done = 0;
+    a->tap_next = (uint64_t)rate;
     a->read = a->count = 0;
     a->phase = -1.0;
     a->error_avg = 0;

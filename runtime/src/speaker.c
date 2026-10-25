@@ -53,7 +53,7 @@ void speaker_init(Machine *m)
     if (!s)
         fatal("out of memory");
     m->speaker = s;
-    audio_add_source(m, speaker_render);
+    audio_name_source(m, audio_add_source(m, speaker_render), "speaker");
 }
 
 void speaker_shutdown(Machine *m)

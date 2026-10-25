@@ -43,8 +43,10 @@ EM_JS(int, web_audio_open, (int rate), {
     Module.innAudio = sink;
     const url = typeof innAsset === 'function' ? innAsset('audio-worklet.js') : 'audio-worklet.js';
     ctx.audioWorklet.addModule(url).then(() => {
-        const node = new AudioWorkletNode(ctx, 'inn-sink', { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2] });
-        node.port.onmessage = (e) => { sink.taken = e.data.taken; sink.starved = e.data.starved; sink.at = ctx.currentTime; };
+        const node = new AudioWorkletNode(ctx, 'inn-sink', { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2],
+            processorOptions: { tap: !!Module.innAudioTapOn } });
+        node.port.onmessage = (e) => { sink.taken = e.data.taken; sink.starved = e.data.starved; sink.at = ctx.currentTime;
+            if (e.data.received !== undefined) { sink.tap = e.data; sink.tapWin = Math.max(sink.tapWin || 0, e.data.win); } };
         node.connect(ctx.destination);
         sink.node = node;
     }).catch((e) => console.warn('audio: the worklet did not load (' + e + '); sound is off'));
@@ -66,6 +68,7 @@ EM_JS(void, web_audio_post, (const int16_t *frames, int count), {
     const data = HEAP16.slice(frames >> 1, (frames >> 1) + count * 2);
     s.node.port.postMessage(data, [data.buffer]);
     s.sent += count;
+    if (Module.innAudioTapOn) { s.posts = (s.posts || 0) + 1; s.postedFrames = (s.postedFrames || 0) + count; }
 });
 
 EM_JS(void, web_audio_close, (void), {

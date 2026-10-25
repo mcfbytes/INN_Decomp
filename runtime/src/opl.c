@@ -178,7 +178,7 @@ void opl_init(Machine *m)
     port_register(m, OPL_PORT_ADDR, OPL_PORT_DATA, opl_in, opl_out);
     port_register(m, SB_OPL_PORT_ADDR, SB_OPL_PORT_DATA, opl_in, opl_out);
     port_register(m, SBPRO_OPL_FIRST, SBPRO_OPL_LAST, opl_in, opl_out);
-    audio_add_source(m, opl_render);
+    audio_name_source(m, audio_add_source(m, opl_render), "opl");
 }
 
 void opl_shutdown(Machine *m)

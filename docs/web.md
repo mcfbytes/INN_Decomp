@@ -57,6 +57,7 @@ The page asks for the install (unless `inn.data` provides one), then runs
 | `scenes` | Any value: shows a small picker at the bottom left to flip between the scenes live (it also updates `scene=` in the address bar). |
 | `classic=1` | The old layout for debugging: the setup card (picker, drop zone, Advanced, Connect, modem panel) over the scene, with no menu bar, score or narrator box. |
 | `perf=1` | Pass `--perf`: a timing line in the log every 5 s (see Performance). |
+| `audiotap=1` | Pass `--audiotap`: per-source sound counters, `window.innAudioTap` and `audio: tap` log lines (see Sound). Off by default. |
 | `ips=N` | Guest instruction rate (`--ips`), default 20000000. |
 | `idle=0` | Pass `--no-idle-skip`: the guest's input polls never let time skip ahead (docs/runtime.md, "Idle polls"). |
 
@@ -854,6 +855,23 @@ frames are dropped rather than posted, so unmuting does not play stale sound.
 The page reaches the context as `Module.innAudio.ctx` (`audioContext()` in `page.js`): mute suspends it, unmute
 and the first mouse down on the canvas resume it. A browser without AudioWorklet runs silent and logs
 `audio: this browser has no AudioWorklet; sound is off`.
+
+**Debug tap and headless check.** `?audiotap=1` (the runtime option `--audiotap`, native too) makes the mixer count, per
+source (`opl`, `sb` for the Sound Blaster DSP, `speaker`), the frames it renders and their peak and RMS, and logs one
+`audio: tap t=<s> opl frames=.. peak=.. rms=.. total=.. max=.. sb ..` line per second of output. `page.js` keeps the latest
+values in `window.innAudioTap` (`sources`, and `worklet`: messages, frames received, peak, and `peakSec`, the peak of the last
+second, from `audio-worklet.js`, which counts what its queue received) and logs a `audio: tap worklet` line a second.
+Peaks are int16 (32768 is full scale). Off, it costs one branch per 256-frame chunk and nothing in the worklet.
+`tools/web_audio_check.mjs <build> --port N` (same `playwright-core` setup as `make_og.mjs`) serves a web build, opens it
+with `?autostart=1&audiotap=1&com1=...` and `--autoplay-policy=no-user-gesture-required`, and asserts that after logon the FM
+(OPL) source is loud, reaches the worklet and the DSP is silent in that second, and, replaying the click times of
+`private/lifted/scenarios/inn_sierraland.txt` (read at run time), that SierraLand to 3-D Golf makes the DSP loud in at least
+two separate seconds (its own start-up click is one) and the worklet receives it; `--mode off` checks that without the tap
+nothing is logged and the median `perf:` speed stays 0.99-1.01. The build must use `-DINN_WEB_PRELOAD_DIR` on a drive whose
+`LSCI.CFG` names `sndblast.drv` (`GOLF.EXE` under INN starts on its PC speaker device; the check's drive has the device
+word GOLF initialises at file offset 0x170EC set from 1 to 2 so that it uses the DSP). Such a build holds media: never
+package or publish it. Checked 2026-10-25 on the hybrid build: FM loud at logon plus 14 s (peak about 2600), digital in 3-D
+Golf at 3-D Golf plus 13 s and 15 s, tap-off median speed 1.000; the native JSPI build with `adl.drv` passes the FM check.
 
 ## Performance
 
