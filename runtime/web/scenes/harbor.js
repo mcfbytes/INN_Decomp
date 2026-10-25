@@ -167,8 +167,9 @@ InnScenes.register((() => {
       for (const k of [3, 7, 11]) { g.fillStyle = P.col('#3c2c28'); g.fillRect(x - 6.4 * s, y - k * s, 12.8 * s, 1.2); }
       P.blob(g, x, y - 14 * s, 6 * s, 1.8 * s, '#5c3c20', { wob: 0.2, seed: seed + 1, n: 10 });
     };
-    barrel(120, 196, 1.2, 61); barrel(138, 198, 1.1, 62);
-    P.text(g, 'SIGNAL', 108, 188, '#f6e8c8', 1, 0);
+    barrel(120, 196, 1.35, 61); barrel(140, 198, 1.35, 62);
+    // the font is wider than a barrel, so the word is stencilled across the pair
+    P.text(g, 'SIG', 112, 183, '#f6e8c8', 1, 0); P.text(g, 'NAL', 132, 185, '#f6e8c8', 1, 1);
     // coil of rope
     P.blob(g, 36, 194, 12, 4, ['#e8d098', '#8c6c40'], { wob: 0.4, seed: 63, n: 12, edge: '#3c2410', ea: 0.5 });
     P.blob(g, 36, 193, 6, 2, '#6c4c28', { wob: 0.2, seed: 64, n: 8 });
@@ -416,8 +417,8 @@ InnScenes.register((() => {
       'The pink house has a laundry line with exactly one sock on it. Nobody comments.'] },
     { id: 'boat', x: 150, y: 100, w: 34, h: 18, say: [
       'A rowing boat named "Dial". It is going nowhere in particular, patiently.'] },
-    { id: 'barrels', x: 104, y: 178, w: 44, h: 24, say: [
-      'A barrel marked "SIGNAL". You decide not to ask what is in it. It sloshes.'] },
+    { id: 'barrels', x: 104, y: 176, w: 48, h: 24, say: [
+      'Two barrels marked "SIG" and "NAL". You decide not to ask what is in them. One sloshes.'] },
     { id: 'rope', x: 22, y: 186, w: 28, h: 14, say: [
       'A coil of rope. It has been waiting here so long it has become a hat for the dock.'] },
     { id: 'sea', x: 0, y: 96, w: 132, h: 62, say: [

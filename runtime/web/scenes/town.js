@@ -349,11 +349,12 @@ InnScenes.register((() => {
       },
     },
     {
-      // a pigeon on the post round: it hurries across the square with a letter in its beak
-      gag: { start: 4, period: 22, dur: 11 }, x: 130, y: 170, w: 190, h: 28, sample: 0,
+      // a pigeon on the post round: it hurries across the square with a letter in its beak, in at one
+      // edge and out at the other (the rectangle is the whole width, so it is never cut off on the way)
+      gag: { start: 4, period: 24, dur: 16 }, x: 0, y: 170, w: 320, h: 28, sample: 0,
       draw(g, t, P, u) {
-        const x = 312 - u * 190, y = 188 + Math.abs(Math.sin(u * 60)) * -0.8;
-        const f = Math.sin(u * 90) * 1.8;
+        const x = 330 - u * 344, y = 188 + Math.abs(Math.sin(u * 108)) * -0.8;
+        const f = Math.sin(u * 162) * 1.8;
         P.shape(g, [[x - 4, y - 1], [x - 2, y - 5.5], [x + 3, y - 5.5], [x + 5, y - 2], [x + 2, y + 0.6], [x - 3, y + 0.6]], ['#b8bcd0', '#6c708c'], { wob: 0.2, seed: 7, edge: '#2c2c40', ea: 0.6 });
         P.shape(g, [[x - 4, y - 3], [x - 8, y - 4.4], [x - 7, y - 2]], '#8c90ac', { wob: 0.1, seed: 8 });
         P.blob(g, x + 4.4, y - 7.4, 2.2, 2.2, ['#d8dcec', '#8c90ac'], { wob: 0.1, seed: 9, n: 8 });
