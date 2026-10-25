@@ -148,6 +148,9 @@ SerialLink *uart_link(Machine *m, int com);
  * WebSocket one exists in browser builds only. */
 SerialLink serial_link_tcp(const char *host, int port);
 SerialLink serial_link_ws(const char *url);
+/* Moves what the peer has sent into the link's own queue, served first by recv, so a client held still
+ * (an input script's "wait") leaves nothing backed up at the peer. Only the TCP link queues. */
+void serial_link_drain(SerialLink *link);
 /* Raw TCP client link to e.g. innkeeperd's line port; 0 on success, -1 on failure. */
 int uart_attach_tcp(Machine *m, int com, const char *host, int port);
 /* Browser builds: WebSocket link (ws:// or wss:// URL, binary frames of raw bytes); the native

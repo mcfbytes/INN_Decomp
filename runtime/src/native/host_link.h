@@ -22,6 +22,8 @@ int host_link_recv(Machine *m, uint8_t *buf, int cap);
  * (10 bits), as the UART did, unless INN_LINK_PACING=0. 0 baud turns pacing off. */
 void host_link_set_rate(Machine *m, uint32_t baud);
 void host_link_set_dtr(Machine *m, bool on);
+/* serial_link_drain on the attached link; not a safe point (the machine is held still). */
+void host_link_drain(Machine *m);
 void host_link_break(Machine *m);                      /* sends the CR stand-in innkeeperd expects */
 /* The driver's ring pump (the UART interrupt's work, done without a UART) lives with the lifted driver
  * and registers itself here; host_link_pump runs it at safe points in native mode and as a machine

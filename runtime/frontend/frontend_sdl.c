@@ -58,6 +58,7 @@ typedef struct Options {
     uint64_t run_ms;
     const char *screenshot;
     const char *script;
+    const char *sync_dir;
     const char *wav;
     unsigned conv_kb;
     bool no_fpu, no_idle_skip;
@@ -434,9 +435,19 @@ static void headless_wait_point(Machine *m)
     Frontend *f = g_frontend;
     if (m->virtual_us >= f->end_us)
         exit(finish_run(f, 0));
-    if (f->script)
-        input_script_apply(f->script, m);
+    if (f->script && input_script_apply(f->script, m) != 0)
+        exit(finish_run(f, 1));
     frontend_audio_pump(m);
+}
+
+/* An input script's "wait" holds the machine still; the server's bytes queue in the link meanwhile. */
+static void hold_link(void *ctx)
+{
+#if INN_NATIVE_HW
+    host_link_drain(ctx);
+#else
+    serial_link_drain(uart_link(ctx, UART_COM1));
+#endif
 }
 
 /* A nested wait that outlasts the current chunk (a native start running inside the hybrid build)
@@ -457,6 +468,8 @@ static int start_headless(Frontend *f, const Options *o)
         fprintf(stderr, "cannot load script %s\n", o->script);
         return -1;
     }
+    if (f->script)
+        input_script_set_sync(f->script, o->sync_dir, hold_link, f->m);
     if (o->wav && frontend_audio_open(f->m, false, o->wav) != 0)
         return -1;
     g_frontend = f;
@@ -467,8 +480,8 @@ static int run_headless(Frontend *f)
 {
     lift_set_nested_yield(f->m, headless_nested_yield);
     while (f->m->virtual_us < f->end_us && !f->m->exit_requested) {
-        if (f->script)
-            input_script_apply(f->script, f->m);
+        if (f->script && input_script_apply(f->script, f->m) != 0)
+            return -1;
         f->script_due_us = f->m->virtual_us + HEADLESS_CHUNK_US;
         machine_run_for(f->m, HEADLESS_CHUNK_US);
         frontend_audio_pump(f->m);
@@ -692,7 +705,7 @@ static int run_native(Frontend *f)
 static void usage(void)
 {
     fprintf(stderr, "usage: inn [--trace N] [--ips N] [--com1 host:port|ws://host:port] [--perf] [--wav out.wav] [--conv-kb N] [--no-fpu] [--no-idle-skip] [--tsn-host rules.txt] "
-                    "[--headless --run-ms N --screenshot out.ppm --script input.txt] <c-drive-dir> <program> [args]\n");
+                    "[--headless --run-ms N --screenshot out.ppm --script input.txt [--sync-dir dir]] <c-drive-dir> <program> [args]\n");
 }
 
 static int parse_args(int argc, char **argv, Options *o)
@@ -713,6 +726,7 @@ static int parse_args(int argc, char **argv, Options *o)
         else if (!strcmp(a, "--run-ms")) o->run_ms = strtoull(next, NULL, 10);
         else if (!strcmp(a, "--screenshot")) o->screenshot = next;
         else if (!strcmp(a, "--script")) o->script = next;
+        else if (!strcmp(a, "--sync-dir")) o->sync_dir = next;
         else if (!strcmp(a, "--wav")) o->wav = next;
         else if (!strcmp(a, "--tsn-host")) o->host_rules = next;
         else if (!strcmp(a, "--conv-kb")) o->conv_kb = (unsigned)strtoul(next, NULL, 10);
