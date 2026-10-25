@@ -381,6 +381,7 @@ public class ExportFunctions extends GhidraScript {
             }
         }
         DecompInterface decomp = new DecompInterface();
+        boolean resume = "1".equals(System.getenv("EXPORT_RESUME"));
         int okCount = 0;
         try {
             decomp.openProgram(currentProgram);
@@ -393,8 +394,17 @@ public class ExportFunctions extends GhidraScript {
                     i++;
                     String label = imageLabel(fn.getEntryPoint());
                     String stem = label.replace(':', '_');
-                    writeAsm(new File(outDir, stem + ".asm"), fn);
-                    String err = writeC(new File(outDir, stem + ".c"), decomp, fn);
+                    File cFile = new File(outDir, stem + ".c");
+                    File asmFile = new File(outDir, stem + ".asm");
+                    String err;
+                    if (resume && cFile.length() > 0 && asmFile.length() > 0) {
+                        // EXPORT_RESUME: a previous, interrupted run already wrote this function.
+                        err = java.nio.file.Files.readString(cFile.toPath()).startsWith("/* decompile error")
+                            ? "earlier error" : null;
+                    } else {
+                        writeAsm(asmFile, fn);
+                        err = writeC(cFile, decomp, fn);
+                    }
                     if (err == null) {
                         okCount++;
                     }
