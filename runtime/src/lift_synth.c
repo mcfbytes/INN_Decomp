@@ -108,7 +108,7 @@ static void cut_comment(char *s)
             p++;
         else if (*p == '"')
             quoted = !quoted;
-        else if (*p == '#' && !quoted) {
+        else if (*p == '#' && !quoted && (p == s || isspace((unsigned char)p[-1]))) { /* MOD#stub is a name */
             *p = 0;
             return;
         }
