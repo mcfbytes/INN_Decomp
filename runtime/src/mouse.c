@@ -21,7 +21,6 @@ typedef struct MouseEvent { uint16_t mask, buttons, x, y; int16_t mx, my; } Mous
 typedef struct Mouse {
     int x, y;                /* virtual coordinates */
     int min_x, max_x, min_y, max_y;
-    int virt_h;              /* 200 or 480 depending on the mode at reset */
     uint16_t buttons;
     uint16_t press_count[MOUSE_BUTTONS], release_count[MOUSE_BUTTONS];
     int press_x[MOUSE_BUTTONS], press_y[MOUSE_BUTTONS], release_x[MOUSE_BUTTONS], release_y[MOUSE_BUTTONS];
@@ -39,15 +38,18 @@ static Mouse *mouse_state(Machine *m) { return m->mouse; }
 
 static int clampi(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
 
+/* Virtual screen height of the current mode, as a driver that follows INT 10h mode sets keeps it:
+ * Fastgraph (SHOPADV) resets the driver in text mode and only then sets mode 12h. */
+static int virt_h(Machine *m) { return vga_mode(m) == 0x12 ? 480 : VIRTUAL_H_200; }
+
 static void reset_driver(Machine *m)
 {
     Mouse *s = mouse_state(m);
-    s->virt_h = vga_mode(m) == 0x12 ? 480 : VIRTUAL_H_200;
     s->min_x = s->min_y = 0;
     s->max_x = VIRTUAL_W - 1;
-    s->max_y = s->virt_h - 1;
+    s->max_y = virt_h(m) - 1;
     s->x = VIRTUAL_W / 2;
-    s->y = s->virt_h / 2;
+    s->y = virt_h(m) / 2;
     s->show_count = -1;
     s->handler_mask = 0;
     s->ratio_x = DEFAULT_MICKEY_X;
@@ -79,7 +81,7 @@ void mouse_host_motion(Machine *m, int x, int y, int frame_w, int frame_h)
     if (frame_w <= 0 || frame_h <= 0)
         return;
     int vx = clampi(x * VIRTUAL_W / frame_w, s->min_x, s->max_x);
-    int vy = clampi(y * s->virt_h / frame_h, s->min_y, s->max_y);
+    int vy = clampi(y * virt_h(m) / frame_h, s->min_y, s->max_y);
     if (vx == s->x && vy == s->y)
         return;
     int mx = (vx - s->x) * s->ratio_x / MICKEY_RATIO_UNIT;
@@ -186,7 +188,7 @@ void mouse_cursor_pos(Machine *m, int frame_w, int frame_h, int *x, int *y)
 {
     Mouse *s = mouse_state(m);
     *x = s->x * frame_w / VIRTUAL_W;
-    *y = s->y * frame_h / s->virt_h;
+    *y = s->y * frame_h / virt_h(m);
 }
 
 /* ---- IRQ12 trampoline ---- */
