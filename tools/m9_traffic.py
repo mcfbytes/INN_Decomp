@@ -2,13 +2,21 @@
 """Compare two innkeeperd logs by client messages and host steps.
 
 usage: m9_traffic.py <a.server.log> <b.server.log> [--ignore-kinds K1,K2]
-                      [--ignore-client-kinds B1,B2]
+                      [--ignore-client-kinds B1,B2] [--mask-client HEXPREFIX@FROM-TO ...]
+                      [--stop-before-client HEXPREFIX]
 
 Keeps, in order, the hex after `client message len=N` and the text after
 `step=host `. ANSI colour codes are ignored. --ignore-kinds drops host steps
 whose text starts with a listed kind. --ignore-client-kinds drops client
 messages whose first byte (the command) is listed, in hex, e.g. 2F for the
-land-occupancy polls; a diagnostic for timing races, not a pass criterion. Prints
+land-occupancy polls; a diagnostic for timing races, not a pass criterion.
+--mask-client HEXPREFIX@FROM-TO (repeatable) replaces bytes FROM..TO (decimal, inclusive)
+of every client message that starts with the hex bytes HEXPREFIX (space separated, `??`
+matches any byte) by `xx`, so a field that holds a game's random value does not count, e.g.
+'02 ?? ?? ?? ?? ?? 68 00@8-9'. --stop-before-client HEXPREFIX (same syntax) cuts both
+logs before the first client message that matches, for a scenario whose rest depends on
+a random value. Both are pass criteria for the scenario that names them
+(private/lifted/scenarios/<name>.compare, see m9_compare.sh). Prints
 `traffic: N client messages, M host steps, identical` or the first difference
 with five lines of context from each side. Exit status is 1 on a difference.
 """
@@ -23,7 +31,28 @@ CLIENT = re.compile(r'client message len=\d+\s*(.*)$')
 HOST = re.compile(r'step=host (.*)$')
 
 
-def events(path, ignore, ignore_client=frozenset()):
+def parse_mask(spec):
+    prefix, _, span = spec.rpartition('@')
+    first, _, last = span.partition('-')
+    return prefix.lower().split(), int(first), int(last or first)
+
+
+def masked(body, masks):
+    raw = body.split()
+    for prefix, first, last in masks:
+        head = [b.lower() for b in raw[:len(prefix)]]
+        if len(head) == len(prefix) and all(p in ('??', h) for p, h in zip(prefix, head)):
+            for i in range(first, min(last, len(raw) - 1) + 1):
+                raw[i] = 'xx'
+    return ' '.join(raw)
+
+
+def matches(prefix, body):
+    head = body.lower().split()[:len(prefix)]
+    return len(head) == len(prefix) and all(p in ('??', h) for p, h in zip(prefix, head))
+
+
+def events(path, ignore, ignore_client=frozenset(), masks=(), stop=None):
     text = ANSI.sub('', Path(path).read_text(errors='replace'))
     found = []
     clients = hosts = 0
@@ -31,9 +60,11 @@ def events(path, ignore, ignore_client=frozenset()):
         hits = []
         client = CLIENT.search(line)
         host = HOST.search(line)
+        if client and stop and matches(stop, client.group(1)):
+            break
         if client and not (client.group(1).split()[:1] and
                            int(client.group(1).split()[0], 16) in ignore_client):
-            hits.append((client.start(), 'C', client.group(1).strip()))
+            hits.append((client.start(), 'C', masked(client.group(1).strip(), masks)))
         if host:
             body = host.group(1).strip()
             if not any(body.startswith(kind) for kind in ignore):
@@ -66,11 +97,17 @@ def main(argv):
     parser.add_argument('--ignore-kinds', default='', help='comma-separated host-step prefixes to drop')
     parser.add_argument('--ignore-client-kinds', default='',
                         help='comma-separated hex first bytes of client messages to drop')
+    parser.add_argument('--mask-client', action='append', default=[], metavar='HEXPREFIX@FROM-TO',
+                        help='replace bytes FROM..TO of client messages starting with HEXPREFIX by xx')
+    parser.add_argument('--stop-before-client', default='', metavar='HEXPREFIX',
+                        help='ignore everything from the first client message starting with HEXPREFIX')
     args = parser.parse_args(argv)
+    stop = args.stop_before_client.lower().split() or None
+    masks = [parse_mask(spec) for spec in args.mask_client]
     ignore_client = frozenset(int(k, 16) for k in args.ignore_client_kinds.split(',') if k)
     ignore = [kind for kind in args.ignore_kinds.split(',') if kind]
-    left, n_left, m_left = events(args.a, ignore, ignore_client)
-    right, n_right, m_right = events(args.b, ignore, ignore_client)
+    left, n_left, m_left = events(args.a, ignore, ignore_client, masks, stop)
+    right, n_right, m_right = events(args.b, ignore, ignore_client, masks, stop)
     limit = min(len(left), len(right))
     differ = next((i for i in range(limit) if left[i] != right[i]), None)
     if differ is None and len(left) == len(right):
