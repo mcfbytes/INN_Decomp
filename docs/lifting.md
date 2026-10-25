@@ -265,17 +265,20 @@ call TSNEXEC.EXE tsn_long_shift_left DX:AX=long(0x12345678) CX=4
   A20 enabled for the call: no DOS program here uses the HMA and the runtime has no XMS, so the area is
   free and inside the snapshot. They are compared like any memory, so what a function writes into its
   buffers is checked, including writes past their end (into the gaps).
-- **Restoring.** The trigger state is saved (CPU, the first 1 MB + 64 KB of memory, VGA, DOS handles,
-  hook bitmap, emulated time and pending interrupts, A20). Each call is set up on top of it, verified
-  (host file deletions, renames, creations and growth journaled and undone after both runs, as for live
-  calls), and the trigger state is loaded again before the next call and before the run continues.
-  During the calls the time slice is stretched so no device ticker runs, interrupts are held and call
-  coverage is off. `INN_SYNTH_CHECK=1` saves the state again after each restore and stops with an
-  error if the CPU, memory, VGA, DOS state, hook bitmap, time, interrupts, A20 or I/O mode differ.
-  Not restorable, so not for synthetic calls: bytes written into host files, port I/O to devices
-  other than VGA, loading an overlay or module, ending the process. A call whose original does not
-  return within 50 million instructions, or that ends the process, is reported as a mismatch and the
-  lifted C is not run; avoid calls the lift turns into `fatal()` (a zero divisor) or loops forever on.
+- **Restoring.** The trigger state is saved (CPU, the first 1 MB + 64 KB of memory, VGA, the Sound
+  Blaster DSP and the DMA controller, DOS handles, hook bitmap, emulated time and pending interrupts, A20).
+  Each call is set up on top of it, verified (host file deletions, renames, creations and growth
+  journaled and undone after both runs, as for live calls), and the trigger state is loaded again before
+  the next call and before the run continues. During the calls the time slice is stretched so no device
+  ticker runs, interrupts are held and call coverage is off. `INN_SYNTH_CHECK=1` saves the state again
+  after each restore and stops with an error if the CPU, memory, VGA, Sound Blaster or DMA state, DOS
+  state, hook bitmap, time, interrupts, A20 or I/O mode differ. Calls that program the DSP and DMA
+  channel 1 are therefore restorable (shadow runs save and load that state with the VGA state too).
+  Not restorable, so not for synthetic calls: bytes written into host files, port I/O to other devices
+  (PIC, PIT, OPL, keyboard, UARTs; an IRQ the DSP raises within the call, F2h's or a block end's, is PIC
+  state), loading an overlay or module, ending the process. A call whose original does not return
+  within 50 million instructions, or that ends the process, is reported as a mismatch and the lifted C
+  is not run; avoid calls the lift turns into `fatal()` (a zero divisor) or loops forever on.
 - **Results** are counted apart from live calls: mismatches are logged as
   `verify: MOD name synthetic call N (file:line): ...` and the summary adds
   `verify: MOD name: N calls checked, M mismatches (synthetic)` (with `DX:AX differs in N` as for live

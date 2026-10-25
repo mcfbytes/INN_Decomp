@@ -1,5 +1,6 @@
 /* Sound Blaster tests: DSP commands, single-cycle and auto-init DMA, block-end IRQs with no sink,
- * pause, stalls on a masked channel, IRQs held by irq_hold, and the rendered samples. */
+ * pause, stalls on a masked channel, IRQs held by irq_hold, the rendered samples, and the snapshot
+ * that shadow and synthetic runs restore. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -244,6 +245,47 @@ static void test_render(void)
     finish(m);
 }
 
+/* The DSP and DMA state saved in the middle of a block (and of a DSP command) and loaded again after the
+ * block ended: the channel is unmasked with its count as it was, the DSP finishes the rest of the block
+ * and the command, and saving again gives the same bytes. */
+static void test_snapshot_round_trip(void)
+{
+    Machine *m = boot();
+    dma_program(m, MODE_SINGLE_READ_CH1, 999);
+    dsp(m, 0x40);
+    dsp(m, TC_100US);
+    dsp(m, 0x14);
+    dsp(m, 999 & 0xFF);
+    dsp(m, 999 >> 8);
+    run_ms(m, 50);
+    dsp(m, 0xE0); /* identify, its argument still to come */
+    size_t size = sound_snapshot_size();
+    uint8_t *mid = malloc(size), *again = malloc(size);
+    sound_snapshot_save(m, mid);
+    uint16_t count_mid = dma_count(m);
+    sound_snapshot_save(m, mid); /* the count read moved the flip-flop: save after it */
+    dsp(m, 0x0F);
+    CHECK(dsp_read(m) == 0xF0, "identify answers before the load");
+    run_ms(m, 60);
+    CHECK(irqs(m) == 1, "block ended before the load, %d IRQs", irqs(m));
+    CHECK(port_in(m, 0x0F, 1) & 0x02, "channel masked at terminal count");
+
+    sound_snapshot_load(m, mid);
+    sound_snapshot_save(m, again);
+    CHECK(memcmp(mid, again, size) == 0, "save after load gives the same bytes");
+    DmaChannelState c;
+    dma_channel_get(m, 1, &c); /* no sync: a port read would let the DSP catch up first */
+    CHECK(!c.masked && c.count == count_mid, "after the load: masked %d, count %u (%u when saved)", c.masked, c.count,
+          count_mid);
+    dsp(m, 0x33);
+    CHECK(dsp_read(m) == 0xCC, "the half-received identify completes after the load");
+    run_ms(m, 1); /* the rest of the block was due long ago */
+    CHECK(irqs(m) == 2, "the loaded block ends again, %d IRQs", irqs(m));
+    free(mid);
+    free(again);
+    finish(m);
+}
+
 int main(void)
 {
     test_commands();
@@ -251,6 +293,7 @@ int main(void)
     test_auto_init();
     test_masked_stall();
     test_render();
+    test_snapshot_round_trip();
     if (failures) {
         fprintf(stderr, "%d failures\n", failures);
         return 1;
