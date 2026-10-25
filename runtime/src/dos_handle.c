@@ -207,6 +207,7 @@ static uint16_t device_info(const DosFile *f)
                DEVINFO_STDOUT;
     case DEV_NUL: return DEVINFO_CHAR_HI | DEVINFO_DEVICE | DEVINFO_NUL;
     case DEV_CLOCK: return DEVINFO_CHAR_HI | DEVINFO_DEVICE | DEVINFO_CLOCK;
+    case DEV_EMM: return DEVINFO_CHAR_HI | DEVINFO_DEVICE;
     case DEV_AUX:
     case DEV_PRN: return DEVINFO_CHAR_HI | DEVINFO_DEVICE | DEVINFO_NOT_EOF;
     case DEV_NONE: break;

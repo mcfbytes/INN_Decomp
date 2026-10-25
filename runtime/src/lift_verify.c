@@ -9,7 +9,7 @@
 #include "lift_internal.h"
 
 enum {
-    SNAPSHOT_BYTES = MEM_ONE_MEG + 0x10000,
+    SNAPSHOT_CAP = MEM_SIZE, /* Machine.snapshot_bytes of it are used; untouched pages cost nothing */
     IO_LOG_MAX = 65536,
     DEAD_STACK_BYTES = 0x2000, /* below the entry SP: locals of the call, dead after return */
     MAX_REPORTED_BYTES = 16,
@@ -47,14 +47,14 @@ void lift_verify_enable(Machine *m, int calls_per_entry)
         s->verify = calloc(1, sizeof(VerifyState));
         if (!s->verify)
             fatal("out of memory");
-        s->verify->mem_before = malloc(SNAPSHOT_BYTES);
-        s->verify->mem_original = malloc(SNAPSHOT_BYTES);
+        s->verify->mem_before = malloc(SNAPSHOT_CAP);
+        s->verify->mem_original = malloc(SNAPSHOT_CAP);
         s->verify->vga_before = malloc(vga_snapshot_size());
         s->verify->vga_original = malloc(vga_snapshot_size());
         s->verify->dos_before = malloc(dos_snapshot_size());
         s->verify->dos_original = malloc(dos_snapshot_size());
         s->verify->dos_lifted = malloc(dos_snapshot_size());
-        s->verify->mem_lifted = malloc(SNAPSHOT_BYTES);
+        s->verify->mem_lifted = malloc(SNAPSHOT_CAP);
         s->verify->vga_lifted = malloc(vga_snapshot_size());
         s->verify->dos_lifted_end = malloc(dos_snapshot_size());
         if (!s->verify->mem_before || !s->verify->mem_original || !s->verify->vga_before ||
@@ -264,9 +264,10 @@ static bool registers_match(const Cpu *a, const Cpu *b, uint16_t scratch, char *
 }
 
 /* First differing byte outside the dead stack below the entry SP, or -1. */
-static long first_memory_difference(const uint8_t *a, const uint8_t *b, uint32_t dead_lo, uint32_t dead_hi)
+static long first_memory_difference(const uint8_t *a, const uint8_t *b, uint32_t bytes, uint32_t dead_lo,
+                                    uint32_t dead_hi)
 {
-    for (uint32_t i = 0; i < SNAPSHOT_BYTES; i++)
+    for (uint32_t i = 0; i < bytes; i++)
         if (a[i] != b[i] && (i < dead_lo || i >= dead_hi))
             return (long)i;
     return -1;
@@ -339,7 +340,7 @@ static void compare(Machine *m, ActiveHook *h, uint16_t lo_sp, uint16_t hi_sp)
     uint32_t stack_top = v->cpu_before.seg_base[S_SS] + hi_sp, stack_low = v->cpu_before.seg_base[S_SS] + lo_sp;
     uint32_t ss_base = v->cpu_before.seg_base[S_SS];
     uint32_t dead_lo = stack_low > ss_base + DEAD_STACK_BYTES ? stack_low - DEAD_STACK_BYTES : ss_base;
-    long at = first_memory_difference(m->mem, v->mem_original, dead_lo, stack_top);
+    long at = first_memory_difference(m->mem, v->mem_original, m->snapshot_bytes, dead_lo, stack_top);
     if (at >= 0) {
         snprintf(why, sizeof why, "memory %05lX lifted %02X original %02X", (unsigned long)at,
                  m->mem[at], v->mem_original[at]);
@@ -364,7 +365,7 @@ static void compare(Machine *m, ActiveHook *h, uint16_t lo_sp, uint16_t hi_sp)
 static void restore(Machine *m, const Cpu *cpu, const uint8_t *mem, const uint8_t *vga, const uint8_t *dos)
 {
     m->cpu = *cpu;
-    memcpy(m->mem, mem, SNAPSHOT_BYTES);
+    memcpy(m->mem, mem, m->snapshot_bytes);
     vga_snapshot_load(m, vga);
     dos_snapshot_load(m, dos);
 }
@@ -405,7 +406,7 @@ static bool run_original_to(Machine *m, const Cpu *exit)
 static void save(Machine *m, Cpu *cpu, uint8_t *mem, uint8_t *vga, uint8_t *dos)
 {
     *cpu = m->cpu;
-    memcpy(mem, m->mem, SNAPSHOT_BYTES);
+    memcpy(mem, m->mem, m->snapshot_bytes);
     vga_snapshot_save(m, vga);
     dos_snapshot_save(m, dos);
 }
@@ -502,7 +503,7 @@ bool lift_verify_call(Machine *m, ActiveHook *h)
     m->irq_hold = true;
     uint16_t entry_sp = m->cpu.r[R_SP].w;
     v->cpu_before = m->cpu;
-    memcpy(v->mem_before, m->mem, SNAPSHOT_BYTES);
+    memcpy(v->mem_before, m->mem, m->snapshot_bytes);
     vga_snapshot_save(m, v->vga_before);
     dos_snapshot_save(m, v->dos_before);
     dos_journal_begin(m);
@@ -529,7 +530,7 @@ bool lift_verify_call(Machine *m, ActiveHook *h)
     }
     run_original(m, h);
     v->cpu_original = m->cpu;
-    memcpy(v->mem_original, m->mem, SNAPSHOT_BYTES);
+    memcpy(v->mem_original, m->mem, m->snapshot_bytes);
     vga_snapshot_save(m, v->vga_original);
     dos_snapshot_save(m, v->dos_original);
 
@@ -576,7 +577,7 @@ SynthResult lift_verify_synthetic(Machine *m, ActiveHook *h, const char *label, 
     r.ax = v->cpu_original.r[R_AX].w;
     r.dx = v->cpu_original.r[R_DX].w;
     uint32_t at = real_addr(r.dx, r.ax);
-    if (r.dx == 0xFFFF && at >= MEM_ONE_MEG && at + sizeof r.at_result <= SNAPSHOT_BYTES) {
+    if (r.dx == 0xFFFF && at >= MEM_ONE_MEG && at + sizeof r.at_result <= m->snapshot_bytes) {
         memcpy(r.at_result, v->mem_original + at, sizeof r.at_result);
         r.has_bytes = true;
     }

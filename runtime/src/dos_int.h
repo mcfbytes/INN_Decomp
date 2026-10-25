@@ -76,7 +76,7 @@ enum {
 enum { ATTR_RDONLY = 0x01, ATTR_HIDDEN = 0x02, ATTR_SYSTEM = 0x04, ATTR_VOLUME = 0x08,
        ATTR_DIR = 0x10, ATTR_ARCHIVE = 0x20 };
 
-typedef enum DosDevice { DEV_NONE, DEV_CON, DEV_NUL, DEV_AUX, DEV_PRN, DEV_CLOCK } DosDevice;
+typedef enum DosDevice { DEV_NONE, DEV_CON, DEV_NUL, DEV_AUX, DEV_PRN, DEV_CLOCK, DEV_EMM } DosDevice;
 
 /* One system file table entry (host side). */
 typedef struct DosFile {

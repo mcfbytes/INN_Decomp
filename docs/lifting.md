@@ -250,8 +250,8 @@ call TSNEXEC.EXE tsn_long_shift_left DX:AX=long(0x12345678) CX=4
   words n, n+1). `p+n` and `p-n` move a pointer (no spaces around the operator). `name=value` pushes a
   value and names it, `let name=value` only names it, for later items such as `name+2`.
 - **Buffers** live in the HMA (FFFF:0010 to FFFF:FFFF, 16-byte aligned, 16 zero bytes after each), with
-  A20 enabled for the call: no DOS program here uses the HMA and the runtime has no XMS, so the area is
-  free and inside the snapshot. They are compared like any memory, so what a function writes into its
+  A20 enabled for the call: no DOS program here uses the HMA and the runtime's XMS (off by default) never
+  hands it out, so the area is free and inside the snapshot. They are compared like any memory, so what a function writes into its
   buffers is checked, including writes past their end (into the gaps).
 - **Restoring.** The trigger state is saved (CPU, the first 1 MB + 64 KB of memory, VGA, DOS handles,
   hook bitmap, emulated time and pending interrupts, A20). Each call is set up on top of it, verified

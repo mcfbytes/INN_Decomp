@@ -148,7 +148,24 @@ Sinks, in `runtime/frontend/audio_sdl.c`:
 
 `--conv-kb N` leaves programs only the first N KB of conventional memory; the rest becomes a DOS
 system block, as resident software would take it. Use it to drive LSCITV into swapping (it needs about
-500 KB to start). There is no EMS or XMS.
+500 KB to start). EMS and XMS are off unless asked for, so every run without the options below is
+unchanged.
+
+`--ems-kb N` turns on LIM EMS 4.0 with N KB (16 KB pages; native builds ignore it, their client answers
+its probes with "none"): INT 67h functions 40h-48h, 4Bh-4Dh, 57h (move and exchange) and 58h; the
+`EMMXXXX0` device opens, IOCTL 4400h reports a character device and 4407h ready. The page frame is
+E000h, four 16 KB slots of plain RAM: mapping a page copies the slot's old page back to its store and
+the new page in, so a logical page mapped into two slots at once is copied, not aliased. `--xms-kb N`
+turns on an XMS 3.0 driver with N KB: INT 2Fh AX=4300h answers 80h, AX=4310h gives the entry in
+ES:BX (a far-called service stub), which implements 00h, 08h, 09h, 0Ah, 0Bh (move, handle 0 being a
+real-mode seg:off), 0Ch/0Dh (lock returns the linear address) and 0Eh; 01h answers that there is no HMA
+(synthetic calls keep their buffers there) and other functions BL=80h.
+
+EMS pages, XMS blocks and both handle tables live in `Machine.mem` above 1 MB + 64 KB, where real-mode
+code cannot reach, and `Machine.snapshot_bytes` grows to cover them: shadow verification and synthetic
+calls snapshot `[0, snapshot_bytes)`, so a verified call that maps, allocates or moves is undone like any
+memory write. Moves read and write the frame through the current mapping. `runtime/tests/test_emsxms.c`
+covers both, alone and together.
 
 ## Program load and exit
 
@@ -168,8 +185,8 @@ With `INN_EXEC_LOG=1`, each load logs `exec: <path> tail=<text> cwd=<directory>`
 logs `exit: <psp> code=<al> type=<ah>`. With `INN_DOS_AUDIT=1`, INT 21h calls are counted per AH (and
 per AL for 44h, 4Bh, 57h, 58h and 5Ah-5Dh) and logged at process exit.
 
-INT 67h returns AH=84h for every function. INT 2Fh AX=4300h returns AL=0. Opening `EMMXXXX0` fails
-with file not found.
+Without `--ems-kb`, INT 67h returns AH=84h for every function and opening `EMMXXXX0` fails with file not
+found; without `--xms-kb`, INT 2Fh AX=4300h returns AL=0 ("Conventional memory").
 
 ## Input scripts
 

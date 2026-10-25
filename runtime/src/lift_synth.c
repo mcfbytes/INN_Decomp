@@ -13,7 +13,7 @@
 #include "lift_internal.h"
 
 enum {
-    SNAPSHOT_BYTES = MEM_ONE_MEG + 0x10000,
+    SNAPSHOT_CAP = MEM_SIZE, /* Machine.snapshot_bytes of it are used */
     HMA_SEG = 0xFFFF,
     HMA_LO = MEM_ONE_MEG,           /* FFFF:0010 */
     HMA_HI = MEM_ONE_MEG + 0xFFF0,  /* FFFF:FFFF + 1 */
@@ -200,7 +200,7 @@ void lift_synth_load(Machine *m, const char *paths)
     const char *check = getenv("INN_SYNTH_CHECK"), *verbose = getenv("INN_SYNTH_LOG");
     y->check = check && *check && *check != '0';
     y->log = verbose && *verbose && *verbose != '0';
-    y->mem = malloc(SNAPSHOT_BYTES);
+    y->mem = malloc(SNAPSHOT_CAP);
     y->vga = malloc(vga_snapshot_size());
     y->dos = malloc(dos_snapshot_size());
     y->vga_after = malloc(vga_snapshot_size());
@@ -804,7 +804,7 @@ static bool validate(Machine *m, Synth *y)
 static void save_trigger(Machine *m, Synth *y)
 {
     y->cpu = m->cpu;
-    memcpy(y->mem, m->mem, SNAPSHOT_BYTES);
+    memcpy(y->mem, m->mem, m->snapshot_bytes);
     vga_snapshot_save(m, y->vga);
     dos_snapshot_save(m, y->dos);
     memcpy(y->hooks, m->exec_hooks, HOOK_BITMAP_BYTES);
@@ -820,7 +820,7 @@ static void save_trigger(Machine *m, Synth *y)
 static void restore_trigger(Machine *m, Synth *y)
 {
     m->cpu = y->cpu;
-    memcpy(m->mem, y->mem, SNAPSHOT_BYTES);
+    memcpy(m->mem, y->mem, m->snapshot_bytes);
     vga_snapshot_load(m, y->vga);
     dos_snapshot_load(m, y->dos);
     m->virtual_us = y->virtual_us;
@@ -840,7 +840,7 @@ static void check_restored(Machine *m, Synth *y, const char *label)
     dos_snapshot_save(m, y->dos_after);
     if (memcmp(&m->cpu, &y->cpu, sizeof m->cpu) != 0)
         what = "CPU";
-    else if (memcmp(m->mem, y->mem, SNAPSHOT_BYTES) != 0)
+    else if (memcmp(m->mem, y->mem, m->snapshot_bytes) != 0)
         what = "memory";
     else if (memcmp(y->vga_after, y->vga, vga_snapshot_size()) != 0)
         what = "VGA";
