@@ -120,6 +120,7 @@ struct Machine {
 
     void *dos, *bios, *pic, *pit, *vga, *kbd, *mouse, *uart, *ems, *xms, *frontend;
     void *audio, *opl, *speaker, *dma, *sb;
+    void *mpu; /* MPU-401 (mpu401.c) */
     void *exec_stub; /* TSNEXEC stand-in (exec_stub.c), when a frontend installs one */
     /* Native mode (docs/native.md): INN code runs as C; no device tickers, no port I/O, interrupts from
      * the native core (runtime/src/native). Cleared while a game runs on the emulator. */

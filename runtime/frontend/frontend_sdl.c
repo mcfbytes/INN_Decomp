@@ -23,6 +23,7 @@
 #include "host_link.h"
 #endif
 #include "machine.h"
+#include "mpu401.h"
 #if __has_include("dos.h")
 #include "dos.h"
 #define HAVE_DOS 1
@@ -59,6 +60,7 @@ typedef struct Options {
     const char *screenshot;
     const char *script;
     const char *wav;
+    const char *midi_out;
     unsigned conv_kb;
     bool no_fpu, no_idle_skip;
     const char *host_rules;
@@ -691,7 +693,7 @@ static int run_native(Frontend *f)
 
 static void usage(void)
 {
-    fprintf(stderr, "usage: inn [--trace N] [--ips N] [--com1 host:port|ws://host:port] [--perf] [--wav out.wav] [--conv-kb N] [--no-fpu] [--no-idle-skip] [--tsn-host rules.txt] "
+    fprintf(stderr, "usage: inn [--trace N] [--ips N] [--com1 host:port|ws://host:port] [--perf] [--wav out.wav] [--midi-out out.mid] [--conv-kb N] [--no-fpu] [--no-idle-skip] [--tsn-host rules.txt] "
                     "[--headless --run-ms N --screenshot out.ppm --script input.txt] <c-drive-dir> <program> [args]\n");
 }
 
@@ -714,6 +716,7 @@ static int parse_args(int argc, char **argv, Options *o)
         else if (!strcmp(a, "--screenshot")) o->screenshot = next;
         else if (!strcmp(a, "--script")) o->script = next;
         else if (!strcmp(a, "--wav")) o->wav = next;
+        else if (!strcmp(a, "--midi-out")) o->midi_out = next;
         else if (!strcmp(a, "--tsn-host")) o->host_rules = next;
         else if (!strcmp(a, "--conv-kb")) o->conv_kb = (unsigned)strtoul(next, NULL, 10);
         else return -1;
@@ -753,6 +756,10 @@ static HostRules *host_rules;
 static int boot(Machine *m, const Options *o)
 {
     bios_init(m);
+    if (o->midi_out && mpu401_open_midi_out(m, o->midi_out) != 0) {
+        fprintf(stderr, "cannot write %s\n", o->midi_out);
+        return -1;
+    }
     if (o->host_rules) {
         exec_stub_install(m, NULL, NULL);
         if (!(host_rules = host_rules_load(m, o->host_rules))) {

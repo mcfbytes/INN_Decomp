@@ -2,6 +2,7 @@
 #include "audio.h"
 #include "host_audio.h"
 #include "lift_semantic.h"
+#include "mpu401.h"
 #include "native.h"
 
 void host_audio_opl_write(Machine *m, uint8_t reg, uint8_t value)
@@ -40,4 +41,18 @@ void host_audio_pcm_stop(Machine *m)
 {
     (void)m;
     fatal("not implemented");
+}
+
+void host_audio_midi_write(Machine *m, uint8_t byte)
+{
+    if (m->native) {
+        native_safepoint(m);
+        mpu401_midi_byte(m, byte);
+        return;
+    }
+    if (m->io_mode == IO_REPLAY) { /* the original's byte already went out */
+        lift_semantic_event(m, SEM_MIDI_BYTE, byte, 0);
+        return;
+    }
+    mpu401_midi_byte(m, byte);
 }

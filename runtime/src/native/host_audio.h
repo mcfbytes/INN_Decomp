@@ -14,5 +14,7 @@ uint8_t host_audio_opl_status(Machine *m);                 /* timer flags, for t
 /* Sound Blaster digital output, 8-bit mono from guest memory; raises IRQ 7 at each block end. */
 int host_audio_pcm_start(Machine *m, uint32_t linear, uint16_t bytes, uint32_t rate_hz, bool auto_init);
 void host_audio_pcm_stop(Machine *m);
+/* One byte to the MPU-401's MIDI OUT (UART mode): the driver's 330h data write. */
+void host_audio_midi_write(Machine *m, uint8_t byte);
 
 #endif

@@ -144,6 +144,35 @@ Sinks, in `runtime/frontend/audio_sdl.c`:
 | AudioWorklet (browser) | the same pacing with a 100 ms target (frames are posted from the busy main thread); the frames go to `runtime/web/audio-worklet.js` by `postMessage` and play on the audio thread ([web.md](web.md), "Sound") |
 | `--wav out.wav` | every rendered frame, unpaced; with `--headless` this is the test path |
 
+### MPU-401
+
+`mpu401.c` is a Roland MPU-401 at 330h (data) and 331h (status, commands), as far as a UART-mode driver
+(`MT32.DRV`, chosen with `music = mt32.drv` in `LSCI.CFG`) uses it. Status bit 6 (DRR) is always clear:
+the card always takes a byte; bit 7 (DSR) is clear while an answer waits at 330h. Every command is
+answered with FEh, reset (FFh) included; 3Fh enters UART mode, where every command but reset is ignored
+(so `MT32.DRV`'s second and third 3Fh time out after 65535 polls each, as on a real card). In UART mode
+data bytes go to MIDI OUT; intelligent mode is not emulated (data is dropped, commands only
+acknowledged). An empty queue reads FEh, as DOSBox's MPU does. No IRQ: the driver polls.
+
+Nothing is synthesised (MT-32 ROMs are not distributable). `--midi-out out.mid` writes MIDI OUT as a
+type 0 Standard MIDI File, one tick per millisecond of emulated time: running status is expanded,
+system exclusive messages are written whole, real-time bytes, system common messages and stray data as
+F7 escapes, each event stamped at the byte that completes it. The file is finished when the machine is
+shut down. Native builds reach the same sink through `host_audio_midi_write` (docs/native.md).
+
+Timestamps of the same driver calls differ between runs where emulated time does:
+
+- Shadow verification stops emulated time during a verified call's original run, so a verified init
+  writes its whole patch upload at one millisecond.
+- Native mode skips the driver's handshakes and delays (a host sink needs neither), so init takes no
+  time there; hybrid lifted C charges the port reads and loop instructions of those delays (init takes
+  about 3.8 s of emulated time at 20 MIPS, as the original).
+- Lifted and original runs drift by the original's per-call instruction time (milliseconds over a
+  session), and the scripted input does not move with it: a script-driven message (master volume, a
+  sound stopped by a click) can then land a few events earlier or later in the stream, or one more
+  sequencer tick of notes can be sent before it. The bytes each call sends are compared exactly by
+  shadow verification.
+
 ## Conventional memory
 
 `--conv-kb N` leaves programs only the first N KB of conventional memory; the rest becomes a DOS
@@ -224,6 +253,8 @@ itself, not `TSNEXEC.EXE`: `inn --tsn-host rules.txt <drive> 'INN\BARON\RB.EXE' 
 - **Mouse (INT 33h, HLE).** User event handlers (AX=0Ch/14h) run from IRQ12: host events queue,
   IRQ12 enters a ROM trampoline that saves registers, far-calls the handler with the event in
   AX/BX/CX/DX/SI/DI, restores, EOIs and IRETs. One queued event per call.
+- **MPU-401 (330h/331h).** UART mode, no IRQ; see "MPU-401" under Sound. Shadow verification treats it
+  as every non-VGA device: only the original run's bytes reach MIDI OUT.
 - **Game port (201h).** Nothing attached: reads return FFh (no one-shot ever fires, no button),
   writes are ignored. Red Baron polls it every frame.
 - **VGA.** B8000h is the text buffer; the A0000h window is routed through `vga_mem_read/write`.

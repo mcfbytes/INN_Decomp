@@ -20,6 +20,7 @@ typedef enum SemKind {
     SEM_PIC_MASK,      /* a = chip, b = mask */
     SEM_KBD_DATA,      /* read; value replayed */
     SEM_KBD_ACK,
+    SEM_MIDI_BYTE,     /* a = byte written to the MPU-401 data port */
     SEM_KIND_COUNT
 } SemKind;
 

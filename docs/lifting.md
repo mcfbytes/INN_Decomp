@@ -141,7 +141,7 @@ runs without a server, the program named by `INN_PROGRAM` against dosrt's TSN ho
 [redbaron.md](redbaron.md), "Verifying lifts"). Snapshots cover guest
 memory, the VGA device (registers, DAC, planes) and host-side DOS state (open files, positions,
 current directory). Host file deletions, renames, creations and growth are journaled and undone
-between the two runs. Known limits: bytes written to host files are written by both runs and not restored; devices other than VGA (PIT, UART, OPL) see only the original run's I/O, which is the
+between the two runs. Known limits: one call may make at most 4M port accesses (MT32.DRV's init makes 3.3M); bytes written to host files are written by both runs and not restored; devices other than VGA (PIT, UART, OPL) see only the original run's I/O, which is the
 intended behaviour.
 
 ## Semantic port comparison
@@ -159,6 +159,7 @@ hybrid build, where it must agree with the raw comparison). Both runs are reduce
 | PIT | 43h control for channel 0 (lobyte/hibyte), two 40h writes | `SEM_PIT_DIVISOR` |
 | PIC | 20h/A0h write of 20h; 21h/A1h write (reads dropped) | `SEM_PIC_EOI`, `SEM_PIC_MASK` |
 | keyboard | 60h read; 61h read, write with bit 7 set, write with it clear | `SEM_KBD_DATA`, `SEM_KBD_ACK` |
+| MPU-401 | 330h write (a MIDI byte); 331h status reads and commands and 330h reads stay raw | `SEM_MIDI_BYTE` |
 
 3DAh reads are dropped; every other access, and a lone 61h access, stays a raw port event. The
 original's side is canonicalised from the recorded port log; the lifted side canonicalises the ports

@@ -10,7 +10,7 @@
 
 enum {
     SNAPSHOT_BYTES = MEM_ONE_MEG + 0x10000,
-    IO_LOG_MAX = 65536,
+    IO_LOG_MAX = 1 << 22, /* MT32.DRV's init (with INN's 64 timbres) reads the MPU status 3.3 million times */
     DEAD_STACK_BYTES = 0x2000, /* below the entry SP: locals of the call, dead after return */
     MAX_REPORTED_BYTES = 16,
 };

@@ -26,6 +26,7 @@ enum {
     PIT_CONTROL_ACCESS_MASK = 0x30,
     PIC_NON_SPECIFIC_EOI = 0x20,
     KBD_ACK_STROBE = 0x80,
+    PORT_MPU_DATA = 0x330,
 };
 
 static const uint16_t OPL_INDEX_PORTS[OPL_PORTS] = { 0x388, 0x228, 0x220, 0x222 };
@@ -263,11 +264,21 @@ static bool kbd_port(SemTrace *t, uint16_t port, int size, uint32_t value, bool 
     return true;
 }
 
+/* MPU-401 data port writes are MIDI bytes; its status polls and commands stay raw. */
+static bool mpu_port(SemTrace *t, uint16_t port, int size, uint32_t value, bool is_out)
+{
+    if (port != PORT_MPU_DATA || !is_out || size != 1)
+        return false;
+    sem_trace_event(t, SEM_MIDI_BYTE, value & 0xFF, 0);
+    return true;
+}
+
 void sem_trace_port(SemTrace *t, uint16_t port, int size, uint32_t value, bool is_out)
 {
     if (opl_port(t, port, size, value, is_out) || dac_port(t, port, size, value, is_out) ||
         crtc_port(t, port, size, value, is_out) || pit_port(t, port, size, value, is_out) ||
-        pic_port(t, port, size, value, is_out) || kbd_port(t, port, size, value, is_out))
+        pic_port(t, port, size, value, is_out) || kbd_port(t, port, size, value, is_out) ||
+        mpu_port(t, port, size, value, is_out))
         return;
     if (port == 0x3DA && !is_out)
         return; /* input status: retrace polling */
@@ -301,6 +312,7 @@ bool sem_trace_next_read(SemTrace *t, SemKind kind, uint32_t *b)
 
 static const char *const KIND_NAME[SEM_KIND_COUNT] = {
     "opl_write", "dac_set", "dac_get", "crtc_start", "pit_divisor", "pic_eoi", "pic_mask", "kbd_data", "kbd_ack",
+    "midi_byte",
 };
 
 static bool is_read_kind(SemKind k) { return k == SEM_DAC_GET || k == SEM_KBD_DATA; }
