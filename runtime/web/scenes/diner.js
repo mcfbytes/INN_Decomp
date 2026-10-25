@@ -115,7 +115,7 @@ InnScenes.register((() => {
     P.shape(g, [[s.x, s.y], [s.x + s.w, s.y], [s.x + s.w + 2, s.y + s.h], [s.x - 2, s.y + s.h]], ['#e4e8f4', '#8c94b0'], { wob: 0.5, seed: 38, edge: '#2c3250', ea: 0.8 });
     P.rect(g, s.x + 3, s.y + 3, s.w - 6, s.h - 6, P.pick('#3a2c58', '#120a2a'), { wob: 0.3, seed: 39 });
     // unlit tubes; the lit ones are drawn by the animation
-    P.text(g, 'OPEN', s.x + 8, s.y + 6, P.pick('#9a6c8c', '#4a3058'), 2, 0);
+    P.text(g, 'OPEN', s.x + 5, s.y + 6, P.pick('#9a6c8c', '#4a3058'), 2, 1);
     P.text(g, '24 BAUD', s.x + 8, s.y + 24, P.pick('#6c9ca8', '#304860'), 1, 1);
     // chasing bulbs round the edge
     for (let x = s.x + 2; x < s.x + s.w; x += 5) { g.fillStyle = P.lit(P.pick('#ffe890', '#ffcc60')); g.fillRect(x, s.y + 0.5, 1.6, 1.6); g.fillRect(x, s.y + s.h - 1.5, 1.6, 1.6); }
@@ -225,12 +225,12 @@ InnScenes.register((() => {
           P.glow(g, s.x + 28, s.y + 26, 34, '#40e8ff', 0.4 * pulse);
         }
         // OPEN: the N is the one with a loose connection
-        const w1 = 12;
+        const w1 = 12;                  // the unlit tubes' letter pitch, (5 + 1) * 2
         g.save();
         g.globalAlpha = P.dusk ? 1 : 0.62;
         for (let i = 0; i < 4; i++) {
           if (i === 2 && flick) continue;
-          P.text(g, 'OPEN'[i], s.x + 8 + i * w1, s.y + 6, P.lit('#ff58a8'), 2, 0);
+          P.text(g, 'OPEN'[i], s.x + 5 + i * w1, s.y + 6, P.lit('#ff58a8'), 2, 0);
         }
         P.text(g, '24 BAUD', s.x + 8, s.y + 24, P.lit('#58f0ff'), 1, 1);
         g.restore();
