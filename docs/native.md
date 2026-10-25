@@ -457,7 +457,9 @@ makes the link unpaced.
 Unchanged: the DOS layer (`dos_*.c`) already maps the C: drive to host files (stdio, MEMFS/IDBFS in the
 browser), and `dos_host_file_closed` already feeds the save sync. Package 8 adds C entry points for
 EXEC and terminate so native code need not go through INT 21h for them, and confirms that EMS (INT 67h)
-and XMS (INT 2Fh 43h) report none in every path.
+and XMS (INT 2Fh 43h) report none in every path. The hybrid build's opt-in EMS and XMS (`--ems-kb`,
+`--xms-kb`, [runtime.md](runtime.md) "Conventional memory") are ignored by native builds, so the client's
+probes, which run as the same lifted C in both builds, find neither.
 
 ## 10. Build configurations
 
