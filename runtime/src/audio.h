@@ -12,7 +12,7 @@ enum {
     AUDIO_DEFAULT_RATE = 48000,
     AUDIO_CHANNELS = 2,      /* interleaved stereo int16 frames everywhere */
     AUDIO_RING_FRAMES = 32768, /* about 0.7 s at 48 kHz; the oldest frames drop on overflow */
-    AUDIO_MAX_SOURCES = 4,
+    AUDIO_MAX_SOURCES = 6,
 };
 
 /* Adds frames of interleaved stereo to mix, using the source's state as it is now. */
@@ -64,6 +64,59 @@ uint8_t opl_read_status(Machine *m);
 enum { SB_BASE = 0x220, SB_DMA_CHANNEL = 1, SB_DSP_VERSION = 0x0201 };
 void sb_init(Machine *m);
 void sb_shutdown(Machine *m);
+
+/* ---- digital voice: 8-bit unsigned mono, as the Sound Blaster DSP plays it ----
+ * Byte i of a block is fetched (i + 1) periods after the start; the output ramps to each byte over one
+ * period and goes through the AC coupling of the line output. The DSP (sb.c) and the host PCM below
+ * use the same model, so a block can change hands between them (docs/native.md section 11). */
+typedef struct PcmVoice {
+    bool active, auto_init, paused, speaker;
+    uint32_t block, left;       /* bytes per block; bytes still to fetch in this one */
+    uint64_t period_ns;         /* time between bytes */
+    uint64_t next_ns;           /* when the next byte is fetched */
+    uint64_t pause_left_ns;     /* paused: time from the continue to the next byte */
+    uint8_t prev, cur;          /* the output ramps from prev to cur over cur_period from cur_ns */
+    uint64_t cur_ns, cur_period;
+    double prev_in, prev_out;   /* AC coupling filter */
+} PcmVoice;
+
+enum { PCM_SILENCE = 0x80 };
+
+/* The DSP's voice for the mixed-mode hand-off. get copies it (a pending exit from auto-init counts as
+ * single-cycle); take copies it and leaves the DSP idle and silent, its IRQ line low; set replaces it. */
+void sb_voice_get(Machine *m, PcmVoice *v);
+void sb_voice_take(Machine *m, PcmVoice *v);
+void sb_voice_set(Machine *m, const PcmVoice *v);
+/* DSP time constant (40h): a byte every 256 - tc microseconds. */
+uint8_t sb_time_constant(Machine *m);
+
+/* Host PCM (host_audio_pcm_start, native mode): a mixer source that plays from guest memory with no
+ * DSP and no DMA controller. The buffer is read as channel 1 would read it: dma_len bytes from
+ * dma_base, wrapping within its 64K page, restarting at its end when dma_auto, else holding the DSP
+ * (no more bytes, no block end) once it ran out. A block end sets irq; the native core raises IRQ 7. */
+typedef struct AudioPcm {
+    PcmVoice v;
+    uint32_t dma_base, dma_len, dma_pos;
+    bool dma_auto, dma_held;
+    bool irq;                   /* a block ended and IRQ 7 is not yet raised */
+    uint8_t time_constant;      /* the last one set (host_audio_sb_time_constant) */
+} AudioPcm;
+
+AudioPcm *audio_pcm(Machine *m);
+/* Renders what is due under the old state and fetches every byte due by now; call before a change. */
+void audio_pcm_sync(Machine *m);
+/* Emulated time at which the current block ends (UINT64_MAX when none will). */
+uint64_t audio_pcm_block_end_ns(Machine *m);
+
+/* Sound Blaster DSP, 8237 DMA controller and host PCM state, for shadow and synthetic snapshots
+ * (lift_verify.c, lift_synth.c): plain bytes, no pointers. */
+size_t sb_snapshot_size(void);
+void sb_snapshot_save(Machine *m, void *dst);
+void sb_snapshot_load(Machine *m, const void *src);
+size_t sound_snapshot_size(void);
+void sound_snapshot_save(Machine *m, void *dst);
+void sound_snapshot_load(Machine *m, const void *src);
+
 /* Square wave from PIT channel 2 gated by port 61h. */
 void speaker_init(Machine *m);
 void speaker_shutdown(Machine *m);

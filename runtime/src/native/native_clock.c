@@ -1,5 +1,6 @@
 /* The native clock (docs/native.md section 5): m->virtual_us advances by work charges and waits, and
  * in real-time mode is paced against the platform's wall clock. */
+#include "host_audio.h"
 #include "native_internal.h"
 
 static bool deterministic(const NativeState *n)
@@ -71,11 +72,13 @@ static void wait_slice(Machine *m, uint64_t until)
         native_yield(m);
 }
 
-/* Emulated time of the next tick, not counting ticks already overdue (they wait for delivery). */
-static uint64_t next_tick_us(const Machine *m)
+/* Emulated time of the next tick, not counting ticks already overdue (they wait for delivery), or of
+ * the end of a Sound Blaster block when that comes first. */
+static uint64_t next_tick_us(Machine *m)
 {
     const NativeState *n = native_state(m);
-    return (n->timer_due_ns + 999) / 1000;
+    uint64_t tick = (n->timer_due_ns + 999) / 1000, block = host_audio_next_due_us(m);
+    return block < tick ? block : tick;
 }
 
 void native_wait_until(Machine *m, uint64_t virtual_us)

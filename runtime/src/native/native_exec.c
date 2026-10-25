@@ -6,6 +6,7 @@
 
 #include "devices.h"
 #include "dos_int.h"
+#include "host_audio.h"
 #include "host_link.h"
 #include "host_timer.h"
 #include "host_video.h"
@@ -246,12 +247,13 @@ static void restore_stale_vectors(Machine *m)
     }
 }
 
-/* In this order: the mode switch (video follows it), the timer, port 61h's speaker gates, the PIC and
- * the keyboard bytes, a mouse event waiting for its IRQ, the link ticker. Nothing of the native model
+/* In this order: the Sound Blaster block, the mode switch (video follows it), the timer, port 61h's
+ * speaker gates, the PIC and the keyboard bytes, a mouse event waiting for its IRQ, the link ticker. Nothing of the native model
  * keeps a copy of what it gave away. */
 void native_handoff_to_emulator(Machine *m)
 {
     mem_read_block(m, 0, handoff_ivt, IVT_BYTES);
+    host_audio_to_devices(m); /* first: a block end not yet raised goes to the PIC with the others */
     handoff_divisor = host_timer_divisor(m);
     uint8_t port61 = native_port61(m);
     uint64_t next_tick = host_timer_next_due_us(m); /* the PIT goes on counting where the native timer is */
@@ -265,9 +267,9 @@ void native_handoff_to_emulator(Machine *m)
 }
 
 /* The reverse: the ticker goes, the video comes back in the mode the VGA device has (text mode if a game
- * left one the host video does not carry), the native timer takes the PIT's divisor, the speaker gates
- * come back, masks come from the PIC, and vectors and the mouse handler that point into freed memory are
- * put right. */
+ * left one the host video does not carry), a block the DSP plays goes to the host PCM, the native timer
+ * takes the PIT's divisor, the speaker gates come back, masks come from the PIC, and vectors and the
+ * mouse handler that point into freed memory are put right. */
 void native_handoff_from_emulator(Machine *m)
 {
     machine_remove_ticker(m, link_ticker);
@@ -278,6 +280,7 @@ void native_handoff_from_emulator(Machine *m)
         vga_set_mode(m, HOST_VIDEO_TEXT80, true);
     }
     uint8_t gates = (uint8_t)port_in(m, PORT61, 1) & PORT61_GATES;
+    host_audio_from_devices(m);
     native_set_active(m, true); /* host_video_init takes the VGA device's picture */
     host_timer_set_divisor(m, pit_timer_divisor(m));
     native_set_port61(m, (uint8_t)((native_port61(m) & ~PORT61_GATES) | gates));

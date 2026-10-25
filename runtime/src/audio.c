@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "audio.h"
+#include "devices.h"
 
 enum {
     CHUNK_FRAMES = 256,
@@ -29,6 +30,7 @@ typedef struct Audio {
     int16_t last[AUDIO_CHANNELS]; /* final frame of the previous paced read */
     double phase;                 /* paced resampler position, in [-1, 0) input frames */
     double error_avg;
+    AudioPcm pcm;
 } Audio;
 
 static Audio *audio_state(Machine *m) { return m->audio; }
@@ -184,6 +186,127 @@ int audio_read_paced(Machine *m, int16_t *out, int cap, int queued)
     return n;
 }
 
+/* ---- host PCM: the DSP's voice model (sb.c) reading guest memory directly ---- */
+
+enum { PCM_SAMPLE_SHIFT = 8, PCM_DEFAULT_TIME_CONSTANT = 0xD2, NS_PER_US = 1000, DMA_PAGE_MASK = 0xFF0000 };
+
+static const double PCM_DC_BLOCK_POLE = 0.999; /* sb.c's: the line output is AC-coupled */
+
+AudioPcm *audio_pcm(Machine *m) { return &audio_state(m)->pcm; }
+
+/* The next buffer byte as channel 1 would move it; false while the buffer is held. */
+static bool pcm_fetch(Machine *m, AudioPcm *p, uint8_t *b)
+{
+    if (p->dma_held || p->dma_len == 0)
+        return false;
+    uint32_t at = (p->dma_base & DMA_PAGE_MASK) | ((p->dma_base + p->dma_pos) & 0xFFFF);
+    *b = mem_is_vga(at) ? 0xFF : m->mem[at];
+    if (++p->dma_pos == p->dma_len) {
+        p->dma_pos = 0;
+        p->dma_held = !p->dma_auto;
+    }
+    return true;
+}
+
+/* Fetches every byte due by t, as sb.c's advance does; a held buffer stalls the block. */
+static void pcm_advance(Machine *m, AudioPcm *p, uint64_t t)
+{
+    PcmVoice *v = &p->v;
+    while (v->active && !v->paused && v->next_ns <= t) {
+        uint8_t b;
+        if (!pcm_fetch(m, p, &b)) {
+            v->next_ns += ((t - v->next_ns) / v->period_ns + 1) * v->period_ns;
+            break;
+        }
+        v->prev = v->cur;
+        v->cur = b;
+        v->cur_ns = v->next_ns;
+        v->cur_period = v->period_ns;
+        v->next_ns += v->period_ns;
+        if (--v->left == 0) {
+            p->irq = true;
+            if (v->auto_init)
+                v->left = v->block;
+            else
+                v->active = false;
+        }
+    }
+}
+
+static double pcm_level(const PcmVoice *v, uint64_t t)
+{
+    if (!v->speaker)
+        return 0;
+    double x = t < v->cur_ns ? v->prev : v->cur;
+    if (t >= v->cur_ns && t < v->cur_ns + v->cur_period)
+        x = v->prev + (double)(v->cur - v->prev) * (double)(t - v->cur_ns) / (double)v->cur_period;
+    return (x - PCM_SILENCE) * (1 << PCM_SAMPLE_SHIFT);
+}
+
+static void pcm_render(Machine *m, int32_t *mix, int frames)
+{
+    AudioPcm *p = audio_pcm(m);
+    PcmVoice *v = &p->v;
+    uint64_t t0 = audio_frame_ns(m, 0);
+    if (!v->active && t0 >= v->cur_ns + v->cur_period && pcm_level(v, t0) == v->prev_in && v->prev_out > -1 &&
+        v->prev_out < 1)
+        return; /* idle and settled */
+    for (int i = 0; i < frames; i++) {
+        uint64_t t = audio_frame_ns(m, i);
+        pcm_advance(m, p, t);
+        double in = pcm_level(v, t);
+        v->prev_out = in - v->prev_in + PCM_DC_BLOCK_POLE * v->prev_out;
+        v->prev_in = in;
+        int32_t s = (int32_t)v->prev_out;
+        mix[i * AUDIO_CHANNELS] += s;
+        mix[i * AUDIO_CHANNELS + 1] += s;
+    }
+}
+
+void audio_pcm_sync(Machine *m)
+{
+    audio_sync(m);
+    pcm_advance(m, audio_pcm(m), machine_now_ns(m));
+}
+
+uint64_t audio_pcm_block_end_ns(Machine *m)
+{
+    const AudioPcm *p = audio_pcm(m);
+    const PcmVoice *v = &p->v;
+    if (!v->active || v->paused || p->dma_held || (!p->dma_auto && p->dma_len - p->dma_pos < v->left))
+        return UINT64_MAX; /* stopped, or the buffer runs out first */
+    return v->next_ns + (uint64_t)(v->left - 1) * v->period_ns;
+}
+
+static void pcm_init(AudioPcm *p)
+{
+    *p = (AudioPcm){ .time_constant = PCM_DEFAULT_TIME_CONSTANT };
+    p->v.period_ns = (uint64_t)(256 - PCM_DEFAULT_TIME_CONSTANT) * NS_PER_US;
+    p->v.prev = p->v.cur = PCM_SILENCE;
+}
+
+size_t sound_snapshot_size(void) { return sb_snapshot_size() + dma_snapshot_size() + sizeof(AudioPcm); }
+
+void sound_snapshot_save(Machine *m, void *dst)
+{
+    uint8_t *d = dst;
+    sb_snapshot_save(m, d);
+    dma_snapshot_save(m, d + sb_snapshot_size());
+    if (audio_state(m))
+        memcpy(d + sb_snapshot_size() + dma_snapshot_size(), audio_pcm(m), sizeof(AudioPcm));
+    else
+        memset(d + sb_snapshot_size() + dma_snapshot_size(), 0, sizeof(AudioPcm));
+}
+
+void sound_snapshot_load(Machine *m, const void *src)
+{
+    const uint8_t *s = src;
+    sb_snapshot_load(m, s);
+    dma_snapshot_load(m, s + sb_snapshot_size());
+    if (audio_state(m))
+        memcpy(audio_pcm(m), s + sb_snapshot_size() + dma_snapshot_size(), sizeof(AudioPcm));
+}
+
 int audio_add_source(Machine *m, AudioRenderFn fn)
 {
     Audio *a = audio_state(m);
@@ -231,6 +354,8 @@ void audio_init(Machine *m)
         fatal("out of memory");
     m->audio = a;
     audio_set_rate(m, AUDIO_DEFAULT_RATE);
+    pcm_init(&a->pcm);
+    audio_add_source(m, pcm_render);
     machine_add_ticker(m, audio_tick);
 }
 
