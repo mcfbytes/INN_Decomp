@@ -434,8 +434,11 @@ static void headless_wait_point(Machine *m)
     Frontend *f = g_frontend;
     if (m->virtual_us >= f->end_us)
         exit(finish_run(f, 0));
-    if (f->script)
+    if (f->script) {
         input_script_apply(f->script, m);
+        if (input_script_ended(f->script))
+            exit(finish_run(f, 0));
+    }
     frontend_audio_pump(m);
 }
 
@@ -467,8 +470,11 @@ static int run_headless(Frontend *f)
 {
     lift_set_nested_yield(f->m, headless_nested_yield);
     while (f->m->virtual_us < f->end_us && !f->m->exit_requested) {
-        if (f->script)
+        if (f->script) {
             input_script_apply(f->script, f->m);
+            if (input_script_ended(f->script))
+                break;
+        }
         f->script_due_us = f->m->virtual_us + HEADLESS_CHUNK_US;
         machine_run_for(f->m, HEADLESS_CHUNK_US);
         frontend_audio_pump(f->m);

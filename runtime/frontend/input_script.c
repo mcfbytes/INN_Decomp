@@ -1,9 +1,10 @@
-/* Script lines: "<ms> key <set1-hex>", "<ms> type <text>", "<ms> move <x> <y>",
- * "<ms> click <x> <y>", "<ms> shot <file.ppm>"; '#' starts a comment. */
+/* Script verbs: key, down, up, type, move, click, shot, signal, await, end (docs/runtime.md, "Input scripts"). */
 #include <ctype.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 #include "devices.h"
 #include "host_input.h"
@@ -12,7 +13,7 @@
 
 enum { MAX_EVENTS = 4096, HOLD_US = 60000, TYPE_GAP_US = 120000, LINE_MAX = 512, PATH_MAX_LEN = 256 };
 
-typedef enum { EV_KEY_DOWN, EV_KEY_UP, EV_MOVE, EV_BUTTON_DOWN, EV_BUTTON_UP, EV_SHOT } EventKind;
+typedef enum { EV_KEY_DOWN, EV_KEY_UP, EV_MOVE, EV_BUTTON_DOWN, EV_BUTTON_UP, EV_SHOT, EV_SIGNAL, EV_AWAIT, EV_END } EventKind;
 
 typedef struct Event {
     uint64_t at_us;
@@ -24,6 +25,10 @@ typedef struct Event {
 struct InputScript {
     Event events[MAX_EVENTS];
     int count, next;
+    uint64_t shift_us;       /* time spent in awaits: added to every event not yet applied */
+    bool waiting;            /* held at the await in events[next - 1] */
+    uint64_t wait_start_us, wait_deadline_us;
+    bool ended;              /* an "end" event was applied */
 };
 
 /* Set-1 make codes for the US layout; index is the ASCII character, 0x100 marks Shift. */
@@ -103,6 +108,20 @@ static int parse_line(InputScript *s, char *line)
         Event *e = add_event(s, at, EV_SHOT, 0, 0);
         if (e)
             snprintf(e->path, sizeof e->path, "%s", rest);
+    } else if ((!strcmp(verb, "signal") || !strcmp(verb, "await")) && *rest) {
+        char name[PATH_MAX_LEN];
+        unsigned long long timeout_ms = 120000;
+        if (verb[0] == 's' ? sscanf(rest, "%255s", name) != 1 : sscanf(rest, "%255s %llu", name, &timeout_ms) < 1)
+            return -1;
+        if (strchr(name, '/'))
+            return -1;
+        Event *e = add_event(s, at, verb[0] == 's' ? EV_SIGNAL : EV_AWAIT, 0, 0);
+        if (e) {
+            snprintf(e->path, sizeof e->path, "%s", name);
+            e->b = (int)(timeout_ms > 86400000ULL ? 86400000ULL : timeout_ms);
+        }
+    } else if (!strcmp(verb, "end") && !*rest) {
+        add_event(s, at, EV_END, 0, 0);
     } else {
         return -1;
     }
@@ -139,7 +158,46 @@ void input_script_free(InputScript *s) { free(s); }
 
 uint64_t input_script_next_us(const InputScript *s)
 {
-    return s->next < s->count ? s->events[s->next].at_us : UINT64_MAX;
+    if (s->waiting)
+        return s->wait_start_us;
+    return s->next < s->count ? s->events[s->next].at_us + s->shift_us : UINT64_MAX;
+}
+
+bool input_script_ended(const InputScript *s) { return s->ended; }
+
+/* The sync file for NAME, or false when INN_SYNC_DIR is unset. */
+static bool sync_path(char *out, size_t size, const char *name)
+{
+    const char *dir = getenv("INN_SYNC_DIR");
+    if (!dir || !*dir)
+        return false;
+    return snprintf(out, size, "%s/%s", dir, name) < (int)size;
+}
+
+static bool sync_exists(const char *name)
+{
+    char path[PATH_MAX_LEN + 512];
+    struct stat st;
+    return sync_path(path, sizeof path, name) && stat(path, &st) == 0;
+}
+
+static void sync_signal(const char *name)
+{
+    char path[PATH_MAX_LEN + 512];
+    if (!sync_path(path, sizeof path, name)) {
+        log_msg("script: signal %s without INN_SYNC_DIR", name);
+        return;
+    }
+    char *slash = strrchr(path, '/');
+    *slash = 0;
+    if (mkdir(path, 0777) != 0 && errno != EEXIST)
+        log_msg("script: cannot create %s", path);
+    *slash = '/';
+    FILE *f = fopen(path, "w");
+    if (f)
+        fclose(f);
+    else
+        log_msg("script: cannot create %s", path);
 }
 
 static void apply_event(Machine *m, const Event *e)
@@ -160,11 +218,38 @@ static void apply_event(Machine *m, const Event *e)
         if ((m->native_video ? host_video_write_ppm(m, e->path) : vga_write_ppm(m, e->path)) != 0)
             log_msg("script: cannot write %s", e->path);
         break;
+    default: break;
     }
 }
 
 void input_script_apply(InputScript *s, Machine *m)
 {
-    while (s->next < s->count && s->events[s->next].at_us <= m->virtual_us)
-        apply_event(m, &s->events[s->next++]);
+    while (!s->ended) {
+        if (s->waiting) {
+            bool got = sync_exists(s->events[s->next - 1].path);
+            if (!got && m->virtual_us < s->wait_deadline_us)
+                return;
+            if (!got)
+                log_msg("script: await %s timed out", s->events[s->next - 1].path);
+            s->shift_us += m->virtual_us - s->wait_start_us;
+            s->waiting = false;
+            continue;
+        }
+        if (s->next >= s->count || s->events[s->next].at_us + s->shift_us > m->virtual_us)
+            return;
+        const Event *e = &s->events[s->next++];
+        if (e->kind == EV_SIGNAL) {
+            sync_signal(e->path);
+        } else if (e->kind == EV_END) {
+            s->ended = true;
+        } else if (e->kind == EV_AWAIT) {
+            if (sync_exists(e->path))
+                continue;
+            s->waiting = true;
+            s->wait_start_us = m->virtual_us;
+            s->wait_deadline_us = m->virtual_us + (uint64_t)e->b * 1000;
+        } else {
+            apply_event(m, e);
+        }
+    }
 }

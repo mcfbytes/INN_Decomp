@@ -183,7 +183,16 @@ with file not found.
 13500 down 48                    # held until the matching "up" (flight controls)
 13900 up 48
 14000 type guybrush\n            # US layout, \n is Enter
+15000 signal ready               # creates $INN_SYNC_DIR/ready
+16000 await other 60000          # holds later events until $INN_SYNC_DIR/other exists
+17000 end                        # ends the run, closing the line, as --run-ms does
 ```
+
+`signal` and `await` synchronize several clients (next section). `await NAME [timeout_ms]` holds every
+later event until the file exists, then shifts the rest of the script by the time waited, so events keep
+their order and spacing; on timeout (default 120000 ms of emulated time) it logs
+`script: await NAME timed out` and goes on. Names have no `/`. Without `INN_SYNC_DIR`, a `signal` logs
+a message and an `await` waits for its timeout. `end` stops the run at that time, so a client can hang up.
 
 `tools/ppm2png.py` converts screenshots. Example end-to-end run against the sibling server:
 
@@ -194,6 +203,45 @@ build/inn --headless --run-ms 95000 --script play.txt --com1 127.0.0.1:2314 work
 
 The C: drive is a copy of the installed client with the program under `\INN`, as `LSCI.CFG`
 expects. The frontend starts each program in its own directory.
+
+## Several clients against one server
+
+`tools/multi_client.sh <build_dir> <port> <manifest> [run_ms_default]` starts one innkeeperd
+(`$INNKEEPERD`, with `--bind 127.0.0.1:<port> --no-int14h --data-dir OUT/data --capture-dir OUT/captures`)
+and one `inn --headless` per client, then checks the logs. `OUT` is `work/verify/<port>` (locked
+like `verify_lifted.sh`); each client gets `OUT/<tag>/client.log`, its screenshots as ppm and png, and
+the server writes `OUT/server.log`. Each client runs on an rsync copy of its drive at
+`work/verify-drive/<port>-<tag>` (default `work/srv-games-c`) whose `INN\LSCI.CFG` `id =` line is the
+client's account. Scripts see `@OUT@` as `OUT/<tag>` and `@SYNC@` as `OUT/sync`, and the clients get
+`INN_SYNC_DIR=OUT/sync` for `signal` and `await`. The environment passes through;
+`INN_VERIFY_LIFTED` (50 calls when unset) applies only to the tags in `INN_VERIFY_TAGS` (comma or space
+separated, or `all`), so the lift families can shadow-verify multiplayer paths.
+
+Manifest lines (`#` starts a comment; relative paths are relative to the manifest's directory):
+
+```
+server <extra innkeeperd args>
+client <tag> <account> <script> [start_delay_ms] [drive] [run_ms]   # '-' for the default drive
+command <tag> <shell command>      # started after the server, e.g. a Playwright driver;
+                                   # @OUT@, @SYNC@ and @PORT@ are substituted
+expect <tag|server> <ERE>          # matched in client.log or server.log after the run
+reject <tag|server> <ERE>          # (ANSI colour stripped)
+```
+
+The summary lists each process's exit status, the count of `not decoded` lines in `server.log` and every
+expect and reject result; the exit status is non-zero when any check fails. Example, two players in the
+SierraLand Waiting Room, the second hanging up first:
+
+```
+client ann 100001 ann.txt 0 - 190000
+client bob 100002 bob.txt 3000 - 190000
+expect server step=host GroupLeft
+reject server not decoded
+```
+
+Ann's script ends with `signal annin`, `await bobin` and a screenshot; Bob's mirrors it and finishes
+with `await annshot` and `end`. Run: `INNKEEPERD=... tools/multi_client.sh build 41020
+private/lifted/scenarios/srv/waiting2/manifest.txt` (the scenario is in the private repo).
 
 ## TSN host stand-in
 
