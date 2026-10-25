@@ -571,8 +571,9 @@ bool lift_verify_call(Machine *m, ActiveHook *h)
 
 /* A synthetic call (lift_synth.c): the machine is set up with CS:IP at h's entry and the return
  * address pushed. Both runs start from that state, are compared as a live call is, and the machine
- * is left in that start state again, host file changes undone. */
-SynthResult lift_verify_synthetic(Machine *m, ActiveHook *h, const char *label, uint64_t budget)
+ * is left in that start state again, host file changes undone; with keep_end, in the original's end
+ * state when the call returned and matched (a chained call starts there). */
+SynthResult lift_verify_synthetic(Machine *m, ActiveHook *h, const char *label, uint64_t budget, bool keep_end)
 {
     LiftState *s = lift_state(m);
     VerifyState *v = s->verify;
@@ -617,7 +618,10 @@ SynthResult lift_verify_synthetic(Machine *m, ActiveHook *h, const char *label, 
     r.returned = returned;
     r.mismatch = v->mismatches != before;
     m->exit_requested = false;
-    restore(m, &v->cpu_before, v->mem_before, v->vga_before, v->dos_before, v->snd_before);
+    if (keep_end && returned && !r.mismatch)
+        restore(m, &v->cpu_original, v->mem_original, v->vga_original, v->dos_original, v->snd_original);
+    else
+        restore(m, &v->cpu_before, v->mem_before, v->vga_before, v->dos_before, v->snd_before);
     dos_journal_undo(m);
     dos_journal_end(m);
     m->cpu.stop = false;

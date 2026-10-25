@@ -74,11 +74,10 @@ static void log_verify_line(const LiftedEntry *e, const HookStats *st)
                     st->shadow_calls, st->shadow_mismatches);
         return;
     }
-    if (e->no_shadow) {
-        log_msg("verify: %s %s: not shadowed (LIFT_NOSHADOW)", e->module, e->name);
-        return;
-    }
-    if (st->armed_once && st->result_diffs)
+    if (e->no_shadow) { /* live calls are not checked; synthetic ones (call!) are, below */
+        if (st->armed_once)
+            log_msg("verify: %s %s: not shadowed (LIFT_NOSHADOW)", e->module, e->name);
+    } else if (st->armed_once && st->result_diffs)
         log_msg("verify: %s %s: %d calls checked, %d mismatches, DX:AX differs in %d", e->module, e->name,
                 st->shadow_calls, st->shadow_mismatches, st->result_diffs);
     else if (st->armed_once)

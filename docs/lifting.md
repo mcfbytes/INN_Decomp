@@ -298,6 +298,10 @@ call LSCITV.EXE lsci_kSqrt words(1, 144) DS=DGROUP
 call LSCITV.EXE lsci_strncat buf(64,"abc") "xy" 3 DS=DGROUP
 call TSNEXEC.EXE tsn_memcpy let a=buf(32,"abcdefgh") a+2 a 5
 call TSNEXEC.EXE tsn_long_shift_left DX:AX=long(0x12345678) CX=4
+poke DGROUP:0x0100 words(0, 0)                # written in the next call's setup only
+call! PROG.EXE wait_for_key DS=DGROUP          # a LIFT_FAR_NOSHADOW entry, shadowed on request
+call PROG.EXE queue_put e=words(4, 13)
+chain PROG.EXE queue_get e                     # starts where the call before it ended
 ```
 
 - **Triggers.** `after <module> <entry> [n] [near|far]` takes the snapshot the n-th time (default
@@ -320,6 +324,23 @@ call TSNEXEC.EXE tsn_long_shift_left DX:AX=long(0x12345678) CX=4
   DGROUP` or a number; the trigger's arguments `arg(n)`, `argptr(n)` (word n, and the far pointer at
   words n, n+1). `p+n` and `p-n` move a pointer (no spaces around the operator). `name=value` pushes a
   value and names it, `let name=value` only names it, for later items such as `name+2`.
+- **Pokes.** `poke <SEG:off> bytes(...)|words(...)` writes the values into guest memory in the setup of
+  the next call line (each poke applies to that one call only; several pokes may precede it), on top of
+  the restored trigger state, so a call finds an event queued or a driver in a given state. SEG is as
+  in `[SEG:off]` and either half may read memory (`poke [DGROUP:0x10+[DGROUP:0x20]]:0 ...`); the values may name the call's own items (`words(h)` after `call ... let h=bytes(0xCF)`):
+  pokes are written after the items are evaluated, so the items' `[SEG:off]` reads see the memory
+  before the pokes. Below 1 MB the bytes go through the bus (VGA memory too).
+- **Chains.** `chain <module> <entry> <items...>` is a call that starts from the end state of the call
+  before it under the same `after` (the original's end: memory, VGA, DOS state and registers; SS:SP
+  back at the trigger's, then the new arguments pushed), instead of the trigger state. Names and HMA
+  buffers carry over, so `chain ... p` reads what the call before it left in `p`. Host file changes are
+  still undone after every call. If a call fails (does not return, mismatches, is not loaded), the
+  calls chained to it are skipped and logged. The machine goes back to the trigger state when the chain
+  ends; `INN_SYNTH_CHECK` checks it there.
+- **NOSHADOW entries.** `call!` (and `chain!`) opt a `LIFT_*_NOSHADOW` entry into synthetic
+  verification, for entries whose reason not to shadow (a wait on input or a device) the poked or
+  chained state satisfies; without `!` such an entry is a list error. Region entries cannot be called.
+  The summary reports their synthetic calls as for any entry.
 - **Buffers** live in the HMA (FFFF:0010 to FFFF:FFFF, 16-byte aligned, 16 zero bytes after each), with
   A20 enabled for the call: no DOS program here uses the HMA and the runtime has no XMS, so the area is
   free and inside the snapshot. They are compared like any memory, so what a function writes into its
