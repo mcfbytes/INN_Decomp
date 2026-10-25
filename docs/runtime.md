@@ -225,6 +225,47 @@ Scripts without these commands behave as before. `tools/verify_two.sh <build> <p
 with outputs in `work/verify/<port>/a` and `/b` and the sync directory `work/verify/<port>/sync`. Unit test:
 `runtime/tests/test_input_script.c`.
 
+## Link settling
+
+A headless run's emulated clock does not read the wall clock (`INN_EPOCH` fixes the start), but the
+server's bytes arrive at a wall time, and the guest sees them at whatever emulated time its next receive
+poll falls on. Headless runs go about six times faster than real time, and that rate follows the host's
+load, so a reply could land a few emulated milliseconds earlier or later from one run to the next.
+Scenarios that walk into a random encounter (`tw_combat`) took different paths that way.
+
+`INN_LINK_SETTLE_MS=N` (`runtime/src/link_settle.c`) wraps the TCP link in a settling layer, in both the
+UART of the hybrid build (`uart_attach_tcp`) and the native host link (`host_link_open`):
+
+- Once the guest has sent a byte, what the server sends next is held. It is released at the first
+  receive poll at or after `INN_LINK_SETTLE_WINDOW_MS` (default 3) of emulated time after the guest's
+  last sent byte. Each send moves that point, and 250 ms after the first send it is due regardless.
+- At that poll the client waits, in wall time, until the server has been quiet for N ms (or for twice
+  the slowest reply seen so far, up to 4 N), then hands over everything received. No more than a 5 s
+  wait per poll.
+- The first carrier check waits for the TCP connect to finish (up to 5 s).
+- Bytes the server sends while nothing is pending go through at once. Their emulated time still follows
+  the wall clock; the first 20 are logged as `link-settle: N bytes arrived unprompted at T ms`.
+
+Every receive poll falls at an emulated time fixed by the run itself, so replies reach the guest at the
+same emulated times in every run, whatever the host's load. `tools/verify_lifted.sh` and
+`tools/m9_suite.sh` set `INN_LINK_SETTLE_MS=40` unless it is already set; `INN_LINK_SETTLE_MS=0` turns
+it off. The run's summary, `link-settle: S settles, W ms waited, slowest reply R ms, ...`, is logged
+when the link closes or the process exits.
+
+The 3 ms window is about the median reply time of an unsettled run (1 to 4 emulated ms after the last
+byte, measured on `tw_combat`). It keeps the recorded scenarios on the paths they were recorded on: with
+it the hybrid `tw_combat` gives the unsettled baseline's traffic, and the M9 suite's verification counts
+match an unsettled run of the same build except on `inn_casino`. Other windows (2, 5, 10 or 20 ms) send
+`tw_combat` down other paths. The window is shorter than a 2400-baud byte, so the UART's
+byte-at-a-time sends settle about once per byte: `tw_combat` waits about 49 s of wall time in 1212
+settles. The slowest reply measured under a load average of 40 was 23 ms. The window is a timing model,
+not a measurement of the 1993 network.
+
+Settling makes runs of one build repeat. It does not make the hybrid and native builds agree: they
+charge work differently ([native.md](native.md) section 5), so the client reaches a send at different
+emulated times, and a game whose random numbers follow the clock (`tw_combat`'s encounter) can still
+differ between them.
+
 ## TSN host stand-in
 
 `exec_stub.c` replaces TSNEXEC for running one DOS game client alone: INT 14h returns a 17-entry export

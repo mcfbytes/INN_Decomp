@@ -150,7 +150,16 @@ tick, the TSNEXEC tick counter maintained by the client). In native mode it adva
   background tab) it jumps forward and the lost time is dropped, as the frame clock does today.
 - **Deterministic mode (headless).** No wall clock: charges and waits only. A run is then independent of
   host speed; only the moments the server's bytes arrive (polled at safe points) tie it to wall time, as
-  in today's headless hybrid runs. Headless hybrid and native runs start that clock at `INN_EPOCH`
+  in today's headless hybrid runs. `INN_LINK_SETTLE_MS` removes that tie for replies (docs/runtime.md,
+  "Link settling"): once the client has sent, what the server sends next is held until 3 ms of emulated
+  time after the client's last byte, and the receive poll at that moment waits in wall time until the
+  server has been quiet for the given milliseconds. The settling sits in the SerialLink, so it covers
+  the UART of the hybrid build (driven by the frame loop's `machine_run_for`) and `host_link` of the
+  native build (driven by this clock's waits and safe points) alike. `tools/verify_lifted.sh` and
+  `tools/m9_suite.sh` turn it on (40 ms). With it three runs of `tw_combat` on one hybrid build give the
+  same traffic and screens, also with the client slowed by a busy loop on its CPU, which without it
+  changes the encounter. Bytes the server sends unprompted still arrive at a wall time.
+  Headless hybrid and native runs start that clock at `INN_EPOCH`
   (default 750000000, 8 Oct 1993 UTC). An empty `INN_EPOCH` uses the host clock. The same epoch makes
   two runs of one build repeat. Hybrid and native still start about 0.4 s apart, because they charge
   work differently: a periodic host message can fall on opposite sides of a scripted event. Move the
