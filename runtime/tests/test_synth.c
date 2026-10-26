@@ -163,6 +163,10 @@ int main(void)
 
     r = run(f_good, "after TEST.EXE f 1\ncall TEST.EXE g 1 2\n", F_SCRATCH);
     CHECK(r.synth_calls[1] == 0, "a lifted entry never entered fires no call");
+
+    /* an overlay is named PROG.EXE#stub: a # inside a word is part of the name, not a comment */
+    r = run(f_good, "after TEST.EXE#1000 f 1   # not reached\ncall TEST.EXE#1000 f 1 2 buf(2)\n", F_SCRATCH);
+    CHECK(r.synth_calls[0] == 0, "an overlay module name parses and its trigger is not reached");
     if (failures)
         fprintf(stderr, "%d check(s) failed\n", failures);
     return failures != 0;

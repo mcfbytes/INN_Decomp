@@ -108,7 +108,7 @@ static void cut_comment(char *s)
             p++;
         else if (*p == '"')
             quoted = !quoted;
-        else if (*p == '#' && !quoted) {
+        else if (*p == '#' && !quoted && (p == s || p[-1] == ' ' || p[-1] == '\t')) {
             *p = 0;
             return;
         }
