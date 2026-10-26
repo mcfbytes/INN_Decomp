@@ -19,6 +19,10 @@ an overlay of the module's EXE, the entry belongs to that overlay. Its offset is
 overlay's code, it registers under "<MODULE>#<stub segment>", which the runtime announces when the
 overlay manager reads the code, and its signature and relocations come from the overlay's code and
 fixup table. Signature bytes past the end of the overlay's code are not compared.
+
+Floating-point emulator sequences (tools/borland_emu_patch.py: CD 34..3D in the file, FWAIT + x87 once an
+emulator with a coprocessor has patched them) inside a signature are marked in `emu_mask`, so the runtime
+accepts either form there; one cut off by the end of the signature leaves its bytes there uncompared.
 """
 import pathlib
 import re
@@ -81,6 +85,42 @@ def read_module(module_dir):
     return (name, native, *image_of(exe_path))
 
 
+EMU_SEG_PREFIXES = (0x26, 0x2E, 0x36, 0x3E)
+
+
+def emu_len(b):
+    """Length of an emulator sequence at the start of b, in the INT or the patched form, else 0."""
+    if len(b) >= 2 and b[0] == 0xCD and 0x34 <= b[1] <= 0x3D:
+        return 3 if b[1] == 0x3C else 2
+    if len(b) >= 2 and b[0] == 0x90 and b[1] == 0x9B:
+        return 2
+    if len(b) >= 2 and b[0] == 0x9B and 0xD8 <= b[1] <= 0xDF:
+        return 2
+    if len(b) >= 3 and b[0] == 0x9B and b[1] in EMU_SEG_PREFIXES and 0xD8 <= b[2] <= 0xDF:
+        return 3
+    return 0
+
+
+def emu_marks(code, start, unknown):
+    """(emu_mask, extra unknown bits) for the signature at code[start:]."""
+    compared = 0
+    while compared < SIGNATURE_LEN and not unknown >> compared & 1:
+        compared += 1
+    mask, cut, i = 0, 0, 0
+    while i < compared:
+        n = emu_len(code[start + i:start + i + 3])
+        if not n:
+            i += 1
+            continue
+        if i + n <= compared:
+            mask |= 1 << i
+        else:
+            for k in range(i, compared):
+                cut |= 1 << k
+        i += n
+    return mask, cut
+
+
 def reloc_mask(start, relocs):
     mask = SPLIT_HEAD if start - 1 in relocs else 0
     for i in range(SIGNATURE_LEN):
@@ -104,28 +144,34 @@ def entries_of(module_dir, name, native, image, relocs, overlays):
                     unknown |= 1 << i
                 signature = signature.ljust(SIGNATURE_LEN, b'\0')
                 mask = reloc_mask(start, fixups)
+                source_code = code
             else:
                 start = seg * 16 + off
                 signature = image[start:start + SIGNATURE_LEN]
                 mask = reloc_mask(start, relocs)
+                source_code = image
             if len(signature) != SIGNATURE_LEN:
                 sys.exit(f'{source}: {match[3]} lies outside the image')
             kind = match[4]
             if match[6]:
                 unknown |= ((1 << SIGNATURE_LEN) - 1) & ~((1 << int(match[6])) - 1)
+            emu, cut = emu_marks(source_code, start, unknown)
+            unknown |= cut
             yield (module, seg, off, match[3], kind.startswith('LIFT_NEAR'), match[5], signature, mask,
-                   kind == 'LIFT_REGION', kind.endswith('_NOSHADOW'), unknown, kind.endswith('_REPLAY'), native)
+                   kind == 'LIFT_REGION', kind.endswith('_NOSHADOW'), unknown, kind.endswith('_REPLAY'), native,
+                   emu)
 
 
 def emit_module(out, index, entries):
     for _, _, _, fn, *_ in entries:
         out.append(f'void {fn}(Machine *m);')
     out.append(f'static const LiftedEntry module_{index}[] = {{')
-    for module, seg, off, fn, near, scratch, signature, mask, region, no_shadow, unknown, replay, native in entries:
+    for module, seg, off, fn, near, scratch, signature, mask, region, no_shadow, unknown, replay, native, emu \
+            in entries:
         sig = ', '.join(f'0x{b:02X}' for b in signature)
         out.append(f'    {{ "{module}", 0x{seg:04X}, 0x{off:04X}, {fn}, "{fn}", {str(near).lower()}, '
                    f'{scratch}, {{ {sig} }}, 0x{mask:04X}, {str(region).lower()}, {str(no_shadow).lower()}, '
-                   f'0x{unknown:04X}, {str(replay).lower()}, {str(native).lower()} }},')
+                   f'0x{unknown:04X}, {str(replay).lower()}, {str(native).lower()}, 0x{emu:04X} }},')
     out.append('};')
 
 

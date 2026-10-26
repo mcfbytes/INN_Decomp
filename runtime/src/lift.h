@@ -16,6 +16,9 @@ enum {
     LIFT_REG_AX = 1 << R_AX, LIFT_REG_CX = 1 << R_CX, LIFT_REG_DX = 1 << R_DX, LIFT_REG_BX = 1 << R_BX,
     LIFT_REG_SI = 1 << R_SI, LIFT_REG_DI = 1 << R_DI,
     LIFT_REG_ES = 1 << (8 + S_ES), LIFT_REG_FLAGS = 1 << 15,
+    /* The x87 (Cpu.fpu) is compared like a register (docs/lifting.md, "Floating point"): FPU_CC lets the
+     * condition codes C0-C3 differ, FPU lets the whole FPU state differ. */
+    LIFT_REG_FPU_CC = 1 << 16, LIFT_REG_FPU = 1 << 17,
 };
 
 /* One lifted function of one module build. The signature guards against other builds. */
@@ -25,7 +28,7 @@ typedef struct LiftedEntry {
     LiftedFn fn;
     const char *name;
     bool near_return;       /* returns with RET rather than RETF */
-    uint16_t scratch_regs;  /* LIFT_REG_* bits the calling convention lets differ on return */
+    uint32_t scratch_regs;  /* LIFT_REG_* bits the calling convention lets differ on return */
     uint8_t signature[LIFT_SIGNATURE_LEN]; /* original bytes at the entry, as in the file */
     uint16_t reloc_mask; /* bit i: a load-segment-relocated word starts at signature byte i */
     bool region;    /* LIFT_REGION: may leave at any instruction; see lift_verify.c */
@@ -33,6 +36,8 @@ typedef struct LiftedEntry {
     uint16_t unknown_mask; /* bit i: signature byte i is not compared (past the end of an overlay's code) */
     bool replay;    /* LIFT_*_REPLAY: shadow-verified with time and interrupts flowing (device replay) */
     bool native_only; /* from a directory whose module.txt says `native`: armed only for native control */
+    uint16_t emu_mask; /* bit i: a floating-point emulator sequence (INT 34h-3Dh, or the x87 form an emulator
+                        * patches it into) starts at signature byte i; either form matches there */
 } LiftedEntry;
 
 /* reloc_mask bit 15: byte 0 is the high half of a relocated word starting before the entry. */
