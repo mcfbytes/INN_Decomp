@@ -135,6 +135,12 @@ static CallbackResult x_send(Machine *m)
         ret16(m, 0);
         return CB_DONE;
     }
+    /* The lifted half of a shadow run: the original's half already sent it, and a second copy would
+     * queue a second reply and free the handle twice. */
+    if (m->io_mode == IO_REPLAY) {
+        ret16(m, 1);
+        return CB_DONE;
+    }
     uint32_t p = deref(m, handle);
     uint8_t buf[MSG_MAX];
     for (uint16_t i = 0; i < len; i++)
