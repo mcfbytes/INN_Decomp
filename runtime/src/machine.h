@@ -101,6 +101,7 @@ struct Machine {
     uint64_t irq_pending; /* bit n: interrupt vector n requested by a device */
     uint64_t virtual_us;  /* emulated time, advanced by the scheduler */
     uint64_t slice_start_insn; /* cpu.instructions when the current slice began */
+    uint64_t step_start_insn;  /* cpu.instructions when machine_step last called cpu_run (lift_time.c) */
 
     uint64_t ips; /* emulated instructions per second */
     uint32_t io_cost_ns; /* ISA bus time charged per port access */
@@ -284,6 +285,9 @@ enum { IDLE_STREAK = 8, IDLE_GAP_SLOTS = 5000, IDLE_MAX_US = 1000 };
 /* Time passes for work lifted C does without port I/O (a direct guest call, a service called from C):
  * ns of bus time, handled as a port access is. Callers pass m->io_cost_ns. */
 void machine_charge_c(Machine *m, uint32_t ns);
+/* Ends the current scheduler slice now, as when its instruction slots are used up: emulated time moves
+ * on by TICK_SLICE_US and the tickers run (lift_time.c). */
+void machine_end_slice(Machine *m);
 
 /* Host time (seconds since 1970) at which emulated time 0 falls: INN_EPOCH when set, so runs that
  * seed from the clock repeat, else the host clock at first use. The BIOS tick and DOS clock use it. */
