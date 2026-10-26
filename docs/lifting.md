@@ -134,6 +134,9 @@ returns (interrupts held, port I/O recorded and performed), saves that end state
 snapshot, runs the lifted C with the recorded port reads replayed (its writes are compared, not
 performed), and compares the two end states: memory except the dead stack below the entry SP,
 the registers outside the entry's scratch set, flags unless scratch, and the port I/O sequence.
+A lifted entry that the lifted run enters on another stack than the call's (code an ISR runs on its
+private stack, such as the AIL timer's, inside a lifted ISR or delivered by device replay) adds the
+200h bytes below its SP to the dead stack. The original's callees leave their frames there; the lifted C does not.
 The game then continues from the original's end state, so a wrong lift cannot derail a run. All
 lifted hooks are off during the original's shadow run, so lifted callees inside it run original
 code and the whole call tree is compared. The
@@ -151,7 +154,8 @@ a modem driver) are marked `LIFT_FAR_REPLAY` / `LIFT_NEAR_REPLAY` and verified w
 `LIFT_FAR_NOSHADOW` / `LIFT_NEAR_NOSHADOW`: they are hooked but only ever checked functionally, and the
 summary lists them as not shadowed.
 `LIFTED_PREFIX(seg, off, fn, kind, scratch, n)` is `LIFTED` with a signature of only the first `n` bytes, for an
-entry whose code is followed by data the loader or the host fills in (the file does not hold those bytes).
+entry whose code is followed by data the loader or the host fills in (the file does not hold those bytes),
+or that starts fewer than 12 bytes before the end of the image (n at most the bytes left).
 During the lifted run, VGA port accesses also reach the device (its state is snapshotted), so mode
 sets and palette writes are compared. Interrupts are held and emulated time stands still during
 shadow runs (device replay aside), so the VGA status register toggles vertical retrace by read count instead; code that

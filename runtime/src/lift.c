@@ -546,8 +546,11 @@ bool lift_dispatch(Machine *m, uint32_t linear)
     ActiveHook *h = find_hook(s, linear);
     if (!h || !signature_matches(m, h))
         return false;
-    if (!lift_verify_call(m, h))
+    if (!lift_verify_call(m, h)) {
+        if (s->in_shadow)
+            lift_verify_nested_entry(m);
         lift_call_c(m, h->entry->fn);
+    }
     return true;
 }
 
@@ -629,8 +632,11 @@ static bool call_lifted_direct(Machine *m, LiftState *s, uint32_t linear)
         return false;
     s->direct_calls++;
     charge_direct(m);
-    if (!lift_verify_call(m, h))
+    if (!lift_verify_call(m, h)) {
+        if (s->in_shadow)
+            lift_verify_nested_entry(m);
         lift_call_c(m, h->entry->fn);
+    }
     return true;
 }
 
