@@ -212,6 +212,17 @@ static void settle_close(void *ctx)
     free(s);
 }
 
+bool serial_link_settle_drain(SerialLink *link)
+{
+    if (!link || link->recv != settle_recv)
+        return false;
+    Settle *s = link->ctx;
+    /* Held bytes stay held; what arrives while nothing is pending is the guest's at once, as in recv. */
+    if (pull(s) && !s->pending)
+        s->released = s->count;
+    return true;
+}
+
 SerialLink serial_link_settle(Machine *m, SerialLink inner, uint32_t quiet_ms, uint32_t window_us)
 {
     if (!inner.send || !inner.recv || !inner.connected)

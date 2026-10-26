@@ -172,6 +172,8 @@ void serial_link_drain(SerialLink *link);
  * set (INN_LINK_SETTLE_WINDOW_MS, default 3, sets the window) and otherwise returns inner. */
 SerialLink serial_link_settle(Machine *m, SerialLink inner, uint32_t quiet_ms, uint32_t window_us);
 SerialLink serial_link_settle_env(Machine *m, SerialLink inner);
+/* serial_link_drain for a settled link: reads the host into the settling queue. False for other links. */
+bool serial_link_settle_drain(SerialLink *link);
 /* Raw TCP client link to e.g. innkeeperd's line port; 0 on success, -1 on failure. */
 int uart_attach_tcp(Machine *m, int com, const char *host, int port);
 /* Browser builds: WebSocket link (ws:// or wss:// URL, binary frames of raw bytes); the native

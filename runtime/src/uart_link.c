@@ -225,6 +225,8 @@ SerialLink serial_link_tcp(const char *host, int port)
 
 void serial_link_drain(SerialLink *link)
 {
+    if (serial_link_settle_drain(link))
+        return;
     if (link && link->recv == tcp_recv)
         tcp_drain(link->ctx);
 }

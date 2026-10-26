@@ -1,6 +1,6 @@
 /* Link settling (docs/runtime.md, "Link settling"): replies are held until the window after the
  * guest's last send, a late reply is waited for, earlier bytes are not held, a guest that keeps
- * sending still settles, and INN_LINK_SETTLE_MS switches it on. */
+ * sending still settles, a drain keeps the hold, and INN_LINK_SETTLE_MS switches it on. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -174,9 +174,33 @@ static void test_env(void)
     machine_destroy(m);
 }
 
+/* serial_link_drain (an input script's wait) reads the server into the settling queue; a held reply
+ * stays held, unprompted bytes are the guest's. */
+static void test_drain(void)
+{
+    Machine *m = machine_create();
+    Pipe p = { 0 };
+    SerialLink l = settled(m, &p);
+    char got[PIPE_BYTES];
+    m->virtual_us = 100000;
+    give(&p, "U");
+    serial_link_drain(&l);
+    CHECK(p.in_len == 0, "the drain read the server");
+    CHECK(take(&l, got, sizeof got) == 1 && !strcmp(got, "U"), "unprompted drained bytes pass (%s)", got);
+    l.send(l.ctx, (const uint8_t *)"Q", 1);
+    give(&p, "R");
+    serial_link_drain(&l);
+    CHECK(p.in_len == 0 && take(&l, got, sizeof got) == 0, "a drained reply is still held");
+    m->virtual_us += WINDOW_US;
+    CHECK(take(&l, got, sizeof got) == 1 && !strcmp(got, "R"), "and released at the window");
+    l.close(l.ctx);
+    machine_destroy(m);
+}
+
 int main(void)
 {
     test_hold_and_release();
+    test_drain();
     test_env();
     if (failures) {
         fprintf(stderr, "%d failures\n", failures);
