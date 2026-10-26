@@ -145,6 +145,12 @@ void lift_irq_boundary(Machine *m);
 /* Called between slices while lifted code waits in a nested guest call, so a frontend can present
  * frames, take input and pace against the wall clock; never during shadow verification. */
 void lift_set_nested_yield(Machine *m, void (*fn)(Machine *m));
+/* Host input applied while the original of a device-replay entry runs: logged so the lifted run can apply it. */
+/* Lifted C that stands in for a loop of the original with no event in it (a delay): the instructions it would have run. */
+void lift_replay_idle(Machine *m, uint64_t insns);
+/* Called before a host service runs in the lifted half of a device-replay shadow run. */
+void lift_replay_pre_callback(Machine *m);
+void lift_replay_host_input(Machine *m, int kind, int a, int b, int c, int d);
 
 /* INN_INTERP_PROFILE: NULL, or one counter per 16-byte paragraph of the 1 MB image that cpu_run
  * increments for every instruction it executes; written to the file at lift_shutdown. */

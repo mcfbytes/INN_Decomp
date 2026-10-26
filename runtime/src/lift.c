@@ -585,7 +585,7 @@ void lift_run_nested(Machine *m, uint32_t return_linear, uint16_t return_sp, boo
             s->nested_abort = true;
         if (m->native) /* the non-strict fallback: interrupts and yields come from the native core */
             native_safepoint(m);
-        else if (s->nested_yield && !s->in_shadow)
+        else if (s->nested_yield && (!s->in_shadow || lift_replay_recording(m)))
             s->nested_yield(m);
         if (s->shadow_of && m->cpu.instructions >= stall_report) {
             /* Interrupts are held during a shadow run, so code that waits on a timer tick spins. */

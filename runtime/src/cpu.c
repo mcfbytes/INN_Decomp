@@ -1065,6 +1065,8 @@ static void group_fe(Machine *m, Insn *in)
             return;
         }
         m->idle.polled = false;
+        if (__builtin_expect(m->io_mode == IO_REPLAY, 0))
+            lift_replay_pre_callback(m);
         CallbackResult result = fn(m);
         if (!m->idle.polled) /* any other service is activity (machine_idle_poll) */
             m->idle.activity = true;

@@ -8,6 +8,7 @@
 # INN_TSN_HOST=<rules> runs without a server: dosrt's TSN host stand-in plays the host
 # (docs/runtime.md), and INN_PROGRAM names the program and its arguments (default
 # 'INN\TSNEXEC.EXE DEFAULT'); for Red Baron see docs/redbaron.md. The port then only names the run.
+# INN_TIMEOUT=<seconds> caps the client run (default 900).
 # INN_COVERAGE=1 writes the call coverage (docs/lifting.md, "Coverage") to <output dir>/coverage.txt;
 # any other value is used as the file name.
 # INN_SYNTH=<call lists> adds synthetic calls (docs/lifting.md, "Synthetic calls"); the environment passes it.
@@ -49,7 +50,7 @@ else
 fi
 COVERAGE=${INN_COVERAGE:-}
 [ "$COVERAGE" = 1 ] && COVERAGE=$OUT/coverage.txt
-INN_COVERAGE=$COVERAGE INN_VERIFY_LIFTED=$CALLS timeout 900 "$BUILD/inn" ${INN_ARGS:-} --headless \
+INN_COVERAGE=$COVERAGE INN_VERIFY_LIFTED=$CALLS timeout "${INN_TIMEOUT:-900}" "$BUILD/inn" ${INN_ARGS:-} --headless \
     --run-ms "$RUN_MS" --script "$OUT/play.txt" "${HOST_ARGS[@]}" "$DRIVE" "${PROGRAM[@]}" \
     2>&1 | { head -c 256M > "$OUT/client.log"; tail -c 64M > "$OUT/client.tail"; } || true
 # A run that logs without end (a mismatch on every call) keeps its first 256 MiB and last 64 MiB only.

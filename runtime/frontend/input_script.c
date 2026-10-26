@@ -1,4 +1,4 @@
-/* Script lines: "<ms> key|down|up <set1-hex>", "type <text>", "move|click <x> <y>", "shot <file.ppm>",
+/* Script lines: "<ms> key|down|up <set1-hex>", "type <text>", "move|click <x> <y>", "drag <x1> <y1> <x2> <y2>", "shot <file.ppm>",
  * "signal <name>", "wait <name> [timeout_ms]"; '#' starts a comment (docs/runtime.md). */
 #include <ctype.h>
 #include <errno.h>
@@ -90,7 +90,7 @@ static int parse_line(InputScript *s, char *line)
     uint64_t at = ms * 1000;
     char *rest = line + used;
     rest[strcspn(rest, "\r\n")] = 0;
-    int x, y;
+    int x, y, x2, y2;
     unsigned code;
     if (!strcmp(verb, "key") && sscanf(rest, "%x", &code) == 1) {
         add_keystroke(s, at, (uint16_t)code);
@@ -108,6 +108,12 @@ static int parse_line(InputScript *s, char *line)
             add_event(s, at + HOLD_US, EV_BUTTON_DOWN, 0, 0);
             add_event(s, at + 2 * HOLD_US, EV_BUTTON_UP, 0, 0);
         }
+    } else if (!strcmp(verb, "drag") && sscanf(rest, "%d %d %d %d", &x, &y, &x2, &y2) == 4) {
+        add_event(s, at, EV_MOVE, x, y);
+        add_event(s, at + HOLD_US, EV_BUTTON_DOWN, 0, 0);
+        add_event(s, at + 2 * HOLD_US, EV_MOVE, (x + x2) / 2, (y + y2) / 2);
+        add_event(s, at + 3 * HOLD_US, EV_MOVE, x2, y2);
+        add_event(s, at + 4 * HOLD_US, EV_BUTTON_UP, 0, 0);
     } else if (!strcmp(verb, "shot") && *rest) {
         Event *e = add_event(s, at, EV_SHOT, 0, 0);
         if (e)

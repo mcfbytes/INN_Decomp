@@ -1,6 +1,7 @@
 /* INT 33h mouse driver (HLE). User handlers (AX=0Ch/14h) run from IRQ12 through a ROM
  * trampoline that passes the event in AX-DI; design in docs/runtime.md, "Devices". */
 #include <stdlib.h>
+#include <string.h>
 
 #include "bios_internal.h"
 #include "lift.h"
@@ -71,6 +72,8 @@ static void post_event(Machine *m, uint16_t mask)
         return;
     s->queue[(s->q_head + s->q_count++) % EVENT_QUEUE] = (MouseEvent){
         mask, s->buttons, (uint16_t)s->x, (uint16_t)s->y, s->raw_mx, s->raw_my };
+    if (m->io_mode == IO_REPLAY) /* the replayed run takes the original's IRQ12 from its log */
+        return;
     pic_lower_irq(m, PIC_IRQ_MOUSE);
     pic_raise_irq(m, PIC_IRQ_MOUSE);
 }
@@ -78,6 +81,7 @@ static void post_event(Machine *m, uint16_t mask)
 void mouse_host_motion(Machine *m, int x, int y, int frame_w, int frame_h)
 {
     Mouse *s = mouse_state(m);
+    lift_replay_host_input(m, 0, x, y, frame_w, frame_h);
     if (frame_w <= 0 || frame_h <= 0)
         return;
     int vx = clampi(x * VIRTUAL_W / frame_w, s->min_x, s->max_x);
@@ -98,6 +102,7 @@ void mouse_host_motion(Machine *m, int x, int y, int frame_w, int frame_h)
 void mouse_host_button(Machine *m, int button, bool down)
 {
     Mouse *s = mouse_state(m);
+    lift_replay_host_input(m, 1, button, down, 0, 0);
     if (button < 0 || button >= MOUSE_BUTTONS || (bool)(s->buttons >> button & 1) == down)
         return;
     s->buttons = down ? (uint16_t)(s->buttons | 1u << button) : (uint16_t)(s->buttons & ~(1u << button));
@@ -109,6 +114,17 @@ void mouse_host_button(Machine *m, int button, bool down)
         s->release_x[button] = s->x, s->release_y[button] = s->y;
     }
     post_event(m, (uint16_t)((down ? EV_PRESS0 : EV_RELEASE0) << (button * 2)));
+}
+
+/* Applies input the original received during a device-replay shadow run (lift_replay.c). */
+void mouse_replay_input(Machine *m, int kind, int a, int b, int c, int d)
+{
+    if (!m->mouse)
+        return;
+    if (kind == 0)
+        mouse_host_motion(m, a, b, c, d);
+    else
+        mouse_host_button(m, a, b != 0);
 }
 
 /* pusha; push ds; push es, as the IRQ12 trampoline does. IF is clear across the call:
@@ -315,4 +331,20 @@ void mouse_init(Machine *m)
     reset_driver(m);
     install_trampoline(m);
     callback_register(m, "int33", int33_mouse, VEC_MOUSE);
+}
+
+/* ---- verification snapshots ---- */
+
+size_t mouse_snapshot_size(void) { return sizeof(Mouse); }
+
+void mouse_snapshot_save(Machine *m, void *dst)
+{
+    if (m->mouse)
+        memcpy(dst, m->mouse, sizeof(Mouse));
+}
+
+void mouse_snapshot_load(Machine *m, const void *src)
+{
+    if (m->mouse)
+        memcpy(m->mouse, src, sizeof(Mouse));
 }

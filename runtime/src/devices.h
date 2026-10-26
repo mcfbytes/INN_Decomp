@@ -134,6 +134,11 @@ bool mouse_handler(Machine *m, uint16_t *seg, uint16_t *off);
 void mouse_drop_handler(Machine *m);
 /* Events waiting for that handler; 0 before mouse_init. */
 int mouse_queued(Machine *m);
+/* The driver's whole state, for the shadow verifier. */
+size_t mouse_snapshot_size(void);
+void mouse_replay_input(Machine *m, int kind, int a, int b, int c, int d);
+void mouse_snapshot_save(Machine *m, void *dst);
+void mouse_snapshot_load(Machine *m, const void *src);
 /* The driver's show/hide state, for a frontend-drawn cursor overlay. */
 bool mouse_cursor_visible(Machine *m);
 /* Pointer position in frame pixels, for the overlay. */

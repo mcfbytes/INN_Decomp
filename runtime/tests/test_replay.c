@@ -155,6 +155,66 @@ static Run run(bool verify, bool replay, bool no_shadow)
     return r;
 }
 
+/* ---- host input: a function that polls INT 33h until a button is down ---- */
+
+/* P: mov ax,3 / int 33h / test bl,1 / jz P / retf. The input reaches the original mid-call (the yield hook below
+ * stands for the input script); the lifted run gets it from the log, at the same poll. */
+static const uint8_t P[] = { 0xB8, 0x03, 0x00, 0xCD, 0x33, 0xF6, 0xC3, 0x01, 0x74, 0xF6, 0xCB };
+static const uint8_t MAIN_P[] = { 0x9A, W_OFF, 0x00, CODE_SEG & 0xFF, CODE_SEG >> 8, 0xFA, 0xF4 };
+enum { PRESS_AT_US = 3000 };
+static bool pressed;
+static int idle_polls;
+
+static void press_yield(Machine *m)
+{
+    if (!pressed && m->virtual_us >= PRESS_AT_US) {
+        pressed = true;
+        mouse_host_button(m, 0, true);
+    }
+}
+
+static void lifted_p(Machine *m)
+{
+    do {
+        AX = 3;
+        guest_int(m, 0x33);
+    } while (!(BX & 1));
+    lift_ret_far(m, 0);
+}
+
+static Run run_input(bool verify)
+{
+    Machine *m = machine_create();
+    bios_init(m);
+    pressed = false;
+    uint8_t *code = m->mem + real_addr(CODE_SEG, 0);
+    memcpy(code, MAIN_P, sizeof MAIN_P);
+    memcpy(code + W_OFF, P, sizeof P);
+    entries[0] = (LiftedEntry){ .module = "TEST.EXE", .off = W_OFF, .fn = lifted_p, .name = "p",
+                                .scratch_regs = LIFT_REG_AX | LIFT_REG_CX | LIFT_REG_DX | LIFT_REG_FLAGS,
+                                .replay = true };
+    memcpy(entries[0].signature, P, sizeof P);
+    lift_add_table(m, entries, 1);
+    lift_set_nested_yield(m, press_yield);
+    if (verify)
+        lift_verify_enable(m, 5);
+    lift_module_loaded(m, "TEST.EXE", CODE_SEG, 0x200);
+    cpu_set_seg(&m->cpu, S_CS, CODE_SEG);
+    cpu_set_seg(&m->cpu, S_SS, STACK_SEG);
+    SP = 0x400;
+    m->cpu.eip = 0;
+    for (int i = 0; i < 200 && !(m->cpu.halted && !(m->cpu.flags & F_IF)); i++) {
+        press_yield(m);
+        machine_run_for(m, 1000);
+    }
+    LiftState *s = lift_state(m);
+    Run r = { lift_verify_mismatches(m), s->tables[s->table_count - 1].stats[0].shadow_calls, 0, 0, 0, m->virtual_us };
+    CHECK(m->cpu.halted && SP == 0x400, "the polling program ends (halted %d SP %04X)", m->cpu.halted, SP);
+    machine_destroy(m);
+    (void)idle_polls;
+    return r;
+}
+
 int main(void)
 {
     /* Not verified: the lift waits and answers like the original. */
@@ -200,6 +260,14 @@ int main(void)
     unsetenv("INN_VERIFY_REPLAY");
     r = run(true, false, true);
     CHECK(r.shadow_calls == 0, "NOSHADOW stays unshadowed (%d)", r.shadow_calls);
+
+    /* Host input mid-call: the mouse driver is restored for the lifted run and the press is applied again where the
+     * original got it, so the lifted loop ends at the same poll instead of waiting for input it never gets. */
+    r = run_input(false);
+    CHECK(r.virtual_us >= PRESS_AT_US, "the polling lift sees the press (%llu us)", (unsigned long long)r.virtual_us);
+    r = run_input(true);
+    CHECK(r.shadow_calls == 1 && r.mismatches == 0, "host input replayed (%d calls, %d mismatches)", r.shadow_calls,
+          r.mismatches);
 
     if (failures)
         fprintf(stderr, "%d failures\n", failures);

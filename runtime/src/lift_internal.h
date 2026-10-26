@@ -114,6 +114,8 @@ bool lift_module_has_native(Machine *m, const char *module);
 
 /* ---- device replay (lift_replay.c, docs/lifting.md "Device replay") ---- */
 bool lift_replay_active(const Machine *m);
+/* True while the original of a device-replay entry runs live: scripted input may be applied then. */
+bool lift_replay_recording(const Machine *m);
 /* The original's run: interrupts flow, gated to the instruction after an event; events are logged. */
 void lift_replay_record_begin(Machine *m);
 void lift_replay_record_end(Machine *m);

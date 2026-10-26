@@ -272,6 +272,15 @@ for a timer tick or a received byte never returns. Entries marked `LIFT_*_REPLAY
   `device replay: event N: lifted <event>, original <event>`, followed by the log's size and interrupt
   counts. Otherwise the end states are compared as for any shadow run: memory, registers, VGA and DOS
   state; the port I/O and serial output are already compared event by event.
+- **Host input and idle loops.** The original runs with the input script (or the user) live, so a mouse motion or
+  button can reach it mid-call. The mouse driver's state is part of the snapshot every shadow run restarts from (its event queue is popped by the
+  IRQ12 trampoline), and
+  every input applied during the original's run is logged as an `input` entry (with the instructions since its
+  previous event) and applied again at the same place in the lifted run, with its IRQ12 taken from the log. An
+  interrupt or input that came with no event in front of it (the original sat in a delay loop) is timed in
+  instructions since the last event; lifted C that stands in for such a loop says how long it would have run with
+  `lift_replay_idle(m, insns)` (the SHOPADV item lifts' delay helper does), and the entry is taken once that
+  much time has passed. Keyboard input is not replayed.
 - **The link sees every byte once**, from the original's run; the lifted run's UART writes are compared,
   never sent. The game continues from the original's end state, at the emulated time it reached.
 

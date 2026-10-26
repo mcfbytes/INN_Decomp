@@ -16,6 +16,20 @@ enum {
     MAX_REPORTED_BYTES = 16,
 };
 
+/* The device state a run changes outside memory: sound (DSP, DMA, host PCM) and the mouse driver, whose queue the
+ * IRQ12 trampoline pops and whose counters INT 33h clears; a run restored without it would not see the input. */
+static size_t snd_snapshot_size(void) { return sound_snapshot_size() + mouse_snapshot_size(); }
+static void snd_snapshot_save(Machine *m, void *dst)
+{
+    sound_snapshot_save(m, dst);
+    mouse_snapshot_save(m, (uint8_t *)dst + sound_snapshot_size());
+}
+static void snd_snapshot_load(Machine *m, const void *src)
+{
+    sound_snapshot_load(m, src);
+    mouse_snapshot_load(m, (const uint8_t *)src + sound_snapshot_size());
+}
+
 typedef struct IoEvent { uint16_t port; uint8_t size; bool is_out; uint32_t value; } IoEvent;
 
 typedef struct VerifyState {
@@ -59,9 +73,9 @@ void lift_verify_enable(Machine *m, int calls_per_entry)
         s->verify->mem_lifted = malloc(SNAPSHOT_BYTES);
         s->verify->vga_lifted = malloc(vga_snapshot_size());
         s->verify->dos_lifted_end = malloc(dos_snapshot_size());
-        s->verify->snd_before = malloc(sound_snapshot_size());
-        s->verify->snd_original = malloc(sound_snapshot_size());
-        s->verify->snd_lifted = malloc(sound_snapshot_size());
+        s->verify->snd_before = malloc(snd_snapshot_size());
+        s->verify->snd_original = malloc(snd_snapshot_size());
+        s->verify->snd_lifted = malloc(snd_snapshot_size());
         if (!s->verify->mem_before || !s->verify->mem_original || !s->verify->vga_before ||
             !s->verify->vga_original || !s->verify->dos_before || !s->verify->dos_original ||
             !s->verify->dos_lifted || !s->verify->snd_before || !s->verify->snd_original || !s->verify->snd_lifted)
@@ -384,7 +398,7 @@ static void restore(Machine *m, const Cpu *cpu, const uint8_t *mem, const uint8_
     memcpy(m->mem, mem, SNAPSHOT_BYTES);
     vga_snapshot_load(m, vga);
     dos_snapshot_load(m, dos);
-    sound_snapshot_load(m, snd);
+    snd_snapshot_load(m, snd);
 }
 
 /* ---- region mode ----
@@ -426,7 +440,7 @@ static void save(Machine *m, Cpu *cpu, uint8_t *mem, uint8_t *vga, uint8_t *dos,
     memcpy(mem, m->mem, SNAPSHOT_BYTES);
     vga_snapshot_save(m, vga);
     dos_snapshot_save(m, dos);
-    sound_snapshot_save(m, snd);
+    snd_snapshot_save(m, snd);
 }
 
 static void restore(Machine *m, const Cpu *cpu, const uint8_t *mem, const uint8_t *vga, const uint8_t *dos,
@@ -525,7 +539,7 @@ bool lift_verify_call(Machine *m, ActiveHook *h)
     memcpy(v->mem_before, m->mem, SNAPSHOT_BYTES);
     vga_snapshot_save(m, v->vga_before);
     dos_snapshot_save(m, v->dos_before);
-    sound_snapshot_save(m, v->snd_before);
+    snd_snapshot_save(m, v->snd_before);
     dos_journal_begin(m);
     v->log_len = 0;
     v->io_diverged = false;
@@ -553,7 +567,7 @@ bool lift_verify_call(Machine *m, ActiveHook *h)
     memcpy(v->mem_original, m->mem, SNAPSHOT_BYTES);
     vga_snapshot_save(m, v->vga_original);
     dos_snapshot_save(m, v->dos_original);
-    sound_snapshot_save(m, v->snd_original);
+    snd_snapshot_save(m, v->snd_original);
 
     restore(m, &v->cpu_before, v->mem_before, v->vga_before, v->dos_before, v->snd_before);
     dos_journal_undo(m);

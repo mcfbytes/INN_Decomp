@@ -138,8 +138,11 @@ static CallbackResult x_send(Machine *m)
         return CB_DONE;
     }
     /* The lifted half of a shadow run: the original's half already sent it, and a second copy would
-     * queue a second reply and free the handle twice. */
+     * queue a second reply. The handle still waits to be freed, as in the original's half, so the two
+     * end states compare equal. */
     if (m->io_mode == IO_REPLAY) {
+        if (t->pending_count < PENDING_FREE_MAX - 1)
+            t->pending_free[t->pending_count++] = handle;
         ret16(m, 1);
         return CB_DONE;
     }
