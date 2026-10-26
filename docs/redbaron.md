@@ -90,6 +90,12 @@ INN_DRIVE=$PWD/work/baron-c INN_TSN_HOST=$PWD/private/lifted/scenarios/rb_host.t
 the whole run takes a few seconds. `INN_COVERAGE=1` works the same way ([lifting.md](lifting.md),
 "Coverage").
 
+The private scenarios for combat, damage, crashes and the quit path use the same stand-in with a fake second
+player that answers each of our state multicasts with its own, positioned and flagged by the rule language's
+word arithmetic and `reply nth` / `at` rules ([runtime.md](runtime.md), "TSN host stand-in"); they are listed in
+`private/lifted/scenarios/RB-SUITE-combat.txt`. At 100000 calls per function a run costs about 15 CPU seconds per
+emulated second, so the scenarios are kept short.
+
 ## Host requirements
 
 `innkeeperd` (2026-10-14) does none of the Red Baron-specific steps. A host needs, in order:
