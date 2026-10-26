@@ -55,6 +55,7 @@ typedef struct LiftState {
     const char *verify_skip; /* INN_VERIFY_SKIP: hooked names whose calls are never shadowed */
     const char *verify_replay; /* INN_VERIFY_REPLAY: names shadowed with device replay (lift_replay.c) */
     const char *replay_late; /* INN_REPLAY_LATE: replayed names whose late interrupts wait out the gap */
+    const char *replay_exact; /* INN_REPLAY_EXACT: replayed names whose interrupts come when due, at their gap */
     struct Replay *replay;
     const char *only; /* INN_LIFT_ONLY: comma-separated names to hook, all when NULL */
     const char *except; /* INN_LIFT_EXCEPT: comma-separated names never to hook */

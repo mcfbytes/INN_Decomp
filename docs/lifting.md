@@ -291,7 +291,15 @@ unaligned fallback. Both show up as event or memory mismatches, not as false mat
 instructions, charged ones included, have passed there without an event (or before its next event in
 lifted C, or at its return). A wait that polls memory then sees the interrupt in the same loop as the
 original did (3-D Golf's sound driver starting a sound while another plays); lifted code whose waits
-run guest instructions or charge the original's counts needs it, other lifts keep the default. The log holds at
+run guest instructions or charge the original's counts needs it, other lifts keep the default.
+`INN_REPLAY_EXACT=name,...` goes further for code that polls memory a few thousand instructions long for an
+interrupt (a driver finding its IRQ): the original takes each interrupt as soon as it is due, not only after
+an event, and the log keeps how many instructions after the last event it came; the lifted run gets it once
+as many instructions, charged ones included, have passed (or before its next event in lifted C, or at its
+return). Lifted C that polls calls `lift_replay_poll(m)` before each read, having charged the original's
+instructions up to that read, so the handler's write lands before the same read as in the original. It
+logs each such interrupt that came at a different count (`interrupt NN taken ... instructions after the
+last event, the original's after ...`). 3-D Golf's `golf_drv_init` (the Blaster's IRQ probe) uses it. The log holds at
 most 16M entries. Synthetic calls never use replay.
 
 ## Synthetic calls
