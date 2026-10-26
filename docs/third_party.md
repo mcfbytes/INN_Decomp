@@ -34,3 +34,18 @@ from the page's own origin, so visitors' addresses never reach a font host; the 
 monospace font if the file cannot load. License: SIL Open Font License 1.1 (`OFL.txt`; the copyright line is
 "Copyright 2011, The VT323 Project Authors"; no Reserved Font Name is declared). The license travels with the file;
 the packaged site ships it as `assets/vt323.<hash>.ttf`.
+
+## Sign-in provider marks (web page)
+
+The sign-in buttons (`runtime/web/signin.js`) show each provider's own mark, as their brand guidelines require for a
+"Sign in with ..." button. The marks are trademarks, used under each owner's guidelines for exactly that purpose, not
+under a copyright license of ours. They are embedded in `signin.js` as SVG text (served as `data:` images), unmodified
+apart from what the table says. Fetched 2026-10-26.
+
+| Mark | Source | What was taken | SHA-256 of the download |
+|---|---|---|---|
+| Google "G" (gradient) | Google's sign-in branding assets, <https://developers.google.com/static/identity/images/signin-assets.zip> | `Android + Web/SVG/Light/Theme=Light, Show text=No, Shape=Square, Platform=Android+Web.svg` with the button's own fill and stroke removed and the viewBox framed on the G's 20 x 20 box; Figma metadata attributes dropped | `ba884069e12093b06bcfd776915081254a7c95094b80d50be2c5dc6bac1c1da1` (the zip) |
+| Microsoft logo | "Sign in with Microsoft branding guidelines", <https://learn.microsoft.com/en-us/entra/identity-platform/media/howto-add-branding-in-apps/ms-symbollockup_mssymbol_19.svg> | the file; its `<title>` dropped | `929f48f88c8ca7f3f5d294be47ec4caf51acc28ac25340c19a903125d7ecd84a` |
+| Discord symbol, Blurple | Discord's brand page, <https://discord.com/branding> (`66e3d80db9971f10a9757c99_Symbol.svg`) | the file (light theme) | `296286aa112c4400af8e96191ab888f81abd4bd1d5dc7294112a622ef43581b1` |
+| Discord symbol, white | the same page (`66e3d7f4ef6498ac018f2c55_Symbol.svg`) | the file (dark theme) | `eb3bf5a2e8b9f9aa39c1b1d38aeaa7c2997084567634c55f4141aa39cf426cec` |
+| GitHub mark | `@primer/octicons` 19.15.1 from npm, `build/svg/mark-github-24.svg` (MIT, Copyright (c) 2025 GitHub Inc.; the mark itself is a GitHub trademark under <https://github.com/logos>) | the path, filled black (light theme) or white (dark theme), the two colours GitHub's logo guidelines allow | `95377512a8b62c70f9934a1d65e660f522dc762c6b819b54376bab2dd6eb0689` (the tarball) |

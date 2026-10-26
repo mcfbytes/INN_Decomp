@@ -176,12 +176,10 @@ async function loadProviders() {
     try { href = new URL(p.url, base).href; } catch { continue; }
     // The login must live on the auth server's origin: the popup's message is accepted only from there.
     if (!/^https?:/.test(href) || new URL(href).origin !== new URL(base).origin) continue;
-    const a = document.createElement('a');
-    a.className = 'btn';
-    a.href = InnAuth.loginUrl(href, 'redirect');
+    // The provider's own sign-in button (signin.js), as a link.
+    const a = InnSignIn.button({ id: typeof p.id === 'string' ? p.id : '', name: p.name }, { href: InnAuth.loginUrl(href, 'redirect') });
     // The attestation is added when the age notice has been answered, so refresh the address on use.
     a.addEventListener('click', () => { a.href = InnAuth.loginUrl(href, 'redirect'); });
-    a.textContent = `Sign in with ${p.name}`;
     list.append(a);
     usable.push({ id: typeof p.id === 'string' ? p.id : p.name, name: p.name, href });
   }
