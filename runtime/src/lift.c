@@ -381,7 +381,7 @@ static bool nested_return_reached(Machine *m, LiftState *s, uint32_t linear)
         return false;
     NestedCall *n = &s->nested[s->nesting - 1];
     uint16_t sp = m->cpu.r[R_SP].w;
-    if (n->return_linear != linear || (n->sp_above ? sp <= n->return_sp : sp != n->return_sp))
+    if (n->return_linear != linear || (n->sp_above ? (uint16_t)(sp - n->return_sp - 1) >= 0x8000 : sp != n->return_sp))
         return false;
     n->returned = true;
     m->cpu.stop = true;

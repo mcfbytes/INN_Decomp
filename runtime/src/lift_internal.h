@@ -32,7 +32,7 @@ typedef struct ActiveHook {
 typedef struct NestedCall {
     uint32_t return_linear;
     uint16_t return_sp;
-    bool sp_above; /* match any SP above return_sp: the callee may pop its own arguments */
+    bool sp_above; /* match any SP above return_sp (modulo 64K, so a stack at the segment top may wrap): the callee may pop its own arguments */
     bool returned;
 } NestedCall;
 
