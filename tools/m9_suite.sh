@@ -224,6 +224,8 @@ run_queue() {
         fi
         finished=""
         wait -n -p finished || true
+        # wait -n also reports other children (the sort's process substitution above): not a run.
+        [[ -n $finished && -n ${slot_of[$finished]+x} ]] || continue
         slot=${slot_of[$finished]}
         unset 'slot_of[$finished]'
         free+=("$slot")
