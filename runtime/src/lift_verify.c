@@ -11,7 +11,7 @@
 
 enum {
     SNAPSHOT_BYTES = MEM_ONE_MEG + 0x10000,
-    IO_LOG_MAX = 1 << 20,
+    IO_LOG_MAX = 1 << 22,
     DEAD_STACK_BYTES = 0x2000, /* below the entry SP: locals of the call, dead after return */
     MAX_REPORTED_BYTES = 16,
 };
