@@ -22,6 +22,8 @@ typedef struct ExecMsg {
 typedef struct ExecStub {
     ExecSendHook on_send;
     void *user;
+    ExecPollHook on_poll;
+    void *poll_user;
     uint16_t table_off, previous_off, shared_off;
     uint16_t shared_len;
     bool has_previous;
@@ -147,9 +149,17 @@ static CallbackResult x_send(Machine *m)
     return CB_DONE;
 }
 
+static void poll_hook(Machine *m)
+{
+    ExecStub *t = stub(m);
+    if (t->on_poll)
+        t->on_poll(m, t->poll_user);
+}
+
 static CallbackResult x_receive(Machine *m)
 {
     ExecStub *t = stub(m);
+    poll_hook(m);
     uint32_t out = far_linear(arg_far(m, 0));
     if (!t->q_count || !t->alloc_cb) {
         mem_wr16(m, out, 0);
@@ -180,6 +190,7 @@ static CallbackResult x_disconnect(Machine *m) { return CB_DONE; }
 
 static CallbackResult x_poll(Machine *m)
 {
+    poll_hook(m);
     free_pending(m);
     ret16(m, STATUS_OK);
     return CB_DONE;
@@ -284,6 +295,12 @@ void exec_stub_state_load(Machine *m, const void *src)
 {
     if (m->exec_stub)
         memcpy(m->exec_stub, src, sizeof(ExecStub));
+}
+
+void exec_stub_set_poll_hook(Machine *m, ExecPollHook on_poll, void *user)
+{
+    stub(m)->on_poll = on_poll;
+    stub(m)->poll_user = user;
 }
 
 void exec_stub_shutdown(Machine *m)

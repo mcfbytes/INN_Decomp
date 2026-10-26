@@ -10,6 +10,10 @@
 /* Called for every message the client sends (Send and multicast alike), with its bytes. */
 typedef void (*ExecSendHook)(Machine *m, const uint8_t *msg, uint16_t len, void *user);
 
+/* Called at every stand-in Send, Receive and Poll callback (a host that acts on emulated time). */
+typedef void (*ExecPollHook)(Machine *m, void *user);
+void exec_stub_set_poll_hook(Machine *m, ExecPollHook on_poll, void *user);
+
 /* Hooks INT 14h (after bios_init) to return the stand-in's export table. */
 void exec_stub_install(Machine *m, ExecSendHook on_send, void *user);
 void exec_stub_set_send_hook(Machine *m, ExecSendHook on_send, void *user);

@@ -774,6 +774,7 @@ static int boot(Machine *m, const Options *o)
             return -1;
         }
         exec_stub_set_send_hook(m, host_rules_on_send, host_rules);
+        exec_stub_set_poll_hook(m, host_rules_poll, host_rules);
     }
     if (o->com1 && attach_com1(m, o->com1) != 0) {
         fprintf(stderr, "cannot connect COM1 to %s\n", o->com1);

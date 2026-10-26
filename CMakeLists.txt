@@ -174,4 +174,7 @@ else()
   endforeach()
   target_sources(test_input_script PRIVATE runtime/frontend/input_script.c)
   target_include_directories(test_input_script PRIVATE runtime/frontend)
+  # The rule parser lives in the frontend; the test supplies its own exec_stub stand-ins.
+  target_sources(test_host_rules PRIVATE runtime/frontend/host_rules.c)
+  target_include_directories(test_host_rules PRIVATE runtime/frontend)
 endif()

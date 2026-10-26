@@ -9,16 +9,24 @@
 #include "exec_stub.h"
 #include "host_rules.h"
 
-enum { RULES_MAX = 64, ITEMS_MAX = 96, ANY = -1 };
+enum { RULES_MAX = 128, ITEMS_MAX = 96, ANY = -1 };
 
-typedef enum { T_BYTE, T_REQ, T_REQ_REST, T_TIME } ItemKind;
-typedef struct Item { ItemKind kind; int value; } Item;
+typedef enum { T_BYTE, T_REQ, T_REQ_REST, T_TIME, T_REQ_W, T_REQ_D } ItemKind;
+/* T_REQ_W / T_REQ_D: value is the request offset, delta the signed amount added (mod 2^16 / 2^32). */
+typedef struct Item { ItemKind kind; int value; int32_t delta; } Item;
+
+typedef enum { M_ALWAYS, M_ONCE, M_NTH, M_AT } RuleMode;
 
 typedef struct Rule {
     int pattern[ITEMS_MAX];
     int pattern_len;
     Item tmpl[ITEMS_MAX];
     int tmpl_len;
+    RuleMode mode;
+    int nth;      /* M_NTH: the matching message that answers (1-based) */
+    int seen;     /* matches so far */
+    long at_ms;   /* M_AT: emulated time at which the reply is queued */
+    bool done;    /* M_ONCE / M_NTH / M_AT: already answered */
 } Rule;
 
 struct HostRules {
@@ -55,7 +63,7 @@ static bool parse_item(const char *t, Item *items, int *n)
 {
     if (t[0] == '"') {
         for (const char *c = t + 1; *c && *c != '"' && *n < ITEMS_MAX; c++)
-            items[(*n)++] = (Item){T_BYTE, (unsigned char)*c};
+            items[(*n)++] = (Item){T_BYTE, (unsigned char)*c, 0};
         return true;
     }
     if (*n >= ITEMS_MAX)
@@ -63,16 +71,32 @@ static bool parse_item(const char *t, Item *items, int *n)
     if (t[0] == '@') {
         char *end;
         long v = strtol(t + 1, &end, 10);
-        items[(*n)++] = (Item){*end == '-' ? T_REQ_REST : T_REQ, (int)v};
-        return end != t + 1;
+        if (end == t + 1)
+            return false;
+        if (*end == 'w' || *end == 'd') {
+            ItemKind kind = *end == 'w' ? T_REQ_W : T_REQ_D;
+            int32_t delta = 0;
+            if (end[1]) {
+                char sign = end[1];
+                char *kend;
+                long k = strtol(end + 2, &kend, 16);
+                if ((sign != '+' && sign != '-') || kend == end + 2 || *kend)
+                    return false;
+                delta = (int32_t)(sign == '-' ? -k : k);
+            }
+            items[(*n)++] = (Item){kind, (int)v, delta};
+            return true;
+        }
+        items[(*n)++] = (Item){*end == '-' ? T_REQ_REST : T_REQ, (int)v, 0};
+        return true;
     }
     if (!strcmp(t, "T")) {
-        items[(*n)++] = (Item){T_TIME, 0};
+        items[(*n)++] = (Item){T_TIME, 0, 0};
         return true;
     }
     char *end;
     long v = strtol(t, &end, 16);
-    items[(*n)++] = (Item){T_BYTE, (int)v};
+    items[(*n)++] = (Item){T_BYTE, (int)v, 0};
     return *end == 0 && v >= 0 && v <= 255;
 }
 
@@ -105,9 +129,24 @@ HostRules *host_rules_load(Machine *m, const char *path)
         } else if (!strcmp(tok[0], "reply") && s->count < RULES_MAX) {
             Rule *r = &s->rules[s->count++];
             int i = 1;
+            if (i < n && !strcmp(tok[i], "once")) {
+                r->mode = M_ONCE;
+                i++;
+            } else if (i + 1 < n && !strcmp(tok[i], "nth")) {
+                r->mode = M_NTH;
+                r->nth = atoi(tok[i + 1]);
+                ok = r->nth > 0;
+                i += 2;
+            }
             for (; i < n && strcmp(tok[i], "=>"); i++)
                 r->pattern[r->pattern_len++] = !strcmp(tok[i], "..") ? ANY : (int)strtol(tok[i], NULL, 16);
             for (i++; i < n && ok; i++)
+                ok = parse_item(tok[i], r->tmpl, &r->tmpl_len);
+        } else if (!strcmp(tok[0], "at") && n >= 3 && !strcmp(tok[2], "=>") && s->count < RULES_MAX) {
+            Rule *r = &s->rules[s->count++];
+            r->mode = M_AT;
+            r->at_ms = atol(tok[1]);
+            for (int i = 3; i < n && ok; i++)
                 ok = parse_item(tok[i], r->tmpl, &r->tmpl_len);
         } else {
             ok = false;
@@ -134,6 +173,23 @@ static void answer(Machine *m, const Rule *r, const uint8_t *req, uint16_t len)
         switch (it->kind) {
         case T_BYTE: out[n++] = (uint8_t)it->value; break;
         case T_REQ: out[n++] = it->value < len ? req[it->value] : 0; break;
+        case T_REQ_W: {
+            uint16_t v = 0;
+            for (int k = 0; k < 2; k++)
+                v |= (uint16_t)((it->value + k < len ? req[it->value + k] : 0) << (8 * k));
+            v = (uint16_t)(v + it->delta);
+            out[n++] = (uint8_t)v, out[n++] = (uint8_t)(v >> 8);
+            break;
+        }
+        case T_REQ_D: {
+            uint32_t v = 0;
+            for (int k = 0; k < 4; k++)
+                v |= (uint32_t)(it->value + k < len ? req[it->value + k] : 0) << (8 * k);
+            v += (uint32_t)it->delta;
+            for (int k = 0; k < 4; k++)
+                out[n++] = (uint8_t)(v >> (8 * k));
+            break;
+        }
         case T_REQ_REST:
             for (int k = it->value; k < len && n < (int)sizeof out; k++)
                 out[n++] = req[k];
@@ -147,6 +203,18 @@ static void answer(Machine *m, const Rule *r, const uint8_t *req, uint16_t len)
     exec_stub_deliver(m, out, (uint16_t)n);
 }
 
+void host_rules_poll(Machine *m, void *user)
+{
+    HostRules *s = user;
+    for (int i = 0; i < s->count; i++) {
+        Rule *r = &s->rules[i];
+        if (r->mode == M_AT && !r->done && (long)(m->virtual_us / 1000) >= r->at_ms) {
+            r->done = true;
+            answer(m, r, NULL, 0);
+        }
+    }
+}
+
 void host_rules_on_send(Machine *m, const uint8_t *msg, uint16_t len, void *user)
 {
     HostRules *s = user;
@@ -154,13 +222,20 @@ void host_rules_on_send(Machine *m, const uint8_t *msg, uint16_t len, void *user
     for (int i = 0; i < len && i < 48; i++)
         snprintf(hex + 3 * i, 4, " %02x", msg[i]);
     log_msg("tsn: client sent%s%s", hex, len > 48 ? " ..." : "");
+    host_rules_poll(m, s);
     for (int i = 0; i < s->count; i++) {
-        const Rule *r = &s->rules[i];
+        Rule *r = &s->rules[i];
+        if (r->mode == M_AT)
+            continue;
         bool match = r->pattern_len <= len;
         for (int k = 0; match && k < r->pattern_len; k++)
             match = r->pattern[k] == ANY || r->pattern[k] == msg[k];
-        if (match)
-            answer(m, r, msg, len);
+        if (!match)
+            continue;
+        r->seen++;
+        if ((r->mode == M_ONCE && r->seen > 1) || (r->mode == M_NTH && r->seen != r->nth))
+            continue;
+        answer(m, r, msg, len);
     }
 }
 
