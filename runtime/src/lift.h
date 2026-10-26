@@ -146,8 +146,9 @@ void lift_irq_boundary(Machine *m);
  * frames, take input and pace against the wall clock; never during shadow verification. */
 void lift_set_nested_yield(Machine *m, void (*fn)(Machine *m));
 /* Host input applied while the original of a device-replay entry runs: logged so the lifted run can apply it. */
-/* Lifted C that stands in for a loop of the original with no event in it (a delay): the instructions it would have run. */
-void lift_replay_idle(Machine *m, uint64_t insns);
+/* Lifted C that stands in for a loop of the original with no event in it (a delay) calls this after charging the
+ * loop's time (machine_charge_c): input and interrupts the original took inside the loop are due now. */
+void lift_replay_idle(Machine *m);
 /* Called before a host service runs in the lifted half of a device-replay shadow run. */
 void lift_replay_pre_callback(Machine *m);
 void lift_replay_host_input(Machine *m, int kind, int a, int b, int c, int d);

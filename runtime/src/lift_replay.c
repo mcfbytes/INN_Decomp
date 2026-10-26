@@ -51,7 +51,6 @@ typedef struct Replay {
     bool gate_open; /* record: an event happened since the last boundary with IF set */
     uint64_t last_event_insn;
     uint64_t base_insn; /* play: instruction count at the last event consumed */
-    uint64_t credit;    /* play: instructions the lifted C stood in for since then (lift_replay_idle) */
     int irqs, late_irqs;
     bool diverged;
     char why[160];
@@ -169,18 +168,18 @@ static const ReplayEvent *head(Replay *r)
     return r->pos < r->len ? &r->log[r->pos] : NULL;
 }
 
-/* Instructions the original would have run since its last event: what an unaligned entry is timed in. */
+/* Instructions the original would have run since its last event: what an unaligned entry is timed in. Time
+ * the lifted C charged (machine_charge_c) is in the stall count until the next instruction retires. */
 static uint64_t distance(const Machine *m, const Replay *r)
 {
-    return m->cpu.instructions - r->base_insn + r->credit;
+    return m->cpu.instructions + m->cpu.stall - r->base_insn;
 }
 
 static void advance(Machine *m, Replay *r)
 {
     r->index++;
     if (r->log[r->pos].kind != EV_IRQ) {
-        r->base_insn = m->cpu.instructions;
-        r->credit = 0;
+        r->base_insn = m->cpu.instructions + m->cpu.stall;
     }
     if (++r->used >= r->log[r->pos].count) {
         r->pos++;
@@ -244,12 +243,10 @@ static void deliver_due_in_c(Machine *m)
         deliver_head(m, true);
 }
 
-void lift_replay_idle(Machine *m, uint64_t insns)
+void lift_replay_idle(Machine *m)
 {
     if (!lift_replay_active(m) || replay(m)->phase != PHASE_PLAY)
         return;
-    Replay *r = replay(m);
-    r->credit += insns;
     pump_input(m, false);
     deliver_due_in_c(m);
 }
@@ -415,8 +412,7 @@ bool lift_replay_play(Machine *m, LiftedFn fn)
         r->abort = &abort;
 #endif
         if (recorded_ok) {
-            r->base_insn = m->cpu.instructions;
-            r->credit = 0;
+            r->base_insn = m->cpu.instructions + m->cpu.stall;
             pump_input(m, false);
             lift_call_c(m, fn);
             pump_input(m, true);
