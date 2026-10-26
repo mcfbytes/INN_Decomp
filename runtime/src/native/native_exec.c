@@ -20,6 +20,8 @@ typedef struct ExecCtx {
     jmp_buf jump;
     uint16_t parent_psp;  /* the process that started the child: current again once the child ended */
     bool native;          /* the child is C on the host stack, so its termination must longjmp */
+    bool mixed;           /* an emulated child of native INN: the devices come back when it ends */
+    int child_nesting;    /* lifted nesting when an emulated child started; deeper means C on the stack */
     bool finished;
     int saved_nesting, saved_c_depth;
     bool saved_native;
@@ -38,12 +40,15 @@ static Machine *return_stub_machine;
 
 static ExecCtx *innermost(void) { return frame_count > 0 ? &frames[frame_count - 1] : NULL; }
 
-/* The innermost child is gone: leave the host stack of a native child, or end the emulator loop. */
+/* The innermost child is gone: leave the host stack of a native child, or end the emulator loop. An
+ * emulated child that ends inside a nested guest call of its own lifted code (a game's lifted exit
+ * routine calling the runtime's exit) has C frames on the host stack too; they would go on running the
+ * parent's code on the CPU, so they are left the same way. */
 static void child_finished(Machine *m)
 {
     ExecCtx *fr = innermost();
     fr->finished = true;
-    if (fr->native)
+    if (fr->native || lift_state(m)->nesting > fr->child_nesting)
         longjmp(fr->jump, 1);
     m->cpu.stop = true;
 }
@@ -161,9 +166,14 @@ bool native_unpack_to_start(Machine *m)
  * a native child terminates, normally when an emulated one does. */
 static void run_child(Machine *m, ExecCtx *fr)
 {
-    if (setjmp(fr->jump) != 0)
-        return;
     LiftState *s = lift_state(m);
+    fr->mixed = false;
+    fr->child_nesting = s->nesting;
+    if (setjmp(fr->jump) != 0) {
+        if (fr->mixed)
+            native_handoff_from_emulator(m);
+        return;
+    }
     uint16_t cs = m->cpu.seg[S_CS], ip = (uint16_t)m->cpu.eip;
     fr->native = native_start_at(m, cs, ip, false);
     if (!fr->native) {
@@ -185,6 +195,7 @@ static void run_child(Machine *m, ExecCtx *fr)
     bool mixed = m->native; /* INN runs natively: the devices change hands around the game */
     if (mixed)
         native_handoff_to_emulator(m);
+    fr->mixed = mixed;
     m->native = false;
     s->c_depth = 0;
     while (!fr->finished && !m->exit_requested && !s->nested_abort) {

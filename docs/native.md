@@ -548,6 +548,15 @@ TSNEXEC starts every program through EXEC. In native mode its native EXEC (`nati
 Lifted game code (CGENN, DARKSTRT, TWGENN, FATES, RB) runs in mixed mode exactly as in the hybrid build,
 through hooks.
 
+**A game that exits from its lifted code.** A lifted exit routine (GOLF's fatal-error exit, for one)
+ends the process with a guest call to the game's own exit code, which never returns. In the hybrid
+build the CPU then simply runs TSNEXEC on from inside that nested call. In native mode TSNEXEC is C
+further up the host stack, so the terminate hook leaves the lifted frames with the same `longjmp` a
+native child uses, whenever the lifted nesting is deeper than it was when the child started, and the
+devices come back on that path too. Without it the nested call runs TSNEXEC's original code from
+the resume address the terminate wrote, with a code segment that does not fit it, and soon reaches an
+invalid opcode in freed memory.
+
 **The hand-off, as implemented** (`native_handoff_to_emulator` / `native_handoff_from_emulator` in
 `native_exec.c`, `native_irq_to_pic` / `native_irq_from_pic` in `native_irq.c`; only when INN runs
 natively, so a child started by the emulated machine changes nothing). To the emulator, in this order:
