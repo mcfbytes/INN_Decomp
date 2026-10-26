@@ -41,6 +41,7 @@ void lift_init(Machine *m)
     lift_state(m)->except = getenv("INN_LIFT_EXCEPT");
     lift_state(m)->verify_skip = getenv("INN_VERIFY_SKIP");
     lift_state(m)->verify_replay = getenv("INN_VERIFY_REPLAY");
+    lift_state(m)->replay_late = getenv("INN_REPLAY_LATE");
     const char *verify_calls = getenv("INN_VERIFY_LIFTED");
     if (verify_calls && atoi(verify_calls) > 0)
         lift_verify_enable(m, atoi(verify_calls));

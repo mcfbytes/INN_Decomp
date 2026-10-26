@@ -285,7 +285,13 @@ for a timer tick or a received byte never returns. Entries marked `LIFT_*_REPLAY
 Limits: an interrupt the original took during a stretch with IF clear in lifted C (C that emulates
 CLI/STI) is delivered at the lifted run's next chance instead, before or after reads of memory the ISR
 writes; code that polls memory for an ISR's result without any event in the loop is only taken by the
-unaligned fallback. Both show up as event or memory mismatches, not as false matches. The log holds at
+unaligned fallback. Both show up as event or memory mismatches, not as false matches.
+`INN_REPLAY_LATE=name,...` keeps the gap for the named entries: an interrupt the original took late
+(after 100000 instructions without an event) is delivered in the lifted run only once as many
+instructions, charged ones included, have passed there without an event (or before its next event in
+lifted C, or at its return). A wait that polls memory then sees the interrupt in the same loop as the
+original did (3-D Golf's sound driver starting a sound while another plays); lifted code whose waits
+run guest instructions or charge the original's counts needs it, other lifts keep the default. The log holds at
 most 16M entries. Synthetic calls never use replay.
 
 ## Synthetic calls

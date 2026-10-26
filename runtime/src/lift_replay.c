@@ -39,7 +39,8 @@ typedef struct Replay {
     uint32_t used;  /* play: repeats of log[pos] already consumed */
     uint64_t index; /* play: events consumed, for reports */
     bool gate_open; /* record: an event happened since the last boundary with IF set */
-    uint64_t last_event_insn;
+    uint64_t last_event_insn; /* record and, with late_gap, play: instructions at the last event */
+    bool late_gap; /* play: a late interrupt waits until as many instructions passed without an event */
     int irqs, late_irqs;
     bool diverged;
     char why[160];
@@ -133,6 +134,12 @@ static const ReplayEvent *head(Replay *r)
     return r->pos < r->len ? &r->log[r->pos] : NULL;
 }
 
+/* Instructions run so far, charged ones (cpu.stall, not yet folded in by lifted C) included. */
+static uint64_t insns_now(const Machine *m)
+{
+    return m->cpu.instructions + m->cpu.stall;
+}
+
 static void advance(Replay *r)
 {
     r->index++;
@@ -168,10 +175,17 @@ static void deliver_at_return(Machine *m)
         lift_set_hook_bit(m, at, false);
 }
 
+/* A late interrupt (taken after REPLAY_LATE_INSNS without an event) is never due right after an event
+ * when the gap is kept. */
+static bool irq_due_now(Machine *m, const Replay *r, const ReplayEvent *e)
+{
+    return !r->late_gap || !e->value || m->cpu.halted || insns_now(m) - r->last_event_insn >= REPLAY_LATE_INSNS;
+}
+
 static void deliver_due_in_c(Machine *m)
 {
     Replay *r = replay(m);
-    while (lift_in_c(m) && (m->cpu.flags & F_IF) && head(r) && head(r)->kind == EV_IRQ)
+    while (lift_in_c(m) && (m->cpu.flags & F_IF) && head(r) && head(r)->kind == EV_IRQ && irq_due_now(m, r, head(r)))
         deliver_head(m, true);
 }
 
@@ -202,6 +216,7 @@ static const ReplayEvent *consume(Machine *m, EventKind kind, uint16_t port, int
     if (!e || !same)
         return NULL; /* web builds: no unwinding, the comparison reports it */
     advance(r);
+    r->last_event_insn = insns_now(m);
     return e;
 }
 
@@ -273,6 +288,8 @@ void lift_irq_boundary(Machine *m)
     if (r->phase != PHASE_PLAY)
         return;
     if (head(r) && head(r)->kind == EV_IRQ) {
+        if (!irq_due_now(m, r, head(r)))
+            return;
         deliver_head(m, false);
     } else if (c->halted) {
         c->halted = false;
@@ -315,6 +332,8 @@ bool lift_replay_play(Machine *m, LiftedFn fn)
     r->pos = 0;
     r->used = 0;
     r->index = 0;
+    r->last_event_insn = insns_now(m);
+    r->late_gap = s->shadow_of && s->replay_late && lift_listed(s->replay_late, s->shadow_of->entry->name);
     m->irq_gate = true;
     m->ticks_frozen = true;
     int nesting = s->nesting, c_depth = s->c_depth;
