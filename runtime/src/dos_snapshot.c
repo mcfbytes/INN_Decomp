@@ -1,5 +1,6 @@
 /* DOS host-side state for shadow verification: the state struct plus every open file's position,
- * so a function that reads a file sees the same bytes in both shadow runs. */
+ * so a function that reads a file sees the same bytes in both shadow runs. The TSN host stand-in's
+ * state (exec_stub.c) follows the struct, so a function that sends or receives sees the same queue. */
 #include <fcntl.h>
 #include <stdio.h>
 #include <string.h>
@@ -7,17 +8,21 @@
 #include <unistd.h>
 
 #include "dos_int.h"
+#include "exec_stub.h"
 
 typedef struct DosSnapshot {
     DosState state;
     off_t positions[DOS_SFT_MAX];
 } DosSnapshot;
 
-size_t dos_snapshot_size(void) { return sizeof(DosSnapshot); }
+size_t dos_snapshot_size(void) { return sizeof(DosSnapshot) + exec_stub_state_size(); }
+
+static void *stub_state(void *snap) { return (uint8_t *)snap + sizeof(DosSnapshot); }
 
 void dos_snapshot_save(Machine *m, void *dst)
 {
     DosSnapshot *snap = dst;
+    exec_stub_state_save(m, stub_state(snap));
     if (!m->dos) {
         memset(snap, 0, sizeof *snap);
         return;
@@ -191,6 +196,7 @@ int dos_host_open(const char *path, int flags, bool exists)
 void dos_snapshot_load(Machine *m, const void *src)
 {
     const DosSnapshot *snap = src;
+    exec_stub_state_load(m, (const uint8_t *)snap + sizeof(DosSnapshot));
     if (!m->dos)
         return;
     DosState *d = dos_state(m);

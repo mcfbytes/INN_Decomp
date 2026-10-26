@@ -270,6 +270,22 @@ void exec_stub_set_send_hook(Machine *m, ExecSendHook on_send, void *user)
     stub(m)->user = user;
 }
 
+size_t exec_stub_state_size(void) { return sizeof(ExecStub); }
+
+void exec_stub_state_save(Machine *m, void *dst)
+{
+    if (m->exec_stub)
+        memcpy(dst, m->exec_stub, sizeof(ExecStub));
+    else
+        memset(dst, 0, sizeof(ExecStub));
+}
+
+void exec_stub_state_load(Machine *m, const void *src)
+{
+    if (m->exec_stub)
+        memcpy(m->exec_stub, src, sizeof(ExecStub));
+}
+
 void exec_stub_shutdown(Machine *m)
 {
     free(m->exec_stub);

@@ -353,7 +353,7 @@ static void compare(Machine *m, ActiveHook *h, uint16_t lo_sp, uint16_t hi_sp)
     }
     dos_snapshot_save(m, v->dos_lifted);
     if (memcmp(v->dos_lifted, v->dos_original, dos_snapshot_size()) != 0) {
-        report(m, h, "DOS state (open files, positions, current directory) differs");
+        report(m, h, "DOS state (open files, positions, current directory) or TSN stand-in state (queue, pending frees) differs");
         return;
     }
     note_result_difference(m, h);

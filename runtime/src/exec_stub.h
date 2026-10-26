@@ -22,4 +22,11 @@ void exec_stub_set_previous(Machine *m, const char *name);
 /* Queues a host-to-client message for the client's next Receive. */
 void exec_stub_deliver(Machine *m, const uint8_t *msg, uint16_t len);
 
+/* The stand-in's own state (queued host messages, handles waiting to be freed, callbacks) lives outside
+ * guest memory. Shadow verification saves and restores it with the DOS state (dos_snapshot.c), so that
+ * the original's run and the lifted run each see the same queue and a Send answered once. */
+size_t exec_stub_state_size(void);
+void exec_stub_state_save(Machine *m, void *dst);
+void exec_stub_state_load(Machine *m, const void *src);
+
 #endif
