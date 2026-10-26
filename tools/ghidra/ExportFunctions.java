@@ -28,7 +28,16 @@ import ghidra.util.exception.CancelledException;
 public class ExportFunctions extends GhidraScript {
 
     private static final int IMAGE_BASE = 0x1000;
-    private static final int DECOMP_TIMEOUT = 60;
+    // Seconds per function; EXPORT_DECOMP_TIMEOUT overrides (a loaded machine times out the largest ones).
+    private static final int DECOMP_TIMEOUT = decompTimeout();
+
+    private static int decompTimeout() {
+        try {
+            return Integer.parseInt(System.getenv("EXPORT_DECOMP_TIMEOUT"));
+        } catch (NumberFormatException e) {
+            return 60;
+        }
+    }
 
     @Override
     public void run() throws Exception {
@@ -54,6 +63,7 @@ public class ExportFunctions extends GhidraScript {
                 return;
             }
         }
+        readKeep();
         int[] named = new int[] { 0, 0 };
         if (namesPath != null) {
             named = applyNames(new File(namesPath));
@@ -63,9 +73,17 @@ public class ExportFunctions extends GhidraScript {
         }
         int prologues = findPrologues();
         int entry = raw ? seedImageEntry() : 0;
+        int calls = "1".equals(System.getenv("EXPORT_CALLS")) ? seedCallTargets() : 0;
+        int restored = keepRows.isEmpty() ? 0 : applyKeep();
         int[] exported = exportAll(outDir);
         String summary = "exported=" + exported[0] + " decompiled=" + exported[1]
             + " names_applied=" + named[0] + "/" + named[1] + " prologues=" + prologues;
+        if (calls > 0) {
+            summary += " call_targets=" + calls;
+        }
+        if (!keepRows.isEmpty()) {
+            summary += " restored=" + restored;
+        }
         if (raw) {
             summary += " entry=" + entry;
         }
@@ -81,11 +99,61 @@ public class ExportFunctions extends GhidraScript {
         return space().getAddress((seg + IMAGE_BASE) & 0xffff, off & 0xffff);
     }
 
-    private static String imageLabel(Address addr) {
+    private String imageLabel(Address addr) {
         SegmentedAddress sa = (SegmentedAddress) addr;
         int seg = (sa.getSegment() - IMAGE_BASE) & 0xffff;
         int off = sa.getSegmentOffset() & 0xffff;
-        return String.format("%04X:%04X", seg, off);
+        String kept = keepLabels.get(((long) seg * 16 + off) & 0xFFFFF);
+        return kept != null ? kept : String.format("%04X:%04X", seg, off);
+    }
+
+    // EXPORT_KEEP=<earlier index.tsv>: every function listed there stays a function (re-created, cut out
+    // of its owner, when the analysis of this run no longer finds it) and keeps its seg:off label, so a
+    // re-export never drops or renames an entry. Analysis order varies a little between runs, and the same
+    // linear address can carry several seg:off spellings; the earlier spelling wins.
+    private final java.util.Map<Long, String> keepLabels = new java.util.HashMap<>();
+    private final List<String[]> keepRows = new ArrayList<>();
+
+    private void readKeep() throws Exception {
+        String path = System.getenv("EXPORT_KEEP");
+        if (path == null || path.isBlank()) {
+            return;
+        }
+        boolean header = true;
+        for (String line : Files.readAllLines(new File(path).toPath(), StandardCharsets.UTF_8)) {
+            if (header) {
+                header = false;
+                continue;
+            }
+            String[] f = line.split("\t");
+            if (f.length < 2 || !f[0].contains(":")) {
+                continue;
+            }
+            String[] so = f[0].split(":");
+            long linear = ((Long.parseLong(so[0], 16) * 16) + Long.parseLong(so[1], 16)) & 0xFFFFF;
+            keepLabels.put(linear, f[0]);
+            keepRows.add(new String[] { f[0], f[1] });
+        }
+        println("keep list: " + keepRows.size() + " functions");
+    }
+
+    private int applyKeep() throws Exception {
+        int restored = 0;
+        for (String[] row : keepRows) {
+            monitor.checkCancelled();
+            String[] so = row[0].split(":");
+            Address a = imageAddr(Integer.parseInt(so[0], 16), Integer.parseInt(so[1], 16));
+            if (getFunctionAt(a) != null) {
+                continue;
+            }
+            if (ensureFunction(a, row[1]) != null) {
+                restored++;
+                println("restored " + row[0] + " " + row[1]);
+            } else {
+                println("NOT RESTORED " + row[0] + " " + row[1]);
+            }
+        }
+        return restored;
     }
 
     // Raw images have no loader entry point. Seed 0000:0000 for a jump, a run of
@@ -260,6 +328,59 @@ public class ExportFunctions extends GhidraScript {
         return new int[] { applied, total };
     }
 
+    // EXPORT_CALLS=1: every direct CALL or CALLF whose target is code that no function starts at becomes a
+    // function (the owner, if any, is cut at the target). Repeats until nothing new turns up, because the
+    // new functions' own calls are only found once they are disassembled.
+    private int seedCallTargets() throws Exception {
+        int created = 0;
+        for (int round = 0; round < 12; round++) {
+            monitor.checkCancelled();
+            java.util.LinkedHashSet<Address> targets = new java.util.LinkedHashSet<>();
+            for (Function fn : currentProgram.getFunctionManager().getFunctions(true)) {
+                if (fn.isExternal() || !(fn.getEntryPoint() instanceof SegmentedAddress)) {
+                    continue;
+                }
+                InstructionIterator it = currentProgram.getListing().getInstructions(fn.getBody(), true);
+                while (it.hasNext()) {
+                    Instruction ins = it.next();
+                    if (!ins.getFlowType().isCall() || ins.getFlowType().isComputed()) {
+                        continue;
+                    }
+                    for (Address to : ins.getFlows()) {
+                        if (to != null && to instanceof SegmentedAddress && getFunctionAt(to) == null
+                            && currentProgram.getMemory().contains(to)) {
+                            targets.add(to);
+                        }
+                    }
+                }
+            }
+            int made = 0;
+            for (Address to : targets) {
+                monitor.checkCancelled();
+                if (getFunctionAt(to) != null) {
+                    continue;
+                }
+                CodeUnit at = currentProgram.getListing().getCodeUnitContaining(to);
+                if (at != null && !at.getMinAddress().equals(to) && at instanceof Instruction) {
+                    continue; // inside an instruction: not a call target worth a function
+                }
+                Function owner = getFunctionContaining(to);
+                if (owner != null) {
+                    carve(owner, to);
+                }
+                if (ensureFunction(to, null) != null) {
+                    made++;
+                }
+            }
+            println("call targets round " + (round + 1) + ": " + made + " functions");
+            created += made;
+            if (made == 0) {
+                break;
+            }
+        }
+        return created;
+    }
+
     private int findPrologues() throws Exception {
         int created = 0;
         for (MemoryBlock block : currentProgram.getMemory().getBlocks()) {
@@ -319,7 +440,10 @@ public class ExportFunctions extends GhidraScript {
             }
             if (getInstructionAt(addr) == null) {
                 CodeUnit cu = currentProgram.getListing().getCodeUnitContaining(addr);
-                if (cu != null && getFunctionContaining(cu.getMinAddress()) == null
+                // A named entry is authoritative: an instruction of the (carved) owner that straddles it
+                // goes. Unnamed starts (prologue scan) leave other functions' code alone.
+                boolean free = getFunctionContaining(cu == null ? addr : cu.getMinAddress()) == null;
+                if (cu != null && (free || name != null)
                     && (!cu.getMinAddress().equals(addr) || cu instanceof Data)) {
                     clearListing(cu.getMinAddress(), cu.getMaxAddress());
                 }
@@ -381,6 +505,8 @@ public class ExportFunctions extends GhidraScript {
     }
 
     // Drop addr..end of its range from an owning function so a named entry can start there.
+    // (deleteToMax removes addr and everything above it; deleteFromMin would remove the front, entry
+    // included, and so delete the owner.)
     private void carve(Function owner, Address addr) throws Exception {
         AddressSet body = new AddressSet(owner.getBody());
         if (body.getRangeContaining(addr) == null) {
@@ -411,6 +537,7 @@ public class ExportFunctions extends GhidraScript {
         }
         DecompInterface decomp = new DecompInterface();
         boolean resume = "1".equals(System.getenv("EXPORT_RESUME"));
+        boolean indexOnly = "1".equals(System.getenv("EXPORT_INDEX_ONLY"));
         int okCount = 0;
         try {
             decomp.openProgram(currentProgram);
@@ -425,8 +552,10 @@ public class ExportFunctions extends GhidraScript {
                     String stem = label.replace(':', '_');
                     File cFile = new File(outDir, stem + ".c");
                     File asmFile = new File(outDir, stem + ".asm");
-                    String err;
-                    if (resume && cFile.length() > 0 && asmFile.length() > 0) {
+                    String err = null;
+                    if (indexOnly) {
+                        err = null; // EXPORT_INDEX_ONLY: index.tsv only, no listings or C
+                    } else if (resume && cFile.length() > 0 && asmFile.length() > 0) {
                         // EXPORT_RESUME: a previous, interrupted run already wrote this function.
                         err = java.nio.file.Files.readString(cFile.toPath()).startsWith("/* decompile error")
                             ? "earlier error" : null;
@@ -458,6 +587,49 @@ public class ExportFunctions extends GhidraScript {
         return new int[] { funcs.size(), okCount };
     }
 
+    // With EXPORT_DS set, a global's label carries whatever seg:off spelling Ghidra's address normalisation
+    // picked (DAT_2e2b_3b02 for DGROUP offset 6E52). Rewrite every label inside DGROUP to DAT_<dgroup>_<offset>
+    // so the offset is the one the listings show.
+    private static final java.util.regex.Pattern LABEL_SPELLING =
+        java.util.regex.Pattern.compile("(?<!FUN)(?<!LAB)(?<!SUB)(?<!switchD)(?<=[A-Za-z0-9])_([0-9a-f]{4})_([0-9a-f]{4})\\b");
+
+    private static final java.util.regex.Pattern RAM_ACCESS =
+        java.util.regex.Pattern.compile("\\b[A-Za-z]+Ram([0-9a-f]{8})\\b");
+
+    private String respellDgroup(String c) {
+        String env = System.getenv("EXPORT_DS");
+        if (env == null || env.isBlank()) {
+            return c;
+        }
+        long dgroup = (((Long.parseLong(env.trim(), 16) + IMAGE_BASE) & 0xffff) * 16);
+        String seg = String.format("%04x", (Long.parseLong(env.trim(), 16) + IMAGE_BASE) & 0xffff);
+        java.util.regex.Matcher m = LABEL_SPELLING.matcher(c);
+        StringBuffer out = new StringBuffer();
+        while (m.find()) {
+            long flat = Long.parseLong(m.group(1), 16) * 16 + Long.parseLong(m.group(2), 16);
+            if (flat >= dgroup && flat < dgroup + 0x10000) {
+                m.appendReplacement(out, String.format("_%s_%04x", seg, flat - dgroup));
+            } else {
+                m.appendReplacement(out, java.util.regex.Matcher.quoteReplacement(m.group()));
+            }
+        }
+        m.appendTail(out);
+        // Accesses the decompiler could not tie to a symbol (a word read of a byte symbol, a long made of two
+        // words...) print as <type>Ram<flat address>; inside DGROUP they get the same name.
+        m = RAM_ACCESS.matcher(out.toString());
+        StringBuffer named = new StringBuffer();
+        while (m.find()) {
+            long flat = Long.parseLong(m.group(1), 16);
+            if (flat >= dgroup && flat < dgroup + 0x10000) {
+                m.appendReplacement(named, String.format("DAT_%s_%04x", seg, flat - dgroup));
+            } else {
+                m.appendReplacement(named, java.util.regex.Matcher.quoteReplacement(m.group()));
+            }
+        }
+        m.appendTail(named);
+        return named.toString();
+    }
+
     private String writeC(File file, DecompInterface decomp, Function fn) throws Exception {
         String err = null;
         String c = null;
@@ -483,6 +655,7 @@ public class ExportFunctions extends GhidraScript {
                 err = err.replace("*/", "* /").replace('\n', ' ').replace('\r', ' ');
                 w.write("/* decompile error: " + err + " */\n");
             } else {
+                c = respellDgroup(c);
                 w.write(c);
                 if (!c.endsWith("\n")) {
                     w.write("\n");
