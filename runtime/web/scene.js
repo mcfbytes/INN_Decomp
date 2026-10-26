@@ -544,9 +544,9 @@ const InnScenes = (() => {
     return { P, base, anims, quant, display, imageData, out32, work: new Uint8ClampedArray(base), sprite, ms, dark };
   }
 
-  // A small picture (a calling card, adv.js) in the scenes' look: fn(g, P) paints with the kit, then the
-  // same paper texture, a palette of its own and the same ordered dither. The kit is the day one (colours
-  // as given, P.dusk still says the mode): a card is grading its own dusk so its lettering stays readable.
+  // A small picture in the scenes' look (tools/make_logo.mjs paints the site's emblem with it): fn(g, P) paints with
+  // the kit, then the same paper texture, a palette of its own and the same ordered dither. The kit is the day one
+  // (colours as given, P.dusk still says the mode): the picture grades its own dusk.
   function paintSmall(w, h, dark, fn, colours = 40) {
     const P = makeKit(false);
     P.dusk = dark;
@@ -836,7 +836,7 @@ const InnScenes = (() => {
     performance.mark('inn-scene-painted');   // the first one is the landing's first paint (measured in docs/web.md)
     console.log(`scene ${state.id}: painted in ${b.ms.toFixed(1)} ms`);
     syncRunning();
-    if (typeof Adv !== 'undefined' && Adv.scenePainted) Adv.scenePainted();   // calling cards follow the scene and its mode
+    if (typeof Adv !== 'undefined' && Adv.scenePainted) Adv.scenePainted();   // the line under the sign-in buttons follows the scene
   }
 
   async function setScene(id, push) {
