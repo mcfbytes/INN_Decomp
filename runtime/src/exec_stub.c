@@ -138,7 +138,11 @@ static CallbackResult x_send(Machine *m)
         return CB_DONE;
     }
     if (m->io_mode == IO_REPLAY) {
-        /* The lifted half of a shadow run: the host already saw this message from the original half. */
+        /* The lifted half of a shadow run: the host already saw this message from the original half.
+         * The handle is still freed at the next Poll, as the original half frees it, or the two halves
+         * end with different heaps. */
+        if (t->pending_count < PENDING_FREE_MAX - 1)
+            t->pending_free[t->pending_count++] = handle;
         ret16(m, 1);
         return CB_DONE;
     }
