@@ -46,6 +46,8 @@ void exec_stub_state_save(Machine *m, void *dst)
 {
     if (m->exec_stub)
         memcpy(dst, (uint8_t *)m->exec_stub + STATE_FROM, STATE_TO - STATE_FROM);
+    else
+        memset(dst, 0, STATE_TO - STATE_FROM); /* snapshots are memcmp'd whole */
 }
 
 void exec_stub_state_load(Machine *m, const void *src)
