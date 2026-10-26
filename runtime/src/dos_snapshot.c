@@ -7,17 +7,21 @@
 #include <unistd.h>
 
 #include "dos_int.h"
+#include "exec_stub.h"
 
 typedef struct DosSnapshot {
     DosState state;
     off_t positions[DOS_SFT_MAX];
 } DosSnapshot;
 
-size_t dos_snapshot_size(void) { return sizeof(DosSnapshot); }
+/* The TSN stand-in's host-side queues (exec_stub.c) follow the DOS state: a shadowed Send would otherwise
+ * queue the host's reply once per run. */
+size_t dos_snapshot_size(void) { return sizeof(DosSnapshot) + exec_stub_state_size(); }
 
 void dos_snapshot_save(Machine *m, void *dst)
 {
     DosSnapshot *snap = dst;
+    exec_stub_state_save(m, (uint8_t *)dst + sizeof *snap);
     if (!m->dos) {
         memset(snap, 0, sizeof *snap);
         return;
@@ -191,6 +195,7 @@ int dos_host_open(const char *path, int flags, bool exists)
 void dos_snapshot_load(Machine *m, const void *src)
 {
     const DosSnapshot *snap = src;
+    exec_stub_state_load(m, (const uint8_t *)src + sizeof *snap);
     if (!m->dos)
         return;
     DosState *d = dos_state(m);

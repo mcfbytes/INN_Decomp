@@ -1,5 +1,6 @@
 /* TSNEXEC stand-in: the INT 14h export table as callbacks, messages passed whole; the client's memory
  * callbacks run as nested guest calls (sibling docs/protocol/int14h-api.md, docs/runtime.md). */
+#include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -34,6 +35,24 @@ typedef struct ExecStub {
 } ExecStub;
 
 static ExecStub *stub(Machine *m) { return m->exec_stub; }
+
+/* From the client callbacks to the pending frees: everything a Send, Receive or SetCallbacks changes. */
+#define STATE_FROM offsetof(ExecStub, alloc_cb)
+#define STATE_TO offsetof(ExecStub, next_program)
+
+size_t exec_stub_state_size(void) { return STATE_TO - STATE_FROM; }
+
+void exec_stub_state_save(Machine *m, void *dst)
+{
+    if (m->exec_stub)
+        memcpy(dst, (uint8_t *)m->exec_stub + STATE_FROM, STATE_TO - STATE_FROM);
+}
+
+void exec_stub_state_load(Machine *m, const void *src)
+{
+    if (m->exec_stub)
+        memcpy((uint8_t *)m->exec_stub + STATE_FROM, src, STATE_TO - STATE_FROM);
+}
 
 static uint16_t arg16(Machine *m, int index) /* far cdecl: args after the 4-byte return address */
 {

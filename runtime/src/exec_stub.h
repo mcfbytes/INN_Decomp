@@ -3,6 +3,7 @@
 #ifndef EXEC_STUB_H
 #define EXEC_STUB_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 #include "machine.h"
@@ -21,5 +22,11 @@ void exec_stub_set_previous(Machine *m, const char *name);
 
 /* Queues a host-to-client message for the client's next Receive. */
 void exec_stub_deliver(Machine *m, const uint8_t *msg, uint16_t len);
+
+/* The stand-in's queues and callbacks as bytes, for shadow verification (dos_snapshot.c); size 0 and no-ops
+ * without a stand-in. */
+size_t exec_stub_state_size(void);
+void exec_stub_state_save(Machine *m, void *dst);
+void exec_stub_state_load(Machine *m, const void *src);
 
 #endif
