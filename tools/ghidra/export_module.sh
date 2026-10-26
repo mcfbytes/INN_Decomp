@@ -2,6 +2,11 @@
 # usage: export_module.sh <exe> <MODULE_NAME> <out_dir> [names.tsv]
 #        export_module.sh --raw <image_file_offset> <file> <MODULE_NAME> <out_dir> [names.tsv]
 # EXPORT_RESUME=1 continues an export that a timeout cut short (written functions are kept).
+# EXPORT_DS=<image segment, hex> assumes DS = that segment everywhere before the analysis (AssumeDs.java): globals and
+# strings then decompile as DAT_<dgroup>_xxxx. Only for programs that keep DS = DGROUP (large-model Borland C).
+# EXPORT_CALLS=1 makes every direct call target a function; EXPORT_INDEX_ONLY=1 writes index.tsv only (fast check).
+# EXPORT_KEEP=<earlier index.tsv> keeps every function listed there (and its seg:off label) in this export.
+# EXPORT_DECOMP_TIMEOUT=<seconds> per function (default 60); a function that timed out is retried by deleting its .c and EXPORT_RESUME=1.
 set -euo pipefail
 
 usage() {
@@ -87,6 +92,10 @@ if [[ "${EXPORT_RESUME:-}" != 1 ]]; then
         \( -name '*.c' -o -name '*.asm' -o -name 'index.tsv' \) -delete
 fi
 
+PRE=()
+if [[ -n "${EXPORT_DS:-}" ]]; then
+    PRE=(-preScript AssumeDs.java "$EXPORT_DS")
+fi
 POST=(ExportFunctions.java "$OUT_DIR")
 if [[ -n "$NAMES" ]]; then
     POST+=("$NAMES")
@@ -109,6 +118,7 @@ if [[ "$RAW" == 1 ]]; then
         -scriptPath "$SCRIPT_DIR" \
         -log "$PROJ_DIR/headless.log" \
         -scriptlog "$PROJ_DIR/script.log" \
+        ${PRE[@]+"${PRE[@]}"} \
         -postScript "${POST[@]}"
 fi
 
@@ -120,4 +130,5 @@ exec "$GHIDRA_HOME/support/analyzeHeadless" \
     -scriptPath "$SCRIPT_DIR" \
     -log "$PROJ_DIR/headless.log" \
     -scriptlog "$PROJ_DIR/script.log" \
+    ${PRE[@]+"${PRE[@]}"} \
     -postScript "${POST[@]}"
