@@ -138,7 +138,9 @@ that finds its IRQ by waiting for one).
 Enable it with `INN_VERIFY_LIFTED=<calls per function>`; `tools/verify_lifted.sh` runs the logon
 scenario against a local server and prints the per-function summary. With `INN_TSN_HOST=<rules>` it
 runs without a server, the program named by `INN_PROGRAM` against dosrt's TSN host stand-in (Red Baron:
-[redbaron.md](redbaron.md), "Verifying lifts"). Snapshots cover guest
+[redbaron.md](redbaron.md), "Verifying lifts"). Multiplayer paths use `tools/verify_two.sh`: two clients,
+each with its own drive copy and output directory, against one server, their scripts kept in step with
+`signal` and `wait` ([runtime.md](runtime.md), "Input scripts"). Snapshots cover guest
 memory, the VGA device (registers, DAC, planes) and host-side DOS state (open files, positions,
 current directory). Host file deletions, renames, creations and growth are journaled and undone
 between the two runs. Known limits: bytes written to host files are written by both runs and not restored; devices other than VGA (PIT, UART, OPL) see only the original run's I/O, which is the

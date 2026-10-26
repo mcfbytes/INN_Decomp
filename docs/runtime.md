@@ -195,6 +195,25 @@ build/inn --headless --run-ms 95000 --script play.txt --com1 127.0.0.1:2314 work
 The C: drive is a copy of the installed client with the program under `\INN`, as `LSCI.CFG`
 expects. The frontend starts each program in its own directory.
 
+Two clients on one server keep in step through files in a sync directory (`--sync-dir DIR`):
+
+```
+105000 signal a_room           # creates DIR/a_room
+105000 wait b_room             # holds here until DIR/b_room exists (at most 120 s of wall time)
+117000 wait a_said 30000       # the same with a 30 s limit
+```
+
+A `wait` holds the emulated clock at its moment, so the guest sees no time pass; meanwhile the link's
+socket is read into the link's own queue (`serial_link_drain`), and the guest receives those bytes once it
+runs on. A wait that runs out of wall time, or a `signal`/`wait` without `--sync-dir`, logs `script: ...`
+and ends the run with exit status 1 (the summary still prints). Lines at the same time apply in file order,
+so a signal written before a wait is made first. Names are plain file names (no `/`, no leading `.`).
+Scripts without these commands behave as before. `tools/verify_two.sh <build> <port> <run_ms> <calls>
+<scriptA> <scriptB>` runs such a pair, both shadow-verified, against one `innkeeperd`: A on `INN_DRIVE`
+(default `work/inn-c`), B on `INN_DRIVE_B` (default `work/inn-c-p2`, account 100002 with its own persona),
+with outputs in `work/verify/<port>/a` and `/b` and the sync directory `work/verify/<port>/sync`. Unit test:
+`runtime/tests/test_input_script.c`.
+
 ## TSN host stand-in
 
 `exec_stub.c` replaces TSNEXEC for running one DOS game client alone: INT 14h returns a 17-entry export

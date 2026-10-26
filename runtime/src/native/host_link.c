@@ -155,6 +155,13 @@ int host_link_recv(Machine *m, uint8_t *buf, int cap)
     return n;
 }
 
+void host_link_drain(Machine *m)
+{
+    SerialLink *l = link_of(m);
+    if (l)
+        serial_link_drain(l);
+}
+
 void host_link_set_dtr(Machine *m, bool on)
 {
     enter(m);

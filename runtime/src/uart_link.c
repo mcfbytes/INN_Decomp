@@ -86,6 +86,8 @@ int uart_test_take(Machine *m, int com, uint8_t *buf, int cap)
 typedef struct TcpLink {
     int fd;
     bool connecting, up;
+    uint8_t *held;              /* bytes serial_link_drain took off the socket, served first */
+    size_t held_start, held_len, held_cap;
 } TcpLink;
 
 /* A non-blocking connect finishes when the socket turns writable; SO_ERROR says how. */
@@ -124,6 +126,15 @@ static int tcp_send(void *ctx, const uint8_t *buf, int len)
 static int tcp_recv(void *ctx, uint8_t *buf, int cap)
 {
     TcpLink *t = ctx;
+    if (t->held_len && cap > 0) {
+        size_t n = t->held_len < (size_t)cap ? t->held_len : (size_t)cap;
+        memcpy(buf, t->held + t->held_start, n);
+        t->held_start += n;
+        t->held_len -= n;
+        if (!t->held_len)
+            t->held_start = 0;
+        return (int)n;
+    }
     if (!tcp_connected(t))
         return 0;
     ssize_t n = recv(t->fd, buf, (size_t)cap, 0);
@@ -139,7 +150,39 @@ static void tcp_close(void *ctx)
 {
     TcpLink *t = ctx;
     close(t->fd);
+    free(t->held);
     free(t);
+}
+
+/* Takes everything the peer has sent so far off the socket into the link's queue. */
+static void tcp_drain(TcpLink *t)
+{
+    enum { CHUNK = 4096 };
+    if (!tcp_connected(t))
+        return;
+    for (;;) {
+        if (t->held_start + t->held_len + CHUNK > t->held_cap) {
+            if (t->held_start) {
+                memmove(t->held, t->held + t->held_start, t->held_len);
+                t->held_start = 0;
+            }
+            if (t->held_len + CHUNK > t->held_cap) {
+                size_t cap = t->held_cap ? 2 * t->held_cap : 4 * CHUNK;
+                uint8_t *grown = realloc(t->held, cap);
+                if (!grown)
+                    return;
+                t->held = grown;
+                t->held_cap = cap;
+            }
+        }
+        ssize_t n = recv(t->fd, t->held + t->held_start + t->held_len, CHUNK, 0);
+        if (n <= 0) {
+            if (n == 0 || (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR))
+                t->up = false; /* the queued bytes still reach the guest */
+            return;
+        }
+        t->held_len += (size_t)n;
+    }
 }
 
 static int tcp_open(const char *host, int port)
@@ -179,11 +222,22 @@ SerialLink serial_link_tcp(const char *host, int port)
     SerialLink link = { t, tcp_send, tcp_recv, tcp_connected, tcp_close };
     return link;
 }
+
+void serial_link_drain(SerialLink *link)
+{
+    if (link && link->recv == tcp_recv)
+        tcp_drain(link->ctx);
+}
 #else
 SerialLink serial_link_tcp(const char *host, int port)
 {
     SerialLink none = { 0 };
     return none; /* the browser build reaches the server through a WebSocket link instead */
+}
+
+void serial_link_drain(SerialLink *link)
+{
+    (void)link; /* the WebSocket link queues every message as it arrives */
 }
 #endif
 
