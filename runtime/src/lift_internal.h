@@ -93,8 +93,18 @@ bool lift_listed(const char *list, const char *name);
 void lift_call_c(Machine *m, LiftedFn fn);
 /* Shadow-verifies one call of h; returns false when verification does not apply. */
 bool lift_verify_call(Machine *m, ActiveHook *h);
-/* Whether the bytes at h's entry are the entry's signature (with relocations applied). */
+/* Whether the bytes at h's entry are the entry's signature (with relocations applied; either form of
+ * an emulator sequence where LiftedEntry.emu_mask marks one). */
 bool lift_entry_bytes_match(Machine *m, const ActiveHook *h);
+
+/* ---- floating-point emulator sequences (tools/borland_emu_patch.py): an emulator with a coprocessor patches
+ * CD 34+i into 9B D8+i, CD 3C b into 9B <prefix of b >> 6> b|C0, CD 3D into 90 9B ---- */
+/* Length (2 or 3) of the INT-form sequence at b[0..n), or 0 when there is none or it is cut off. */
+int lift_emu_int_len(const uint8_t *b, int n);
+/* The INT form of the sequence at b[0..n) in either form, into out[3]; its length, or 0 for none. */
+int lift_emu_to_int(const uint8_t *b, int n, uint8_t out[3]);
+/* Whether patched[0..len) is what an emulator writes over the INT-form sequence intform[0..len). */
+bool lift_emu_is_patch_of(const uint8_t *intform, const uint8_t *patched, int len);
 
 /* ---- native core (runtime/src/native, docs/native.md) ---- */
 /* The announced module with the highest load segment not above seg, or NULL; *load_seg is its base. */

@@ -173,6 +173,36 @@ current directory). Host file deletions, renames, creations and growth are journ
 between the two runs. Known limits: bytes written to host files are written by both runs and not restored; devices other than VGA (PIT, UART, OPL) see only the original run's I/O, which is the
 intended behaviour.
 
+## Floating point
+
+The x87 state (`Cpu.fpu`, docs/runtime.md "FPU") is part of every comparison, shadow, region, device-replay
+and synthetic alike, as a register would be: TOP, the empty registers, every non-empty register bit for bit
+as its 80-bit image, CW, and SW's exception flags, SF and ES; C0-C3 too, unless the entry's scratch set has
+`LIFT_REG_FPU_CC`. `LIFT_REG_FPU` lets the whole FPU differ. The last-instruction and operand pointers and the
+last opcode are never compared. A difference is logged as `FPU TOP ...`, `FPU CW ...`, `FPU SW ...` or
+`FPU ST(i) lifted <exponent:significand> original ...`. Code that never touches the FPU leaves it equal in both
+runs, so programs without floating point see no change.
+
+Programs linked with Borland's floating-point emulator carry their x87 code as interrupts (`INT 34h`-`3Dh`)
+that the emulator, finding a coprocessor, patches in place into FWAIT and the instruction the first time each
+runs (`tools/borland_emu_patch.py` lists the forms). Lifted C never executes them, so after a call the original's
+end state can hold patched code where the lifted one still holds the INT form. The memory comparison accepts
+exactly that: a sequence in its INT form in the lifted end state and in its patched form in the original's
+(`CD 34+i` against `9B D8+i`, `CD 3C b` against `9B <segment prefix> b|C0`, `CD 3D` against `90 9B`). Any other
+difference, including the reverse or a wrong patch, is reported as before. The game continues from the
+original's end state, patched code included. Entry signatures accept either form wherever
+`tools/gen_lift_table.py` found an emulator sequence (in either form) inside the signature bytes
+(`LiftedEntry.emu_mask`; one cut off by the end of the signature leaves its bytes there uncompared); this
+applies to the first-use check and to the per-call overlay check.
+
+Lifted C computes with `runtime/src/fpu.h`: one call per x87 instruction (`fpu_fld_m64`, `fpu_faddp`,
+`fpu_fcompp`, `fpu_fstsw_m`, `fpu_fsqrt`, `fpu_fpatan`, ...), each running the interpreter's own code for that
+instruction after an FWAIT, so results, precision and rounding control, C0-C3, exceptions and the stack come
+out bit for bit as the original's on every host, Emscripten included. Host `float`/`double` arithmetic is no
+substitute. `runtime/tests/test_lift_fpu.c` checks the API against instruction bytes, the comparison and the
+tolerance. 3-D Golf's readable layer and rules are in the private tree (`include/golf_fp.h`, `GOLF-PLAN.md`
+rule 4).
+
 ## Semantic port comparison
 
 In a hybrid-hw build (`-DINN_NATIVE_HW=ON`) a converted driver function does not touch ports: its device

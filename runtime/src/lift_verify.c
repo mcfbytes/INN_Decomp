@@ -243,7 +243,7 @@ static void run_lifted(Machine *m, ActiveHook *h)
 
 /* ---- comparison ---- */
 
-static bool registers_match(const Cpu *a, const Cpu *b, uint16_t scratch, char *why, size_t cap)
+static bool registers_match(const Cpu *a, const Cpu *b, uint32_t scratch, char *why, size_t cap)
 {
     static const char *const GP[8] = { "AX", "CX", "DX", "BX", "SP", "BP", "SI", "DI" };
     static const char *const SEG[6] = { "ES", "CS", "SS", "DS", "FS", "GS" };
@@ -265,15 +265,26 @@ static bool registers_match(const Cpu *a, const Cpu *b, uint16_t scratch, char *
         snprintf(why, cap, "flags lifted %04X original %04X", a->flags & F_ARITH, b->flags & F_ARITH);
         return false;
     }
+    if (!(scratch & LIFT_REG_FPU) &&
+        !fpu_state_matches(&a->fpu, &b->fpu, (scratch & LIFT_REG_FPU_CC) != 0, why, (unsigned)cap))
+        return false;
     return true;
 }
 
-/* First differing byte outside the dead stack below the entry SP, or -1. */
+/* First differing byte outside the dead stack below the entry SP, or -1. An emulator sequence in its INT form
+ * in the lifted state (a) and patched in the original's (b) is equal (docs/lifting.md, "Floating point"). */
 static long first_memory_difference(const uint8_t *a, const uint8_t *b, uint32_t dead_lo, uint32_t dead_hi)
 {
-    for (uint32_t i = 0; i < SNAPSHOT_BYTES; i++)
-        if (a[i] != b[i] && (i < dead_lo || i >= dead_hi))
-            return (long)i;
+    for (uint32_t i = 0; i < SNAPSHOT_BYTES; i++) {
+        if (a[i] == b[i] || (i >= dead_lo && i < dead_hi))
+            continue;
+        int len = lift_emu_int_len(a + i, (int)(SNAPSHOT_BYTES - i < 3 ? SNAPSHOT_BYTES - i : 3));
+        if (len && lift_emu_is_patch_of(a + i, b + i, len)) {
+            i += (uint32_t)len - 1;
+            continue;
+        }
+        return (long)i;
+    }
     return -1;
 }
 
@@ -297,7 +308,7 @@ static void report(Machine *m, ActiveHook *h, const char *why)
 static void note_result_difference(Machine *m, ActiveHook *h)
 {
     const Cpu *a = &m->cpu, *b = &verify(m)->cpu_original;
-    uint16_t scratch = h->entry->scratch_regs;
+    uint32_t scratch = h->entry->scratch_regs;
     bool ax = (scratch & LIFT_REG_AX) && a->r[R_AX].w != b->r[R_AX].w;
     bool dx = (scratch & LIFT_REG_DX) && a->r[R_DX].w != b->r[R_DX].w;
     if (!ax && !dx)

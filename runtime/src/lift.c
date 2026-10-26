@@ -432,14 +432,70 @@ static void expected_bytes(const ActiveHook *h, uint8_t out[LIFT_SIGNATURE_LEN],
     }
 }
 
+/* ---- floating-point emulator sequences ---- */
+
+static const uint8_t EMU_SEG_PREFIX[4] = { 0x3E, 0x2E, 0x36, 0x26 }; /* b >> 6 of CD 3C b: DS, CS, SS, ES */
+
+int lift_emu_int_len(const uint8_t *b, int n)
+{
+    if (n < 2 || b[0] != 0xCD || b[1] < 0x34 || b[1] > 0x3D)
+        return 0;
+    int len = b[1] == 0x3C ? 3 : 2;
+    return len <= n ? len : 0;
+}
+
+int lift_emu_to_int(const uint8_t *b, int n, uint8_t out[3])
+{
+    int len = lift_emu_int_len(b, n);
+    if (len) {
+        memcpy(out, b, (size_t)len);
+        return len;
+    }
+    if (n >= 2 && b[0] == 0x90 && b[1] == 0x9B) {
+        out[0] = 0xCD, out[1] = 0x3D;
+        return 2;
+    }
+    if (n < 2 || b[0] != 0x9B)
+        return 0;
+    if (b[1] >= 0xD8 && b[1] <= 0xDF) {
+        out[0] = 0xCD, out[1] = (uint8_t)(0x34 + b[1] - 0xD8);
+        return 2;
+    }
+    for (int s = 0; s < 4; s++)
+        if (n >= 3 && b[1] == EMU_SEG_PREFIX[s] && b[2] >= 0xD8 && b[2] <= 0xDF) {
+            out[0] = 0xCD, out[1] = 0x3C, out[2] = (uint8_t)(s << 6 | (b[2] & 0x3F));
+            return 3;
+        }
+    return 0;
+}
+
+bool lift_emu_is_patch_of(const uint8_t *intform, const uint8_t *patched, int len)
+{
+    if (lift_emu_int_len(intform, len) != len || patched[0] == 0xCD)
+        return false;
+    uint8_t back[3];
+    return lift_emu_to_int(patched, len, back) == len && memcmp(back, intform, (size_t)len) == 0;
+}
+
 bool lift_entry_bytes_match(Machine *m, const ActiveHook *h)
 {
     uint8_t expected[LIFT_SIGNATURE_LEN];
     bool skip[LIFT_SIGNATURE_LEN];
     expected_bytes(h, expected, skip);
-    for (int i = 0; i < LIFT_SIGNATURE_LEN; i++)
-        if (!skip[i] && mem_rd8(m, h->linear + (uint32_t)i) != expected[i])
+    for (int i = 0; i < LIFT_SIGNATURE_LEN; i++) {
+        if (skip[i] || mem_rd8(m, h->linear + (uint32_t)i) == expected[i])
+            continue;
+        if (!(h->entry->emu_mask >> i & 1))
             return false;
+        /* An emulator sequence: the file and memory may each hold the INT or the patched form. */
+        uint8_t have[3], want[3], seen[3];
+        for (int k = 0; k < 3; k++)
+            seen[k] = mem_rd8(m, h->linear + (uint32_t)(i + k));
+        int len = lift_emu_to_int(expected + i, LIFT_SIGNATURE_LEN - i, want);
+        if (!len || lift_emu_to_int(seen, 3, have) != len || memcmp(have, want, (size_t)len) != 0)
+            return false;
+        i += len - 1;
+    }
     return true;
 }
 

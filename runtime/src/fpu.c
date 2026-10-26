@@ -2,6 +2,7 @@
  * rounding and exception choices are documented in docs/runtime.md, "FPU". */
 #include <float.h>
 #include <math.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "fpu.h"
@@ -958,4 +959,91 @@ void fpu_exec(Machine *m, const FpuInsn *in)
     return;
 unimplemented:
     log_msg("fpu: unimplemented %02X %02X at %04X:%04X", in->opcode, in->modrm, in->cs, in->ip & 0xFFFF);
+}
+
+/* ---- lifted C (fpu.h): the same code paths as the instructions ---- */
+
+static void exec_for_c(Machine *m, uint8_t opcode, uint8_t modrm, bool is_reg, uint16_t seg, uint16_t off)
+{
+    if (!m->fpu_present)
+        return;
+    fpu_wait(m);
+    FpuInsn in = {.opcode = opcode, .modrm = modrm, .is_reg = is_reg, .addr = real_addr(seg, off),
+                  .seg = seg, .off = off, .cs = m->cpu.seg[S_CS], .ip = m->cpu.eip};
+    fpu_exec(m, &in);
+}
+
+void fpu_mem(Machine *m, uint8_t opcode, int reg, uint16_t seg, uint16_t off)
+{
+    exec_for_c(m, opcode, (uint8_t)((reg & 7) << 3 | 6), false, seg, off);
+}
+
+void fpu_reg(Machine *m, uint8_t opcode, uint8_t modrm)
+{
+    exec_for_c(m, opcode, (uint8_t)(modrm | 0xC0), true, 0, 0);
+}
+
+void fpu_fwait(Machine *m)
+{
+    if (m->fpu_present)
+        fpu_wait(m);
+}
+
+long double fpu_st(const Machine *m, int i) { return get_st(&m->cpu.fpu, i & 7); }
+bool fpu_st_empty(const Machine *m, int i) { return is_empty(&m->cpu.fpu, i & 7); }
+int fpu_top(const Machine *m) { return top(&m->cpu.fpu); }
+uint16_t fpu_sw(const Machine *m) { return m->cpu.fpu.sw; }
+uint16_t fpu_cw(const Machine *m) { return m->cpu.fpu.cw; }
+
+void fpu_push(Machine *m, long double v)
+{
+    if (!m->fpu_present)
+        return;
+    fpu_wait(m);
+    push(fpu_of(m), r64(v));
+}
+
+long double fpu_pop(Machine *m)
+{
+    long double v = fpu_st(m, 0);
+    fpu_fstp_st(m, 0);
+    return v;
+}
+
+/* ---- shadow verification ---- */
+
+bool fpu_state_matches(const Fpu *a, const Fpu *b, bool cc_may_differ, char *why, unsigned cap)
+{
+    if (top(a) != top(b)) {
+        snprintf(why, cap, "FPU TOP lifted %d original %d", top(a), top(b));
+        return false;
+    }
+    if (a->empty != b->empty) {
+        snprintf(why, cap, "FPU empty registers lifted %02X original %02X (physical)", a->empty, b->empty);
+        return false;
+    }
+    if (a->cw != b->cw) {
+        snprintf(why, cap, "FPU CW lifted %04X original %04X", a->cw, b->cw);
+        return false;
+    }
+    uint16_t sw_mask = EXC_MASK | FPU_SF | FPU_ES | (cc_may_differ ? 0 : CC_MASK);
+    if ((a->sw & sw_mask) != (b->sw & sw_mask)) {
+        snprintf(why, cap, "FPU SW lifted %04X original %04X", a->sw & sw_mask, b->sw & sw_mask);
+        return false;
+    }
+    for (int i = 0; i < 8; i++) {
+        int p = phys(a, i);
+        if (a->empty >> p & 1)
+            continue;
+        uint8_t x[10], y[10];
+        fpu_to_ext80(a->st[p], x);
+        fpu_to_ext80(b->st[p], y);
+        if (memcmp(x, y, 10) != 0) {
+            snprintf(why, cap, "FPU ST(%d) lifted %02X%02X:%02X%02X%02X%02X%02X%02X%02X%02X original "
+                     "%02X%02X:%02X%02X%02X%02X%02X%02X%02X%02X", i, x[9], x[8], x[7], x[6], x[5], x[4], x[3], x[2],
+                     x[1], x[0], y[9], y[8], y[7], y[6], y[5], y[4], y[3], y[2], y[1], y[0]);
+            return false;
+        }
+    }
+    return true;
 }

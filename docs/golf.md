@@ -22,7 +22,9 @@ for every player's announcement and seeds its random numbers from the lowest SID
 The game's x87 code is linked as emulator interrupts (INT 34h-3Dh, 2581 of them). With a coprocessor present,
 which dosrt has by default, the emulator rewrites each into FWAIT and the x87 instruction the first time it
 runs, so the code in memory changes as the game plays ([runtime.md](runtime.md), "FPU").
-`tools/borland_emu_patch.py` applies the same rewrite to a copy of the file for disassemblers.
+`tools/borland_emu_patch.py` applies the same rewrite to a copy of the file for disassemblers. Shadow verification
+compares the FPU and accepts sequences the original patched where a lift did not ([lifting.md](lifting.md),
+"Floating point").
 
 ## Running it alone
 
