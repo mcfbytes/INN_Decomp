@@ -158,9 +158,16 @@ shadow runs (device replay aside), so the VGA status register toggles vertical r
 waits for a timer tick still spins there; a shadow
 run still going after 200 million instructions is logged with the hook's name and CS:IP.
 `INN_LIFT_ONLY=name,name,...` hooks only the named functions, which checks functions that are
-otherwise only reached from other lifted code. `INN_VERIFY_SKIP=name,...` keeps the named functions
-hooked but never shadows them, for a call that only works with interrupts flowing (a driver init
-that finds its IRQ by waiting for one).
+otherwise only reached from other lifted code; `INN_LIFT_EXCEPT=name,...` hooks all but the named ones
+(for a scenario on a patched program whose patch lies in a lifted function's code past its signature).
+`INN_VERIFY_SKIP=name,...` keeps the named functions hooked but never shadows them, for a call that
+only works with interrupts flowing (a driver init that finds its IRQ by waiting for one).
+`INN_VERIFY_COST=1` adds, for every checked call, the instructions the original ran (its RET
+included) against what the lifted run ran and charged (nested instructions, `cpu.stall` and the one
+slot the dispatch counts): the first differences per entry and a total per entry, for lifts that
+keep the program's timing by charging the original's instruction counts (3-D Golf's
+`GOLF/unpack.c`, Shop's `rtl3_*`). `VERIFY_TIMEOUT=<seconds>` gives `tools/verify_lifted.sh` more
+than its default 900 s of wall time.
 
 Enable it with `INN_VERIFY_LIFTED=<calls per function>`; `tools/verify_lifted.sh` runs the logon
 scenario against a local server and prints the per-function summary. With `INN_TSN_HOST=<rules>` it

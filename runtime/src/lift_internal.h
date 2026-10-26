@@ -15,6 +15,8 @@ typedef struct HookStats {
     int result_diffs; /* calls whose AX or DX differed although scratch: a possible wrong return value */
     int synth_calls, synth_mismatches, synth_result_diffs; /* the same for synthetic calls (lift_synth.c) */
     int replay_calls; /* shadow calls verified with device replay */
+    int cost_diffs; /* INN_VERIFY_COST: calls whose lifted instruction count differs from the original's */
+    uint64_t cost_original, cost_lifted;
 } HookStats;
 
 typedef struct ActiveHook {
@@ -54,6 +56,7 @@ typedef struct LiftState {
     const char *verify_replay; /* INN_VERIFY_REPLAY: names shadowed with device replay (lift_replay.c) */
     struct Replay *replay;
     const char *only; /* INN_LIFT_ONLY: comma-separated names to hook, all when NULL */
+    const char *except; /* INN_LIFT_EXCEPT: comma-separated names never to hook */
     struct VerifyState *verify;
     struct { char name[16]; uint16_t load_seg; } modules[16];
     int module_count;

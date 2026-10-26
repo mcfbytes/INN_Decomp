@@ -503,6 +503,30 @@ static bool replayed(const LiftState *s, const LiftedEntry *e)
     return e->replay || (s->verify_replay && lift_listed(s->verify_replay, e->name));
 }
 
+/* INN_VERIFY_COST=1: the instructions the original ran (its RET included) against what the lifted run
+ * ran and charged (nested instructions plus cpu.stall, and the one slot the dispatch counts). Lifted
+ * code that keeps the program's timing charges what the original would have run; the first
+ * differences per entry are logged and the summary line gives the totals. */
+static void note_cost(Machine *m, ActiveHook *h, uint64_t original, uint64_t lifted)
+{
+    (void)m;
+    static int enabled = -1;
+    if (enabled < 0) {
+        const char *e = getenv("INN_VERIFY_COST");
+        enabled = e && *e && strcmp(e, "0") != 0;
+    }
+    if (!enabled)
+        return;
+    HookStats *st = h->stats;
+    st->cost_original += original;
+    st->cost_lifted += lifted;
+    if (original == lifted)
+        return;
+    if (++st->cost_diffs <= 5)
+        log_msg("verify: cost %s call %d: original %llu instructions, lifted %llu", h->entry->name,
+                st->shadow_calls, (unsigned long long)original, (unsigned long long)lifted);
+}
+
 bool lift_verify_call(Machine *m, ActiveHook *h)
 {
     LiftState *s = lift_state(m);
@@ -548,7 +572,10 @@ bool lift_verify_call(Machine *m, ActiveHook *h)
         s->shadow_of = NULL;
         return true;
     }
+    uint64_t cost_start = m->cpu.instructions + m->cpu.stall;
     run_original(m, h);
+    /* less the slot of the return hook run_original adds */
+    uint64_t cost_original = m->cpu.instructions + m->cpu.stall - cost_start - 1;
     v->cpu_original = m->cpu;
     memcpy(v->mem_original, m->mem, SNAPSHOT_BYTES);
     vga_snapshot_save(m, v->vga_original);
@@ -558,6 +585,7 @@ bool lift_verify_call(Machine *m, ActiveHook *h)
     restore(m, &v->cpu_before, v->mem_before, v->vga_before, v->dos_before, v->snd_before);
     dos_journal_undo(m);
     run_lifted(m, h);
+    note_cost(m, h, cost_original, m->cpu.instructions + m->cpu.stall - cost_start + 1);
     compare(m, h, entry_sp, entry_sp);
 
     restore(m, &v->cpu_original, v->mem_original, v->vga_original, v->dos_original, v->snd_original);
