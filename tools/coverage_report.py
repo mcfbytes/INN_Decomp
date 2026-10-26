@@ -18,7 +18,7 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import borland_overlay  # noqa: E402
 
-MARKER = re.compile(r'^LIFTED\(\s*(0x[0-9A-Fa-f]+)\s*,\s*(0x[0-9A-Fa-f]+)\s*,\s*(\w+)', re.M)
+MARKER = re.compile(r'^LIFTED(?:_PREFIX)?\(\s*(0x[0-9A-Fa-f]+)\s*,\s*(0x[0-9A-Fa-f]+)\s*,\s*(\w+)', re.M)
 
 
 def read_index(export):
