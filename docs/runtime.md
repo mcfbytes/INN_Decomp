@@ -243,6 +243,8 @@ UART of the hybrid build (`uart_attach_tcp`) and the native host link (`host_lin
   the slowest reply seen so far, up to 4 N), then hands over everything received. No more than a 5 s
   wait per poll.
 - The first carrier check waits for the TCP connect to finish (up to 5 s).
+- An input script's `wait` (`serial_link_drain`) reads the server into the settling queue: a held
+  reply stays held until its poll, other bytes are the guest's at once.
 - Bytes the server sends while nothing is pending go through at once. Their emulated time still follows
   the wall clock; the first 20 are logged as `link-settle: N bytes arrived unprompted at T ms`.
 
@@ -261,10 +263,16 @@ byte-at-a-time sends settle about once per byte: `tw_combat` waits about 49 s of
 settles. The slowest reply measured under a load average of 40 was 23 ms. The window is a timing model,
 not a measurement of the 1993 network.
 
-Settling makes runs of one build repeat. It does not make the hybrid and native builds agree: they
-charge work differently ([native.md](native.md) section 5), so the client reaches a send at different
-emulated times, and a game whose random numbers follow the clock (`tw_combat`'s encounter) can still
-differ between them.
+Settling makes runs of one build repeat. Between the hybrid and the native build it removes the wall
+clock, but the two still differ wherever they reach a moment at different emulated times, because
+they charge work differently ([native.md](native.md) section 5). That matters for the Yserbius engine:
+its random-number table index is seeded from the hundredths of a DOS get-time (INT 21h 2Ch) made
+shortly after the player enters the game, so a few milliseconds' difference picks another encounter
+(`tw_combat`, `ys_combat`). Most of the difference came from the line: the native host link sent each
+byte when it was offered and at the exact baud rate, the UART one byte time later and at 4200 us a
+byte (its line is checked once per 100 us slice). `host_link` now models the same shift register and
+byte time ([native.md](native.md) section 9), which brings the two builds to within about 3 ms of
+each other at that seed (it was 22 ms).
 
 ## TSN host stand-in
 

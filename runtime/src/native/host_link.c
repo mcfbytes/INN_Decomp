@@ -18,12 +18,20 @@ typedef struct HostLink {
     uint64_t next_pump_us;
     bool in_pump;
     bool dtr_logged;
-    uint32_t byte_us;               /* line time of one byte; 0 while the link is unpaced */
-    uint64_t tx_next_us, rx_next_us; /* when the line is free for the next byte each way */
+    uint32_t byte_us;    /* line time of one byte; 0 while the link is unpaced */
+    uint64_t rx_next_us; /* when the line is free for the next received byte */
+    /* Transmit, as the UART's shift register: a byte leaves one byte time after it went in, and the
+     * next one waiting goes in when it has left. */
+    bool tx_held;
+    uint8_t tx_byte;
+    uint64_t tx_done_us; /* when the held byte leaves */
+    uint64_t tx_free_us; /* when the last byte left */
 } HostLink;
 
 /* One link per process: the client has one modem. The state follows the machine that opened it. */
 static HostLink host;
+
+static void tx_flush(Machine *m, bool now);
 
 static SerialLink *link_of(Machine *m)
 {
@@ -69,11 +77,16 @@ int host_link_attach(Machine *m, SerialLink link)
     host.in_pump = false;
     host.dtr_logged = false;
     host.byte_us = 0;
+    host.rx_next_us = 0;
+    host.tx_held = false;
+    host.tx_free_us = 0;
     return 0;
 }
 
 void host_link_close(Machine *m)
 {
+    if (host.owner == m)
+        tx_flush(m, true);
     if (host.owner == m && host.link.close)
         host.link.close(host.link.ctx);
     if (host.owner == m)
@@ -100,6 +113,44 @@ int host_link_open(Machine *m, const char *spec)
     return 0;
 }
 
+/* Sends the byte in the shift register once its byte time is over. A link that takes nothing keeps it
+ * for the next call; a broken one drops it. */
+static void tx_flush(Machine *m, bool now)
+{
+    SerialLink *l = link_of(m);
+    if (!host.tx_held || !l || (!now && m->virtual_us < host.tx_done_us))
+        return;
+    if (l->send(l->ctx, &host.tx_byte, 1) == 0)
+        return;
+    host.tx_held = false;
+    host.tx_free_us = host.tx_done_us;
+}
+
+/* Takes bytes into the line. A byte offered within PACE_IDLE_US of the last one leaving was waiting
+ * for it (the driver's pump runs every HOST_LINK_PUMP_US), so its byte time starts then; bytes whose
+ * time is already over leave at once. The rest wait in the shift register. */
+static int tx_take(Machine *m, SerialLink *l, const uint8_t *buf, int len)
+{
+    uint64_t now = m->virtual_us;
+    int taken = 0;
+    while (taken < len && !host.tx_held) {
+        uint64_t start = host.tx_free_us + PACE_IDLE_US >= now ? host.tx_free_us : now;
+        uint64_t done = start + host.byte_us;
+        if (done > now) {
+            host.tx_held = true;
+            host.tx_byte = buf[taken++];
+            host.tx_done_us = done;
+            break;
+        }
+        int n = l->send(l->ctx, buf + taken, 1);
+        if (n <= 0)
+            return taken ? taken : n;
+        taken++;
+        host.tx_free_us = done;
+    }
+    return taken;
+}
+
 /* Bytes the line can carry now: one per byte time, with credit only for the last PACE_IDLE_US, so an
  * idle line does not release a burst. */
 static int allowance(Machine *m, uint64_t *next, int want)
@@ -120,12 +171,17 @@ void host_link_set_rate(Machine *m, uint32_t baud)
     const char *pacing = getenv("INN_LINK_PACING");
     if (host.owner != m)
         return;
-    host.byte_us = baud && !(pacing && !strcmp(pacing, "0")) ? BYTE_BITS * 1000000u / baud : 0;
+    tx_flush(m, true);
+    /* Rounded up to the scheduler slice: the emulated UART checks its line once per slice, so that is
+     * the byte time the hybrid build's guest sees (4200 us at 2400 baud). */
+    uint32_t us = baud && !(pacing && !strcmp(pacing, "0")) ? BYTE_BITS * 1000000u / baud : 0;
+    host.byte_us = (us + TICK_SLICE_US - 1) / TICK_SLICE_US * TICK_SLICE_US;
 }
 
 bool host_link_carrier(Machine *m)
 {
     enter(m);
+    tx_flush(m, false);
     SerialLink *l = link_of(m);
     return l && l->connected && l->connected(l->ctx);
 }
@@ -136,16 +192,16 @@ int host_link_send(Machine *m, const uint8_t *buf, int len)
     SerialLink *l = link_of(m);
     if (!l)
         return -1;
-    int n = allowance(m, &host.tx_next_us, len);
-    int taken = n ? l->send(l->ctx, buf, n) : 0;
-    if (taken > 0 && host.byte_us)
-        host.tx_next_us += (uint64_t)taken * host.byte_us;
-    return taken;
+    tx_flush(m, false);
+    if (!host.byte_us || len <= 0)
+        return host.tx_held ? 0 : l->send(l->ctx, buf, len);
+    return tx_take(m, l, buf, len);
 }
 
 int host_link_recv(Machine *m, uint8_t *buf, int cap)
 {
     enter(m);
+    tx_flush(m, false);
     SerialLink *l = link_of(m);
     int want = l && l->recv ? allowance(m, &host.rx_next_us, cap) : 0;
     int n = want ? l->recv(l->ctx, buf, want) : 0;
@@ -178,6 +234,7 @@ void host_link_break(Machine *m)
     static const uint8_t BREAK_STANDIN = '\r';
     SerialLink *l = link_of(m);
     enter(m);
+    tx_flush(m, true); /* the byte in the shift register goes first */
     if (l)
         l->send(l->ctx, &BREAK_STANDIN, 1); /* a BREAK is not a character: no line time */
 }

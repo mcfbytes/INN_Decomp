@@ -158,7 +158,10 @@ tick, the TSNEXEC tick counter maintained by the client). In native mode it adva
   native build (driven by this clock's waits and safe points) alike. `tools/verify_lifted.sh` and
   `tools/m9_suite.sh` turn it on (40 ms). With it three runs of `tw_combat` on one hybrid build give the
   same traffic and screens, also with the client slowed by a busy loop on its CPU, which without it
-  changes the encounter. Bytes the server sends unprompted still arrive at a wall time.
+  changes the encounter. Bytes the server sends unprompted still arrive at a wall time. The encounter
+  itself follows this clock: the Yserbius engine seeds its random-number table index from the
+  hundredths of a DOS get-time, so hybrid and native agree on it only while they reach that call
+  within the same hundredth. The host link's line model (section 9) keeps them about 3 ms apart there.
   Headless hybrid and native runs start that clock at `INN_EPOCH`
   (default 750000000, 8 Oct 1993 UTC). An empty `INN_EPOCH` uses the host clock. The same epoch makes
   two runs of one build repeat. Hybrid and native still start about 0.4 s apart, because they charge
@@ -483,8 +486,12 @@ void host_link_pump(Machine *m);
 
 `host_link_send` and `host_link_recv` pace the link at the line rate the driver programmed: one byte per
 byte time (10 bits at that rate) in each direction, as the emulated UART does, so the client's timing and
-the games' timer-seeded behaviour stay close to the hybrid build. Pacing is the default. `INN_LINK_PACING=0`
-makes the link unpaced.
+the games' timer-seeded behaviour stay close to the hybrid build. The byte time is rounded up to the
+100 us scheduler slice, as the UART's comes out (4200 us at 2400 baud). Sending works like the UART's
+shift register: an idle line takes one byte, which leaves (reaches the `SerialLink`) one byte time
+later; a byte offered within 2 ms of the last one leaving was waiting for it, so its byte time starts
+then. Any host-link call sends a byte whose time is over; a BREAK, a rate change and close send it at
+once. Pacing is the default. `INN_LINK_PACING=0` makes the link unpaced.
 
 ### Files
 
