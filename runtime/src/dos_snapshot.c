@@ -96,11 +96,17 @@ void dos_journal_begin(Machine *m)
     }
 }
 
+/* The sizes of descriptors open at the start stay listed, so a second undo (after the lifted run of
+ * a synthetic call) cuts back what that run grew as well. */
 void dos_journal_undo(Machine *m)
 {
     (void)m;
+    JournalEntry kept[JOURNAL_MAX];
+    int kept_count = 0;
     while (journal.count > 0) {
         JournalEntry *e = &journal.e[--journal.count];
+        if (e->kind == J_SIZED_FD)
+            kept[kept_count++] = *e;
         switch (e->kind) {
         case J_DELETED:
             unlink(e->path); /* recreated by the run being undone */
@@ -112,6 +118,8 @@ void dos_journal_undo(Machine *m)
         case J_SIZED_FD: if (ftruncate(e->fd, e->size) != 0) { /* closed by the run */ } break;
         }
     }
+    while (kept_count > 0)
+        journal.e[journal.count++] = kept[--kept_count];
 }
 
 static bool fd_listed(const int *fds, int count, int fd)
