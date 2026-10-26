@@ -8,6 +8,9 @@ unless --module gives it. Each lifted tree is scanned for LIFTED markers in the 
 module.txt names the module (*.c: lifted) and in staging/<that directory>/ (*.c.staged: staged).
 Calls to an overlay's INT 3Fh thunk count for the overlay function it loads (thunks read from --exe,
 default the file module.txt names): the overlay manager jumps there, which is no call.
+An optional coverage_alias.tsv in the export dir lists overlays the manager moved after they were announced:
+rows `<segment, hex, as the coverage file names it><TAB><overlay stub segment, hex><TAB>note`. Places the
+run recorded inside that segment (module-relative, no `#`) count for the overlay's own offsets.
 """
 import argparse
 import collections
@@ -100,6 +103,30 @@ def read_coverage(paths, module, thunks):
     return calls
 
 
+def read_alias(export):
+    """{module-relative segment: overlay stub segment} from coverage_alias.tsv, if the export has one."""
+    alias = {}
+    path = export / 'coverage_alias.tsv'
+    if path.exists():
+        for row in path.read_text().splitlines():
+            if row.strip() and not row.startswith('#'):
+                seg, stub = row.split('\t')[:2]
+                alias[int(seg, 16)] = int(stub, 16)
+    return alias
+
+
+def apply_alias(calls, alias):
+    merged = collections.Counter()
+    for key, count in calls.items():
+        if key[0] == 'res':
+            for seg, stub in alias.items():
+                if seg * 16 <= key[1] < seg * 16 + 0x10000:
+                    key = ('ovl', stub, key[1] - seg * 16)
+                    break
+        merged[key] += count
+    return merged
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('coverage', nargs='+')
@@ -120,6 +147,9 @@ def main():
     if stub_segs and not thunks:
         print('# no overlay thunks read: calls through them stay at the stub (--exe)', file=sys.stderr)
     calls = read_coverage(args.coverage, module, thunks)
+    alias = read_alias(args.ghidra)
+    if alias:
+        calls = apply_alias(calls, alias)
     if not calls:
         sys.exit(f'no coverage rows for {module}')
 
