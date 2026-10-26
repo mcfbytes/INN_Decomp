@@ -868,10 +868,14 @@ with `?autostart=1&audiotap=1&com1=...` and `--autoplay-policy=no-user-gesture-r
 `private/lifted/scenarios/inn_sierraland.txt` (read at run time), that SierraLand to 3-D Golf makes the DSP loud in at least
 two separate seconds (its own start-up click is one) and the worklet receives it; `--mode off` checks that without the tap
 nothing is logged and the median `perf:` speed stays 0.99-1.01. The build must use `-DINN_WEB_PRELOAD_DIR` on a drive whose
-`LSCI.CFG` names `sndblast.drv` (`GOLF.EXE` under INN starts on its PC speaker device; the check's drive has the device
-word GOLF initialises at file offset 0x170EC set from 1 to 2 so that it uses the DSP). Such a build holds media: never
-package or publish it. Checked 2026-10-25 on the hybrid build: FM loud at logon plus 14 s (peak about 2600), digital in 3-D
-Golf at 3-D Golf plus 13 s and 15 s, tap-off median speed 1.000; the native JSPI build with `adl.drv` passes the FM check.
+`LSCI.CFG` names `sndblast.drv` (`GOLF.EXE` under INN starts on its PC speaker device, so the check's scratch drive under `work/` has GOLF's
+sound-device selection patched to the DSP; the patch is not part of the repository). Such a build holds media: never
+package or publish it. The build is the public hybrid one (`-DINN_LIFTED_DIR=/nonexistent`: the original program on the emulator; a
+build with lifted code is not the hybrid). Checked 2026-10-26 on the hybrid ASYNCIFY build: FM loud at logon plus 15 s
+(peak about 2600; the land directory is silent, the music starts when the first land is entered, so the check drives the
+scenario's first clicks), digital in 3-D Golf at three separate seconds, tap-off median speed 1.000. The FM check also
+passes with `adl.drv` (a drive whose `LSCI.CFG` names it) on the JSPI and the ASYNCIFY hybrid builds. Without the DSP's
+late IRQ test answer (`docs/runtime.md`) GOLF's detection fails and only the start-up click is heard (checked).
 
 ## Performance
 

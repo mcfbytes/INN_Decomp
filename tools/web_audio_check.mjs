@@ -1,7 +1,8 @@
 // Headless-browser check of the Sound Blaster output of a web build (docs/web.md, "Sound"). It serves a build
 // directory, opens it with ?autostart=1&audiotap=1, and reads window.innAudioTap (the runtime's per-source
 // "audio: tap" counters plus what the AudioWorklet received). It asserts that
-//   FM:      after logon the OPL source is non-silent and the worklet received sound while the DSP was silent;
+//   FM:      after logon (and the first land entered: the directory is silent) the OPL source is non-silent and the
+//            worklet received sound while the DSP was silent;
 //   digital: SierraLand -> 3-D Golf, driven with the click times of a scenario file read at run time, makes the
 //            SB DSP source non-silent and the worklet receives it.
 // The build must be made with -DINN_WEB_PRELOAD_DIR=<a C: drive whose LSCI.CFG names sndblast.drv>; such a build
@@ -109,7 +110,9 @@ try {
   // One sampler runs through the whole session. FM: after logon (the land directory is up, leadS after the play view)
   // the OPL source and the worklet are non-silent in a second where the DSP is silent. Digital: from the scenario's
   // 3-D Golf comment on, the SB DSP source and the worklet are non-silent in the same second.
-  const ev = mode === 'fm' && !args.includes('--scenario') ? [] : loadScenario(scenarioPath);
+  // The land directory itself is silent; the FM music starts when the first land is entered, so FM drives the scenario too
+  // (and stops at the first loud second).
+  const ev = loadScenario(scenarioPath);
   const first = ev.length ? ev.find((e) => e.verb === 'click').ms : 0;
   const box = async () => page.locator('#canvas').boundingBox();
   const toPx = async (x, y) => { const b = await box(); return [b.x + (x + 0.5) * b.width / 320, b.y + (y + 0.5) * b.height / 200]; };
@@ -153,6 +156,7 @@ try {
     }
     if (mode === 'fm' && fm) break;
   }
+  if (wantFm && !fm) await wait(Date.now() + fmWaitS * 1000, () => !!fm);
   await wait(Date.now() + 3000, () => false);
   const end = await snap();
   show(end, 'end');

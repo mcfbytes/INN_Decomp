@@ -437,7 +437,7 @@ void audio_init(Machine *m)
     m->audio = a;
     audio_set_rate(m, AUDIO_DEFAULT_RATE);
     pcm_init(&a->pcm);
-    audio_add_source(m, pcm_render);
+    audio_name_source(m, audio_add_source(m, pcm_render), "pcm");
     machine_add_ticker(m, audio_tick);
 }
 
