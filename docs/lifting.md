@@ -47,7 +47,7 @@ Scratch sets must use macros from shared headers (`include/`): the generated tab
 translation unit and cannot see file-local definitions. Each lifted source file contributes rows to a static `LiftedEntry` table: module name, entry
 `seg:off` relative to the load segment, function, name, and the first 12 original bytes.
 `lift_module_loaded` arms a table when a loader announces the module. DOS EXEC announces programs
-at their load segment. Drivers (`*.DRV`, raw images) and LSCI DLLs (`*.DLL`, image after the
+at their load segment. Drivers (`*.DRV` and Miles `*.ADV`, raw images) and LSCI DLLs (`*.DLL`, image after the
 relocation list) are announced when a file read lands their image start on a paragraph
 boundary (`runtime/src/dos_modules.c`); their `seg:off` are relative to the image start. Borland
 overlays are announced per overlay (section "Overlays"). Freeing
