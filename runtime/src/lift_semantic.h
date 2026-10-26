@@ -20,6 +20,18 @@ typedef enum SemKind {
     SEM_PIC_MASK,      /* a = chip, b = mask */
     SEM_KBD_DATA,      /* read; value replayed */
     SEM_KBD_ACK,
+    /* Sound Blaster DSP at 220h and 8237 channel 1 (docs/lifting.md, "Semantic port comparison") */
+    SEM_DMA_MASK,         /* a = channel, b = 1 masked, 0 unmasked */
+    SEM_DMA_PROGRAM,      /* a = mode << 24 | page << 16 | address, b = count */
+    SEM_SB_RESET,
+    SEM_SB_DATA,          /* 22Ah read; value replayed */
+    SEM_SB_IDENT,         /* a = E0h (b = its argument) or E1h (b = 0) */
+    SEM_SB_TIME_CONSTANT, /* a = time constant */
+    SEM_SB_BLOCK_SIZE,    /* 48h: a = length field (bytes - 1) */
+    SEM_SB_PCM_START,     /* a = 1 auto-init (1Ch, 90h) or 0 (14h, 91h), b = length field (14h's, else the last 48h's) */
+    SEM_SB_PCM_STOP,      /* a = 0 halt (D0h), 1 end auto-init after this block (DAh) */
+    SEM_SB_PCM_CONTINUE,  /* D4h */
+    SEM_SB_SPEAKER,       /* a = 1 on (D1h), 0 off (D3h) */
     SEM_KIND_COUNT
 } SemKind;
 
@@ -46,6 +58,16 @@ typedef struct SemTrace {
     /* canonicaliser state: accesses held until their group is complete */
     SemHold opl[4], dac_w, dac_r, crtc_reg[2], pit, kbd61;
     int dac_w_index, dac_r_index, crtc_selected;
+    /* Sound Blaster: channel 1's programming (held until mode, address, count and page are all in), the
+     * DSP reset, and the DSP command being received with its argument bytes */
+    SemRaw dma_ev[8];
+    int dma_n;
+    uint8_t dma_have, dma_mode, dma_page;
+    uint16_t dma_addr, dma_count;
+    bool dma_flipflop;
+    SemHold sb_reset, sb_cmd;
+    int sb_args_needed;
+    uint32_t sb_block; /* the last 48h length field, SB_NO_BLOCK when none */
 } SemTrace;
 
 void sem_trace_init(SemTrace *t);   /* empties the trace; keeps its buffers */

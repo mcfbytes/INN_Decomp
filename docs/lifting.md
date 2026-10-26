@@ -161,6 +161,11 @@ hybrid build, where it must agree with the raw comparison). Both runs are reduce
 | PIT | 43h control for channel 0 (lobyte/hibyte), two 40h writes | `SEM_PIT_DIVISOR` |
 | PIC | 20h/A0h write of 20h; 21h/A1h write (reads dropped) | `SEM_PIC_EOI`, `SEM_PIC_MASK` |
 | keyboard | 60h read; 61h read, write with bit 7 set, write with it clear | `SEM_KBD_DATA`, `SEM_KBD_ACK` |
+| DMA channel 1 | 0Ah write for channel 1 | `SEM_DMA_MASK` (a = 1, b = 1 masked) |
+| DMA channel 1 | 0Ch flip-flop clear, 0Bh mode for channel 1, both 02h address and both 03h count bytes (the flip-flop says which), 83h page, in any order | one `SEM_DMA_PROGRAM` (a = mode << 24 \| page << 16 \| address, b = count) once all are in |
+| SB DSP reset | 226h write of 1, then of 0 | `SEM_SB_RESET` |
+| SB DSP data | 22Ah read | `SEM_SB_DATA` (value replayed) |
+| SB DSP commands | 22Ch writes, a command byte with its argument bytes: E0h x, E1h; 40h tc; 48h length; 14h length; 1Ch and 90h (auto-init), 91h; D0h, DAh; D4h; D1h, D3h | `SEM_SB_IDENT`, `SEM_SB_TIME_CONSTANT`, `SEM_SB_BLOCK_SIZE`, `SEM_SB_PCM_START` (a = auto-init, b = 14h's length or the last 48h's), `SEM_SB_PCM_STOP` (a = 0 halt, 1 exit auto-init), `SEM_SB_PCM_CONTINUE`, `SEM_SB_SPEAKER` |
 
 3DAh reads are dropped; every other access, and a lone 61h access, stays a raw port event. The
 original's side is canonicalised from the recorded port log; the lifted side canonicalises the ports
@@ -170,6 +175,13 @@ each compared in order. A difference is logged as `semantic event K: lifted <...
 port for raw accesses; a read the original did not make is a mismatch. An unconverted function produces
 the same events on both sides, so it compares as before. Region-mode and device-replay entries keep
 their raw comparison.
+
+22Ch reads (write-ready polls) and 22Eh reads (data-ready polls and the IRQ acknowledge) are dropped, as
+OPL status reads are. Other DSP commands, DMA accesses for other channels and a program, reset or command
+left incomplete stay raw events. High-speed and normal starts are the same event, so a converted driver
+may use either. The device backend of `host_audio.h` (`host_audio_pcm_start`, `host_audio_sb_reset` and
+the rest) performs these port sequences in emulated mode, so in a shadow run's lifted half they are
+canonicalised like the original's.
 
 ## Device replay
 
@@ -255,17 +267,20 @@ call TSNEXEC.EXE tsn_long_shift_left DX:AX=long(0x12345678) CX=4
   A20 enabled for the call: no DOS program here uses the HMA and the runtime has no XMS, so the area is
   free and inside the snapshot. They are compared like any memory, so what a function writes into its
   buffers is checked, including writes past their end (into the gaps).
-- **Restoring.** The trigger state is saved (CPU, the first 1 MB + 64 KB of memory, VGA, DOS handles,
-  hook bitmap, emulated time and pending interrupts, A20). Each call is set up on top of it, verified
-  (host file deletions, renames, creations and growth journaled and undone after both runs, as for live
-  calls), and the trigger state is loaded again before the next call and before the run continues.
-  During the calls the time slice is stretched so no device ticker runs, interrupts are held and call
-  coverage is off. `INN_SYNTH_CHECK=1` saves the state again after each restore and stops with an
-  error if the CPU, memory, VGA, DOS state, hook bitmap, time, interrupts, A20 or I/O mode differ.
-  Not restorable, so not for synthetic calls: bytes written into host files, port I/O to devices
-  other than VGA, loading an overlay or module, ending the process. A call whose original does not
-  return within 50 million instructions, or that ends the process, is reported as a mismatch and the
-  lifted C is not run; avoid calls the lift turns into `fatal()` (a zero divisor) or loops forever on.
+- **Restoring.** The trigger state is saved (CPU, the first 1 MB + 64 KB of memory, VGA, the Sound
+  Blaster DSP and the DMA controller, DOS handles, hook bitmap, emulated time and pending interrupts, A20).
+  Each call is set up on top of it, verified (host file deletions, renames, creations and growth
+  journaled and undone after both runs, as for live calls), and the trigger state is loaded again before
+  the next call and before the run continues. During the calls the time slice is stretched so no device
+  ticker runs, interrupts are held and call coverage is off. `INN_SYNTH_CHECK=1` saves the state again
+  after each restore and stops with an error if the CPU, memory, VGA, Sound Blaster or DMA state, DOS
+  state, hook bitmap, time, interrupts, A20 or I/O mode differ. Calls that program the DSP and DMA
+  channel 1 are therefore restorable (shadow runs save and load that state with the VGA state too).
+  Not restorable, so not for synthetic calls: bytes written into host files, port I/O to other devices
+  (PIC, PIT, OPL, keyboard, UARTs; an IRQ the DSP raises within the call, F2h's or a block end's, is PIC
+  state), loading an overlay or module, ending the process. A call whose original does not return
+  within 50 million instructions, or that ends the process, is reported as a mismatch and the lifted C
+  is not run; avoid calls the lift turns into `fatal()` (a zero divisor) or loops forever on.
 - **Results** are counted apart from live calls: mismatches are logged as
   `verify: MOD name synthetic call N (file:line): ...` and the summary adds
   `verify: MOD name: N calls checked, M mismatches (synthetic)` (with `DX:AX differs in N` as for live

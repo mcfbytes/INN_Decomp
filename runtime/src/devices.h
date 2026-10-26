@@ -67,6 +67,19 @@ void dma_shutdown(Machine *m);
 int dma_read(Machine *m, int ch, uint8_t *dst, int len, bool *tc);
 /* fn runs before the guest reads or reprograms ch, so a device can first move what is due. */
 void dma_set_sync(Machine *m, int ch, DmaSyncFn fn);
+/* One channel's registers, for the mixed-mode hand-off of a Sound Blaster block (host_audio.c). set
+ * does not call the channel's sync function: the caller moved the device's state already. */
+typedef struct DmaChannelState {
+    uint16_t base_addr, base_count, addr, count;
+    uint8_t page, mode;
+    bool masked;
+} DmaChannelState;
+void dma_channel_get(Machine *m, int ch, DmaChannelState *c);
+void dma_channel_set(Machine *m, int ch, const DmaChannelState *c);
+/* The whole controller for shadow and synthetic snapshots; plain bytes, the sync functions stay. */
+size_t dma_snapshot_size(void);
+void dma_snapshot_save(Machine *m, void *dst);
+void dma_snapshot_load(Machine *m, const void *src);
 
 /* ---- VGA ---- */
 

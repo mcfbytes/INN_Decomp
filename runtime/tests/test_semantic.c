@@ -171,6 +171,120 @@ static void test_no_run(void)
     free(m);
 }
 
+/* A Sound Blaster driver's port log (write-ready polls before each DSP byte, the reset with its data
+ * poll, identify and version, a single-cycle block on channel 1, an auto-init block with 48h and the
+ * high-speed start, halt, continue, speaker, the lone mask at the end and the IRQ acknowledge) becomes
+ * SB and DMA events; the polls disappear. */
+static void dsp_byte(SemTrace *t, uint8_t v)
+{
+    in(t, 0x22C, 0x80); /* busy */
+    in(t, 0x22C, 0x00);
+    out(t, 0x22C, v);
+}
+
+static void dma1(SemTrace *t, uint8_t mode, uint32_t linear, uint16_t count, bool page_first)
+{
+    out(t, 0x0A, 0x05);
+    out(t, 0x0C, 0);
+    out(t, 0x0B, mode);
+    if (page_first)
+        out(t, 0x83, linear >> 16);
+    out(t, 0x02, linear & 0xFF);
+    out(t, 0x02, linear >> 8 & 0xFF);
+    out(t, 0x03, count & 0xFF);
+    out(t, 0x03, count >> 8);
+    if (!page_first)
+        out(t, 0x83, linear >> 16);
+    out(t, 0x0A, 0x01);
+}
+
+static void test_sound_blaster(void)
+{
+    SemTrace t;
+    fresh(&t);
+    out(&t, 0x226, 1);
+    in(&t, 0x388, 0); /* a delay between the two reset writes */
+    out(&t, 0x226, 0);
+    in(&t, 0x22E, 0x00);
+    in(&t, 0x22E, 0x80);
+    in(&t, 0x22A, 0xAA);
+    dsp_byte(&t, 0xE0);
+    dsp_byte(&t, 0x3C);
+    in(&t, 0x22A, 0xC3);
+    dsp_byte(&t, 0xE1);
+    in(&t, 0x22A, 0x02);
+    in(&t, 0x22A, 0x01);
+    dsp_byte(&t, 0xD1);
+    dsp_byte(&t, 0x40);
+    dsp_byte(&t, 0xA5);
+    dma1(&t, 0x49, 0x2ABCD, 0x1234, false);
+    dsp_byte(&t, 0x14);
+    dsp_byte(&t, 0x34);
+    dsp_byte(&t, 0x12);
+    dma1(&t, 0x59, 0x40000, 0x07FF, true); /* page first: the same program */
+    dsp_byte(&t, 0x48);
+    dsp_byte(&t, 0xFF);
+    dsp_byte(&t, 0x03);
+    dsp_byte(&t, 0x90);
+    dsp_byte(&t, 0xD0);
+    dsp_byte(&t, 0xD4);
+    dsp_byte(&t, 0xDA);
+    dsp_byte(&t, 0xD3);
+    out(&t, 0x0A, 0x05);
+    in(&t, 0x22E, 0x7F);
+    dsp_byte(&t, 0xF2); /* no meaning here: raw */
+    out(&t, 0x0B, 0x4A); /* channel 2: raw */
+    sem_trace_finish(&t);
+    static const struct { SemKind kind; uint32_t a, b; } WANT[] = {
+        { SEM_SB_RESET, 0, 0 }, { SEM_SB_DATA, 0, 0xAA }, { SEM_SB_IDENT, 0xE0, 0x3C }, { SEM_SB_DATA, 0, 0xC3 },
+        { SEM_SB_IDENT, 0xE1, 0 }, { SEM_SB_DATA, 0, 2 }, { SEM_SB_DATA, 0, 1 }, { SEM_SB_SPEAKER, 1, 0 },
+        { SEM_SB_TIME_CONSTANT, 0xA5, 0 }, { SEM_DMA_MASK, 1, 1 }, { SEM_DMA_PROGRAM, 0x4902ABCD, 0x1234 },
+        { SEM_DMA_MASK, 1, 0 }, { SEM_SB_PCM_START, 0, 0x1234 }, { SEM_DMA_MASK, 1, 1 },
+        { SEM_DMA_PROGRAM, 0x59040000, 0x07FF }, { SEM_DMA_MASK, 1, 0 }, { SEM_SB_BLOCK_SIZE, 0x3FF, 0 },
+        { SEM_SB_PCM_START, 1, 0x3FF }, { SEM_SB_PCM_STOP, 0, 0 }, { SEM_SB_PCM_CONTINUE, 0, 0 },
+        { SEM_SB_PCM_STOP, 1, 0 }, { SEM_SB_SPEAKER, 0, 0 }, { SEM_DMA_MASK, 1, 1 },
+    };
+    size_t n = sizeof WANT / sizeof WANT[0];
+    CHECK(t.nsem == n, "sb: %zu events, want %zu", t.nsem, n);
+    for (size_t k = 0; k < n; k++)
+        expect(&t, k, WANT[k].kind, WANT[k].a, WANT[k].b, "sb");
+    CHECK(t.nraw == 2 && t.raw[0].port == 0x22C && t.raw[0].value == 0xF2 && t.raw[1].port == 0x0B,
+          "sb: %zu raw (F2h and the channel 2 mode)", t.nraw);
+
+    /* Incomplete groups stay raw: a program without its page, a reset never released, half a command. */
+    fresh(&t);
+    out(&t, 0x0C, 0);
+    out(&t, 0x0B, 0x49);
+    out(&t, 0x02, 0x00);
+    out(&t, 0x02, 0x10);
+    out(&t, 0x03, 0xFF);
+    out(&t, 0x03, 0x00);
+    out(&t, 0x226, 1);
+    out(&t, 0x22C, 0x14);
+    out(&t, 0x22C, 0x10);
+    sem_trace_finish(&t);
+    CHECK(t.nsem == 0 && t.nraw == 9, "sb partial: %zu sem, %zu raw", t.nsem, t.nraw);
+
+    /* A different length or address is a semantic difference. */
+    SemTrace o;
+    fresh(&o);
+    dma1(&o, 0x49, 0x10000, 99, false);
+    dsp_byte(&o, 0x14);
+    dsp_byte(&o, 99);
+    dsp_byte(&o, 0);
+    sem_trace_finish(&o);
+    fresh(&t);
+    dma1(&t, 0x49, 0x10000, 99, false);
+    dsp_byte(&t, 0x14);
+    dsp_byte(&t, 98);
+    dsp_byte(&t, 0);
+    sem_trace_finish(&t);
+    char why[160];
+    CHECK(!sem_trace_compare(&t, &o, why, sizeof why) && strstr(why, "sb_pcm_start"), "length difference: %s", why);
+    sem_trace_free(&t);
+    sem_trace_free(&o);
+}
+
 int main(void)
 {
     test_opl();
@@ -178,6 +292,7 @@ int main(void)
     test_crtc_pit_pic_kbd();
     test_compare();
     test_no_run();
+    test_sound_blaster();
     if (failures)
         return 1;
     printf("semantic ok\n");

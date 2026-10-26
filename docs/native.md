@@ -186,7 +186,7 @@ Sources:
 |---|---|
 | IRQ 0 timer | the clock, at the programmed rate |
 | IRQ 1 keyboard | `host_input`: one scancode byte at a time, latched for the ISR's data read |
-| IRQ 7 Sound Blaster | `host_audio`, at the end of a digital block (only if a driver starts one) |
+| IRQ 7 Sound Blaster | `host_audio`, at the end of a digital block (only if a driver starts one): checked at every safe point, and waits wake for it |
 | mouse | not an IRQ: `mouse.c` events are handed to the client's INT 33h handler at a safe point |
 | COM1 | none: the link is pumped at safe points (section 9, `host_link`) |
 
@@ -403,7 +403,30 @@ uint8_t host_audio_opl_status(Machine *m);                 /* timer flags, for t
 /* Sound Blaster digital output, 8-bit mono from guest memory; raises IRQ 7 at each block end. */
 int host_audio_pcm_start(Machine *m, uint32_t linear, uint16_t bytes, uint32_t rate_hz, bool auto_init);
 void host_audio_pcm_stop(Machine *m);
+/* What SNDBLAST's init and play paths need besides (one DSP or DMA port sequence each). */
+uint8_t host_audio_sb_reset(Machine *m);                   /* AAh */
+uint8_t host_audio_sb_identify(Machine *m, uint8_t v);     /* E0h: ~v */
+uint16_t host_audio_sb_version(Machine *m);                /* E1h: 0201h */
+void host_audio_sb_speaker(Machine *m, bool on);           /* D1h / D3h */
+void host_audio_sb_time_constant(Machine *m, uint8_t tc);  /* 40h; pcm_start with rate_hz 0 uses it */
+uint32_t host_audio_sb_rate(uint8_t tc);                   /* 1000000 / (256 - tc) */
+void host_audio_pcm_mask(Machine *m);                      /* channel 1 masked alone: the block stalls */
+uint8_t host_audio_sb_ack(Machine *m);                     /* 22Eh read */
 ```
+
+**Sound Blaster output.** In native mode a mixer source in `audio.c` (the host PCM) plays 8-bit unsigned
+mono from guest memory with the DSP's model (`sb.c`): byte i of a block is fetched i + 1 periods after the
+start, the output ramps to each byte over one period and is AC-coupled. The period is the time constant's
+(256 - tc µs; `rate_hz` is rounded to a time constant, so native and emulated play at the same rate). The
+buffer is read as DMA channel 1 would: wrapping within its 64K page, restarting at its end for auto-init.
+Each block end raises IRQ 7 in the native IRQ model at the first safe point at or after it
+(`host_audio_poll`); `native_idle` and `native_wait_until` wake for it. Single-cycle blocks stop at their
+end, auto-init blocks repeat, `host_audio_pcm_stop` (D0h, then the mask) and `host_audio_pcm_mask` end the
+transfer with no further IRQ. The host PCM's state lives in the machine's mixer and is part of the
+snapshots shadow and synthetic runs take (`sound_snapshot_*`, with `sb.c` and `dma.c`). In emulated mode
+(hybrid-hw builds, games in mixed mode) each call performs the port sequence the original drivers use
+(`host_audio.h` lists it), so the emulated DSP and DMA controller play it and a shadow run canonicalises
+it into semantic events (docs/lifting.md, "Semantic port comparison").
 
 ### host_input.h (package 6)
 
@@ -511,24 +534,32 @@ through hooks.
 `native_exec.c`, `native_irq_to_pic` / `native_irq_from_pic` in `native_irq.c`; only when INN runs
 natively, so a child started by the emulated machine changes nothing). To the emulator, in this order:
 
-1. `m->native` and `m->native_video` off; `host_video_to_vga`: mode, DAC and the 320x200 pixels or text cells.
-2. PIT channel 0 gets the native divisor and keeps the native timer's phase (its next IRQ 0 falls when the
+1. Sound Blaster (`host_audio_to_devices`): the host PCM's block becomes DMA channel 1's
+   registers (base, current address and count, page, mode 49h or 59h; masked at terminal count) and the
+   DSP's voice (bytes left in the block, time of the next byte, period, auto-init, speaker, the output's
+   ramp and filter), so the sound goes on without a seam. A block end the native model has not raised yet
+   is raised there and goes to the PIC with step 5. The host source is left idle and silent. OPL music
+   needs nothing (one chip, one mixer).
+2. `m->native` and `m->native_video` off; `host_video_to_vga`: mode, DAC and the 320x200 pixels or text cells.
+3. PIT channel 0 gets the native divisor and keeps the native timer's phase (its next IRQ 0 falls when the
    native one was due). Native ticks counted but not yet raised are dropped.
-3. Port 61h: bits 0 and 1 (speaker gates) are written through the port.
-4. PIC masks, requests and in-service bits of both chips go to the device; the native copy of requests and
+4. Port 61h: bits 0 and 1 (speaker gates) are written through the port.
+5. PIC masks, requests and in-service bits of both chips go to the device; the native copy of requests and
    in-service bits is cleared, so nothing is delivered twice.
-5. Keyboard scancode bytes the native queue had not delivered (and a latched byte the ISR had not read) go
+6. Keyboard scancode bytes the native queue had not delivered (and a latched byte the ISR had not read) go
    to the 8042; the native queue is emptied.
-6. Mouse events still queued raise IRQ 12 for the INT 33h trampoline. Position, buttons and handler stay in
+7. Mouse events still queued raise IRQ 12 for the INT 33h trampoline. Position, buttons and handler stay in
    the one mouse device.
-7. `host_link_pump` is registered as a machine ticker. Audio needs nothing (one mixer). The IVT is
-   snapshotted.
+8. `host_link_pump` is registered as a machine ticker. The IVT is snapshotted.
 
 Back: the ticker is removed; the VGA device's mode is taken by `host_video_from_vga` (a mode the host video
 does not carry, such as 12h, is replaced by text mode and logged); the native timer takes the PIT's divisor
 (a program that reprograms the timer and exits leaves it so, as on hardware); port 61h's gate bits come
 from the PIT device; the native masks come from the PIC while the PIC's requests and in-service bits are
-dropped (a bit left in service would block its line for good); the 8042 is emptied; each IVT entry the
+dropped (a bit left in service would block its line for good); a block the DSP is playing comes back
+to the host PCM with its DMA position (`host_audio_from_devices`; the DSP is left idle with its IRQ line
+low and channel 1 masked; a channel set to count down stops the block and is logged; a block end the game
+had not taken is dropped with the PIC's requests); the 8042 is emptied; each IVT entry the
 game changed that now points into free DOS memory is set back to its value at hand-off and logged as
 `native: vector %02X left at %04X:%04X by the game`; an INT 33h handler in free memory is dropped and
 logged. Not carried: emulated keyboard bytes the game left unread, and the PIT's other channels.

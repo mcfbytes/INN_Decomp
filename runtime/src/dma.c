@@ -1,6 +1,7 @@
 /* 8237A DMA controller for the 8-bit channels 0-3 (ports 00h-0Fh, page registers 87h/83h/81h/82h).
  * Devices pull bytes with dma_read when their own timing says a transfer happens. */
 #include <stdlib.h>
+#include <string.h>
 
 #include "devices.h"
 
@@ -175,6 +176,48 @@ static void dma_out(Machine *m, uint16_t port, uint32_t value, int size)
     case REG_ALL_MASKS: set_masks(m, v & 0x0F); break;
     default: break; /* REG_REQUEST: software requests only matter for memory-to-memory */
     }
+}
+
+void dma_channel_get(Machine *m, int ch, DmaChannelState *out)
+{
+    const DmaChannel *c = &dma_state(m)->ch[ch];
+    *out = (DmaChannelState){ c->base_addr, c->base_count, c->addr, c->count, c->page, c->mode, c->masked };
+}
+
+void dma_channel_set(Machine *m, int ch, const DmaChannelState *in)
+{
+    DmaChannel *c = &dma_state(m)->ch[ch];
+    c->base_addr = in->base_addr;
+    c->base_count = in->base_count;
+    c->addr = in->addr;
+    c->count = in->count;
+    c->page = in->page;
+    c->mode = in->mode;
+    c->masked = in->masked;
+}
+
+size_t dma_snapshot_size(void) { return sizeof(Dma); }
+
+/* A machine without the controller (unit tests) saves zeros and loads nothing. */
+void dma_snapshot_save(Machine *m, void *dst)
+{
+    if (dma_state(m))
+        memcpy(dst, dma_state(m), sizeof(Dma));
+    else
+        memset(dst, 0, sizeof(Dma));
+}
+
+void dma_snapshot_load(Machine *m, const void *src)
+{
+    Dma *d = dma_state(m);
+    if (!d)
+        return;
+    DmaSyncFn sync[DMA_CHANNELS];
+    for (int ch = 0; ch < DMA_CHANNELS; ch++)
+        sync[ch] = d->ch[ch].sync;
+    memcpy(d, src, sizeof(Dma));
+    for (int ch = 0; ch < DMA_CHANNELS; ch++)
+        d->ch[ch].sync = sync[ch];
 }
 
 void dma_init(Machine *m)

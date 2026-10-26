@@ -286,6 +286,75 @@ static void sb_dma_sync(Machine *m)
         catch_up(m);
 }
 
+/* ---- mixed-mode hand-off and snapshots ---- */
+
+void sb_voice_get(Machine *m, PcmVoice *v)
+{
+    const Sb *s = sb_state(m);
+    *v = (PcmVoice){ .active = s->active, .auto_init = s->auto_init && !s->exit_auto, .paused = s->paused,
+                     .speaker = s->speaker, .block = s->block, .left = s->left, .period_ns = s->period_ns,
+                     .next_ns = s->next_ns, .pause_left_ns = s->pause_left_ns, .prev = s->prev, .cur = s->cur,
+                     .cur_ns = s->cur_ns, .cur_period = s->cur_period, .prev_in = s->prev_in,
+                     .prev_out = s->prev_out };
+}
+
+void sb_voice_take(Machine *m, PcmVoice *v)
+{
+    Sb *s = sb_state(m);
+    catch_up(m);
+    sb_voice_get(m, v);
+    ack_irq(m, s);
+    s->active = s->paused = s->exit_auto = false;
+    s->prev = s->cur = SILENCE;
+    s->cur_period = 0;
+    s->prev_in = s->prev_out = 0;
+}
+
+void sb_voice_set(Machine *m, const PcmVoice *v)
+{
+    Sb *s = sb_state(m);
+    audio_sync(m);
+    s->active = v->active;
+    s->auto_init = v->auto_init;
+    s->exit_auto = false;
+    s->paused = v->paused;
+    s->speaker = v->speaker;
+    s->block = v->block;
+    s->left = v->left;
+    s->period_ns = v->period_ns;
+    s->next_ns = v->next_ns;
+    s->pause_left_ns = v->pause_left_ns;
+    s->prev = v->prev;
+    s->cur = v->cur;
+    s->cur_ns = v->cur_ns;
+    s->cur_period = v->cur_period;
+    s->prev_in = v->prev_in;
+    s->prev_out = v->prev_out;
+}
+
+uint8_t sb_time_constant(Machine *m)
+{
+    uint64_t us = sb_state(m)->period_ns / NS_PER_US;
+    return (uint8_t)(us >= 1 && us <= 256 ? 256 - us : DEFAULT_TIME_CONSTANT);
+}
+
+size_t sb_snapshot_size(void) { return sizeof(Sb); }
+
+/* A machine without the device (unit tests) saves zeros and loads nothing. */
+void sb_snapshot_save(Machine *m, void *dst)
+{
+    if (sb_state(m))
+        memcpy(dst, sb_state(m), sizeof(Sb));
+    else
+        memset(dst, 0, sizeof(Sb));
+}
+
+void sb_snapshot_load(Machine *m, const void *src)
+{
+    if (sb_state(m))
+        memcpy(sb_state(m), src, sizeof(Sb));
+}
+
 void sb_init(Machine *m)
 {
     Sb *s = calloc(1, sizeof *s);

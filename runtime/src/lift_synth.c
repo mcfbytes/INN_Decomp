@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "audio.h"
 #include "devices.h"
 #include "dos.h"
 #include "lift_internal.h"
@@ -52,6 +53,7 @@ typedef struct Synth {
     uint64_t virtual_us, slice_left, slice_start_insn, c_io_ns, irq_pending;
     bool a20, exit_requested;
     uint8_t *vga_after, *dos_after;
+    uint8_t *snd, *snd_after; /* Sound Blaster DSP, DMA controller and host PCM */
 } Synth;
 
 static Synth *synth(Machine *m) { return lift_state(m)->synth; }
@@ -206,7 +208,9 @@ void lift_synth_load(Machine *m, const char *paths)
     y->vga_after = malloc(vga_snapshot_size());
     y->dos_after = malloc(dos_snapshot_size());
     y->hooks = malloc(HOOK_BITMAP_BYTES);
-    if (!y->mem || !y->vga || !y->dos || !y->vga_after || !y->dos_after || !y->hooks)
+    y->snd = malloc(sound_snapshot_size());
+    y->snd_after = malloc(sound_snapshot_size());
+    if (!y->mem || !y->vga || !y->dos || !y->vga_after || !y->dos_after || !y->hooks || !y->snd || !y->snd_after)
         fatal("out of memory");
     if (!validate(m, y))
         fatal("INN_SYNTH: call list errors");
@@ -807,6 +811,7 @@ static void save_trigger(Machine *m, Synth *y)
     memcpy(y->mem, m->mem, SNAPSHOT_BYTES);
     vga_snapshot_save(m, y->vga);
     dos_snapshot_save(m, y->dos);
+    sound_snapshot_save(m, y->snd);
     memcpy(y->hooks, m->exec_hooks, HOOK_BITMAP_BYTES);
     y->virtual_us = m->virtual_us;
     y->slice_left = m->slice_left;
@@ -823,6 +828,7 @@ static void restore_trigger(Machine *m, Synth *y)
     memcpy(m->mem, y->mem, SNAPSHOT_BYTES);
     vga_snapshot_load(m, y->vga);
     dos_snapshot_load(m, y->dos);
+    sound_snapshot_load(m, y->snd);
     m->virtual_us = y->virtual_us;
     m->slice_left = y->slice_left;
     m->slice_start_insn = y->slice_start_insn;
@@ -838,6 +844,7 @@ static void check_restored(Machine *m, Synth *y, const char *label)
     const char *what = NULL;
     vga_snapshot_save(m, y->vga_after);
     dos_snapshot_save(m, y->dos_after);
+    sound_snapshot_save(m, y->snd_after);
     if (memcmp(&m->cpu, &y->cpu, sizeof m->cpu) != 0)
         what = "CPU";
     else if (memcmp(m->mem, y->mem, SNAPSHOT_BYTES) != 0)
@@ -846,6 +853,8 @@ static void check_restored(Machine *m, Synth *y, const char *label)
         what = "VGA";
     else if (memcmp(y->dos_after, y->dos, dos_snapshot_size()) != 0)
         what = "DOS state";
+    else if (memcmp(y->snd_after, y->snd, sound_snapshot_size()) != 0)
+        what = "Sound Blaster or DMA state";
     else if (memcmp(m->exec_hooks, y->hooks, HOOK_BITMAP_BYTES) != 0)
         what = "lifted hooks (an overlay or module was loaded or freed)";
     else if (m->virtual_us != y->virtual_us || m->irq_pending != y->irq_pending || m->a20 != y->a20 ||
@@ -993,6 +1002,8 @@ void lift_synth_shutdown(Machine *m)
     free(y->vga_after);
     free(y->dos_after);
     free(y->hooks);
+    free(y->snd);
+    free(y->snd_after);
     free(y);
     lift_state(m)->synth = NULL;
 }

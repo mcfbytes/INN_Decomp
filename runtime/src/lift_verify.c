@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "audio.h"
 #include "devices.h"
 #include "dos.h"
 #include "lift_internal.h"
@@ -24,6 +25,7 @@ typedef struct VerifyState {
     uint8_t *dos_before, *dos_original, *dos_lifted; /* open files and positions live host-side */
     Cpu cpu_before, cpu_original, cpu_lifted;
     uint8_t *mem_lifted, *vga_lifted, *dos_lifted_end; /* region mode: the lifted run comes first */
+    uint8_t *snd_before, *snd_original, *snd_lifted; /* DSP, DMA controller and host PCM (not compared) */
     IoEvent log[IO_LOG_MAX];
     int log_len, replay_pos;
     bool io_diverged;
@@ -57,9 +59,12 @@ void lift_verify_enable(Machine *m, int calls_per_entry)
         s->verify->mem_lifted = malloc(SNAPSHOT_BYTES);
         s->verify->vga_lifted = malloc(vga_snapshot_size());
         s->verify->dos_lifted_end = malloc(dos_snapshot_size());
+        s->verify->snd_before = malloc(sound_snapshot_size());
+        s->verify->snd_original = malloc(sound_snapshot_size());
+        s->verify->snd_lifted = malloc(sound_snapshot_size());
         if (!s->verify->mem_before || !s->verify->mem_original || !s->verify->vga_before ||
             !s->verify->vga_original || !s->verify->dos_before || !s->verify->dos_original ||
-            !s->verify->dos_lifted)
+            !s->verify->dos_lifted || !s->verify->snd_before || !s->verify->snd_original || !s->verify->snd_lifted)
             fatal("out of memory");
     }
     s->verify->calls_per_entry = calls_per_entry;
@@ -361,12 +366,14 @@ static void compare(Machine *m, ActiveHook *h, uint16_t lo_sp, uint16_t hi_sp)
 
 /* ---- one verified call ---- */
 
-static void restore(Machine *m, const Cpu *cpu, const uint8_t *mem, const uint8_t *vga, const uint8_t *dos)
+static void restore(Machine *m, const Cpu *cpu, const uint8_t *mem, const uint8_t *vga, const uint8_t *dos,
+                    const uint8_t *snd)
 {
     m->cpu = *cpu;
     memcpy(m->mem, mem, SNAPSHOT_BYTES);
     vga_snapshot_load(m, vga);
     dos_snapshot_load(m, dos);
+    sound_snapshot_load(m, snd);
 }
 
 /* ---- region mode ----
@@ -402,15 +409,17 @@ static bool run_original_to(Machine *m, const Cpu *exit)
     return reached;
 }
 
-static void save(Machine *m, Cpu *cpu, uint8_t *mem, uint8_t *vga, uint8_t *dos)
+static void save(Machine *m, Cpu *cpu, uint8_t *mem, uint8_t *vga, uint8_t *dos, uint8_t *snd)
 {
     *cpu = m->cpu;
     memcpy(mem, m->mem, SNAPSHOT_BYTES);
     vga_snapshot_save(m, vga);
     dos_snapshot_save(m, dos);
+    sound_snapshot_save(m, snd);
 }
 
-static void restore(Machine *m, const Cpu *cpu, const uint8_t *mem, const uint8_t *vga, const uint8_t *dos);
+static void restore(Machine *m, const Cpu *cpu, const uint8_t *mem, const uint8_t *vga, const uint8_t *dos,
+                    const uint8_t *snd);
 static void compare(Machine *m, ActiveHook *h, uint16_t lo_sp, uint16_t hi_sp);
 
 static void verify_region(Machine *m, ActiveHook *h)
@@ -420,14 +429,14 @@ static void verify_region(Machine *m, ActiveHook *h)
     m->io_mode = IO_RECORD;
     lift_call_c(m, h->entry->fn);
     m->io_mode = IO_LIVE;
-    save(m, &v->cpu_lifted, v->mem_lifted, v->vga_lifted, v->dos_lifted_end);
+    save(m, &v->cpu_lifted, v->mem_lifted, v->vga_lifted, v->dos_lifted_end, v->snd_lifted);
     if (m->exit_requested)
         return;
-    restore(m, &v->cpu_before, v->mem_before, v->vga_before, v->dos_before);
+    restore(m, &v->cpu_before, v->mem_before, v->vga_before, v->dos_before, v->snd_before);
     dos_journal_undo(m);
     bool reached = run_original_to(m, &v->cpu_lifted);
-    save(m, &v->cpu_original, v->mem_original, v->vga_original, v->dos_original);
-    restore(m, &v->cpu_lifted, v->mem_lifted, v->vga_lifted, v->dos_lifted_end);
+    save(m, &v->cpu_original, v->mem_original, v->vga_original, v->dos_original, v->snd_original);
+    restore(m, &v->cpu_lifted, v->mem_lifted, v->vga_lifted, v->dos_lifted_end, v->snd_lifted);
     m->cpu.stop = false;
     if (!reached) {
         char why[160];
@@ -454,8 +463,8 @@ static void verify_replayed(Machine *m, ActiveHook *h, uint16_t entry_sp)
     lift_replay_record_begin(m);
     run_original(m, h);
     lift_replay_record_end(m);
-    save(m, &v->cpu_original, v->mem_original, v->vga_original, v->dos_original);
-    restore(m, &v->cpu_before, v->mem_before, v->vga_before, v->dos_before);
+    save(m, &v->cpu_original, v->mem_original, v->vga_original, v->dos_original, v->snd_original);
+    restore(m, &v->cpu_before, v->mem_before, v->vga_before, v->dos_before, v->snd_before);
     dos_journal_undo(m);
     m->io_mode = IO_REPLAY;
     bool same_events = lift_replay_play(m, h->entry->fn);
@@ -475,7 +484,7 @@ static void verify_replayed(Machine *m, ActiveHook *h, uint16_t entry_sp)
         log_msg("verify:   replay log %zu entries, %d interrupts (%d taken without a preceding event)", entries,
                 irqs, late);
     }
-    restore(m, &v->cpu_original, v->mem_original, v->vga_original, v->dos_original);
+    restore(m, &v->cpu_original, v->mem_original, v->vga_original, v->dos_original, v->snd_original);
 }
 
 static bool replayed(const LiftState *s, const LiftedEntry *e)
@@ -505,6 +514,7 @@ bool lift_verify_call(Machine *m, ActiveHook *h)
     memcpy(v->mem_before, m->mem, SNAPSHOT_BYTES);
     vga_snapshot_save(m, v->vga_before);
     dos_snapshot_save(m, v->dos_before);
+    sound_snapshot_save(m, v->snd_before);
     dos_journal_begin(m);
     v->log_len = 0;
     v->io_diverged = false;
@@ -532,13 +542,14 @@ bool lift_verify_call(Machine *m, ActiveHook *h)
     memcpy(v->mem_original, m->mem, SNAPSHOT_BYTES);
     vga_snapshot_save(m, v->vga_original);
     dos_snapshot_save(m, v->dos_original);
+    sound_snapshot_save(m, v->snd_original);
 
-    restore(m, &v->cpu_before, v->mem_before, v->vga_before, v->dos_before);
+    restore(m, &v->cpu_before, v->mem_before, v->vga_before, v->dos_before, v->snd_before);
     dos_journal_undo(m);
     run_lifted(m, h);
     compare(m, h, entry_sp, entry_sp);
 
-    restore(m, &v->cpu_original, v->mem_original, v->vga_original, v->dos_original);
+    restore(m, &v->cpu_original, v->mem_original, v->vga_original, v->dos_original, v->snd_original);
     dos_journal_end(m);
     m->cpu.stop = false;
     m->irq_hold = false;
@@ -561,7 +572,7 @@ SynthResult lift_verify_synthetic(Machine *m, ActiveHook *h, const char *label, 
     s->shadow_of = h;
     m->irq_hold = true;
     uint16_t entry_sp = m->cpu.r[R_SP].w;
-    save(m, &v->cpu_before, v->mem_before, v->vga_before, v->dos_before);
+    save(m, &v->cpu_before, v->mem_before, v->vga_before, v->dos_before, v->snd_before);
     dos_journal_begin(m);
     v->log_len = 0;
     v->io_diverged = false;
@@ -572,7 +583,7 @@ SynthResult lift_verify_synthetic(Machine *m, ActiveHook *h, const char *label, 
     s->nested_budget = 0;
     bool ended = m->exit_requested, returned = !s->nested_abort && !ended;
     s->nested_abort = false;
-    save(m, &v->cpu_original, v->mem_original, v->vga_original, v->dos_original);
+    save(m, &v->cpu_original, v->mem_original, v->vga_original, v->dos_original, v->snd_original);
     r.ax = v->cpu_original.r[R_AX].w;
     r.dx = v->cpu_original.r[R_DX].w;
     uint32_t at = real_addr(r.dx, r.ax);
@@ -580,7 +591,7 @@ SynthResult lift_verify_synthetic(Machine *m, ActiveHook *h, const char *label, 
         memcpy(r.at_result, v->mem_original + at, sizeof r.at_result);
         r.has_bytes = true;
     }
-    restore(m, &v->cpu_before, v->mem_before, v->vga_before, v->dos_before);
+    restore(m, &v->cpu_before, v->mem_before, v->vga_before, v->dos_before, v->snd_before);
     dos_journal_undo(m);
     m->exit_requested = false;
     if (returned) {
@@ -595,7 +606,7 @@ SynthResult lift_verify_synthetic(Machine *m, ActiveHook *h, const char *label, 
     r.returned = returned;
     r.mismatch = v->mismatches != before;
     m->exit_requested = false;
-    restore(m, &v->cpu_before, v->mem_before, v->vga_before, v->dos_before);
+    restore(m, &v->cpu_before, v->mem_before, v->vga_before, v->dos_before, v->snd_before);
     dos_journal_undo(m);
     dos_journal_end(m);
     m->cpu.stop = false;

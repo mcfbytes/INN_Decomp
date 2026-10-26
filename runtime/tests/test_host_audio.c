@@ -1,15 +1,18 @@
 /* Host audio: OPL register writes and status match the port handlers, a shadow replay does not touch
- * the chip, and the native path charges a safe point. PCM playback is not implemented. */
+ * the chip, and the native path charges a safe point. Sound Blaster output: the host PCM renders a block
+ * as the emulated DSP does, raises IRQ 7 at each block end (auto-init repeats, stop and mask end it), takes
+ * its rate from the time constant, hands a block to the devices and back without a seam, and the
+ * emulated-mode port sequences canonicalise to the semantic events a shadow run compares. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/wait.h>
-#include <unistd.h>
 
 #include "audio.h"
 #include "devices.h"
 #include "host_audio.h"
+#include "lift_semantic.h"
 #include "native.h"
+#include "native_internal.h"
 
 static int failures;
 
@@ -173,48 +176,273 @@ static void test_native_safepoint_charges(void)
     finish(m);
 }
 
-static void pcm_start(void)
+/* ---- Sound Blaster digital output ---- */
+
+enum {
+    BUF = 0x20000, BLOCK = 1000, TC_100US = 256 - 100, RATE_10K = 10000, PERIOD_US = 100,
+    IRQ7_BIT = 0x80, T0_US = 1000,
+};
+
+/* Native mode with free calls, so the API's safe points do not move the clock. */
+static Machine *boot_native(void)
 {
-    host_audio_pcm_start(NULL, 0, 0, 0, false);
+    Machine *m = boot();
+    NativeConfig cfg = { .strict = true, .deterministic = true, .call_cost_ns = 0, .yield_every_us = 4000 };
+    native_init(m, &cfg);
+    native_set_active(m, true);
+    m->cpu.flags &= ~(uint32_t)F_IF;
+    return m;
 }
 
-static void pcm_stop(void)
+static void fill_square(Machine *m)
 {
-    host_audio_pcm_stop(NULL);
+    for (int i = 0; i < BLOCK; i++)
+        m->mem[BUF + i] = i / 10 % 2 ? 0xC0 : 0x40;
 }
 
-static int run_child(void (*fn)(void), char *out, size_t cap)
+static bool irq7(Machine *m) { return native_state(m)->pic[0].irr & IRQ7_BIT; }
+
+/* Polls at us; true when IRQ 7 was raised there (and takes it back). */
+static bool irq_at(Machine *m, uint64_t us)
 {
-    int fds[2];
-    if (pipe(fds) != 0)
-        return -1;
-    fflush(NULL);
-    pid_t pid = fork();
-    if (pid == 0) {
-        dup2(fds[1], 2);
-        close(fds[0]);
-        fn();
-        _exit(0);
+    m->virtual_us = us;
+    host_audio_poll(m);
+    bool raised = irq7(m);
+    native_irq_lower(m, HOST_AUDIO_SB_IRQ);
+    return raised;
+}
+
+static double energy(const int16_t *buf, int frames)
+{
+    double sum = 0;
+    for (int i = 0; i < frames * 2; i++)
+        sum += (double)buf[i] * (double)buf[i];
+    return sum;
+}
+
+/* The same block through the emulated DSP and DMA (emulated mode: the API's port sequence) and through
+ * the host PCM (native mode) renders the same samples. */
+static void test_pcm_renders_like_sb(void)
+{
+    enum { PLAY_US = 150000, N = RATE * 15 / 100 };
+    static int16_t a[N * 2], b[N * 2];
+    int n[2];
+    for (int native = 0; native < 2; native++) {
+        Machine *m = native ? boot_native() : boot();
+        fill_square(m);
+        m->virtual_us = T0_US;
+        uint8_t ack = host_audio_sb_reset(m);
+        host_audio_sb_speaker(m, true);
+        int r = host_audio_pcm_start(m, BUF, BLOCK, RATE_10K, false);
+        CHECK(ack == 0xAA && r == 0, "%s: reset %02X start %d", native ? "native" : "emulated", ack, r);
+        m->virtual_us = T0_US + PLAY_US;
+        n[native] = audio_read(m, native ? b : a, N);
+        if (!native) {
+            CHECK(pic_irq_pending(m, PIC_IRQ_SB), "emulated: the block end raised IRQ 7");
+            CHECK(sb_time_constant(m) == TC_100US, "emulated: time constant %02X", sb_time_constant(m));
+        } else {
+            host_audio_poll(m);
+            CHECK(irq7(m), "native: the block end raised IRQ 7");
+        }
+        finish(m);
     }
-    close(fds[1]);
-    size_t len = 0;
-    ssize_t got;
-    while (len + 1 < cap && (got = read(fds[0], out + len, cap - 1 - len)) > 0)
-        len += (size_t)got;
-    out[len] = 0;
-    close(fds[0]);
-    int status;
-    waitpid(pid, &status, 0);
-    return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+    CHECK(n[0] == n[1] && n[0] >= N - 1, "frames emulated %d native %d", n[0], n[1]);
+    CHECK(memcmp(a, b, (size_t)n[0] * 2 * sizeof(int16_t)) == 0, "the host PCM renders what the DSP renders");
+    CHECK(energy(a, n[0] / 2) > 0, "the block is silent");
 }
 
-static void test_pcm_unimplemented(void)
+/* A single-cycle block ends BLOCK periods after the start: IRQ 7 then, not before, and only once. */
+static void test_pcm_irq_at_block_end(void)
 {
-    char out[256];
-    int status = run_child(pcm_start, out, sizeof out);
-    CHECK(status == 1 && strstr(out, "not implemented"), "pcm start: status %d %s", status, out);
-    status = run_child(pcm_stop, out, sizeof out);
-    CHECK(status == 1 && strstr(out, "not implemented"), "pcm stop: status %d %s", status, out);
+    Machine *m = boot_native();
+    m->virtual_us = T0_US;
+    host_audio_sb_reset(m);
+    host_audio_pcm_start(m, BUF, BLOCK, RATE_10K, false);
+    uint64_t end = T0_US + (uint64_t)BLOCK * PERIOD_US;
+    CHECK(host_audio_next_due_us(m) == end, "next due %llu, want %llu", (unsigned long long)host_audio_next_due_us(m),
+          (unsigned long long)end);
+    CHECK(!irq_at(m, end - 1), "no IRQ 1 us before the block end");
+    CHECK(irq_at(m, end), "IRQ 7 at the block end");
+    CHECK(host_audio_next_due_us(m) == UINT64_MAX, "single cycle: nothing more due");
+    CHECK(!irq_at(m, end + 3 * BLOCK * PERIOD_US), "single cycle stops");
+    finish(m);
+}
+
+static void test_pcm_auto_init_and_stop(void)
+{
+    enum { AUTO_BLOCK = 100 };
+    Machine *m = boot_native();
+    m->virtual_us = T0_US;
+    host_audio_pcm_start(m, BUF, AUTO_BLOCK, RATE_10K, true);
+    for (int k = 1; k <= 3; k++) {
+        uint64_t end = T0_US + (uint64_t)k * AUTO_BLOCK * PERIOD_US;
+        CHECK(!irq_at(m, end - 1), "auto-init block %d: no IRQ early", k);
+        CHECK(irq_at(m, end), "auto-init block %d: IRQ 7 at its end", k);
+    }
+    m->virtual_us = T0_US + 35 * AUTO_BLOCK * PERIOD_US / 10;
+    host_audio_pcm_stop(m);
+    CHECK(host_audio_next_due_us(m) == UINT64_MAX, "stopped: nothing due");
+    CHECK(!irq_at(m, T0_US + 10 * AUTO_BLOCK * PERIOD_US), "stopped: no IRQ");
+
+    /* The mask alone stalls the block: no block end while it holds. */
+    host_audio_pcm_start(m, BUF, AUTO_BLOCK, RATE_10K, true);
+    host_audio_pcm_mask(m);
+    CHECK(host_audio_next_due_us(m) == UINT64_MAX, "masked: nothing due");
+    CHECK(!irq_at(m, m->virtual_us + 5 * AUTO_BLOCK * PERIOD_US), "masked: no IRQ");
+    finish(m);
+}
+
+static void test_pcm_rate(void)
+{
+    CHECK(host_audio_sb_rate(TC_100US) == RATE_10K, "rate of %02X: %u", TC_100US, host_audio_sb_rate(TC_100US));
+    CHECK(host_audio_sb_rate(0xD2) == 21739, "rate of D2h: %u", host_audio_sb_rate(0xD2));
+    Machine *m = boot_native();
+    m->virtual_us = T0_US;
+    host_audio_sb_time_constant(m, 0xD2);
+    host_audio_pcm_start(m, BUF, 100, 0, false); /* rate 0: the time constant set before */
+    CHECK(host_audio_next_due_us(m) == T0_US + 100 * 46, "D2h: 46 us a byte, due %llu",
+          (unsigned long long)host_audio_next_due_us(m));
+    host_audio_pcm_start(m, BUF, 100, 22050, false); /* 45.35 us: time constant 211, 45 us */
+    CHECK(host_audio_next_due_us(m) == T0_US + 100 * 45, "22050 Hz: due %llu",
+          (unsigned long long)host_audio_next_due_us(m));
+    CHECK(audio_pcm(m)->time_constant == 211, "22050 Hz: time constant %u", audio_pcm(m)->time_constant);
+    CHECK(host_audio_pcm_start(m, BUF, 100, 1000, false) == -1, "1 kHz has no time constant");
+    CHECK(host_audio_next_due_us(m) == T0_US + 100 * 45, "a refused start changes nothing");
+    host_audio_pcm_start(m, BUF, 0, RATE_10K, false); /* 0 is 64K */
+    CHECK(host_audio_next_due_us(m) == T0_US + 65536ull * PERIOD_US, "64K block due %llu",
+          (unsigned long long)host_audio_next_due_us(m));
+    finish(m);
+}
+
+static void test_dsp_answers(void)
+{
+    for (int native = 0; native < 2; native++) {
+        Machine *m = native ? boot_native() : boot();
+        const char *how = native ? "native" : "emulated";
+        CHECK(host_audio_sb_reset(m) == 0xAA, "%s reset", how);
+        CHECK(host_audio_sb_identify(m, 0xAA) == 0x55, "%s identify", how);
+        CHECK(host_audio_sb_version(m) == 0x0201, "%s version %04X", how, host_audio_sb_version(m));
+        CHECK(host_audio_sb_ack(m) == HOST_AUDIO_SB_STATUS_READY, "%s ack", how);
+        finish(m);
+    }
+}
+
+/* A block that goes to the emulated DSP and DMA a third of the way through and comes back at two thirds
+ * renders exactly as one played natively throughout, and ends with IRQ 7 at the same time. */
+static void test_handoff_round_trip(void)
+{
+    enum { N = RATE * 4 / 100 };
+    static const uint64_t MARKS[] = { 30000, 60000, 120000 };
+    static int16_t out[2][3][N * 2];
+    int got[2][3];
+    for (int hand = 0; hand < 2; hand++) {
+        Machine *m = boot_native();
+        fill_square(m);
+        m->virtual_us = T0_US;
+        host_audio_sb_speaker(m, true);
+        host_audio_pcm_start(m, BUF, BLOCK, RATE_10K, false);
+        for (int k = 0; k < 3; k++) {
+            m->virtual_us = T0_US + MARKS[k];
+            if (k == 2) {
+                host_audio_poll(m);
+                CHECK(irq7(m), "hand-off %d: IRQ 7 by the end", hand);
+            }
+            got[hand][k] = audio_read(m, out[hand][k], N);
+            if (!hand)
+                continue;
+            if (k == 0) {
+                host_audio_to_devices(m);
+                m->native = false;
+                port_out(m, 0x0C, 0, 1);
+                uint16_t lo = (uint16_t)port_in(m, 0x03, 1), count = (uint16_t)(lo | port_in(m, 0x03, 1) << 8);
+                CHECK(count == BLOCK - 1 - 300, "on the DMA controller: count %u after 300 bytes", count);
+            } else if (k == 1) {
+                CHECK(!pic_irq_pending(m, PIC_IRQ_SB), "no block end on the emulated side");
+                host_audio_from_devices(m);
+                CHECK(port_in(m, 0x0F, 1) & 0x02, "channel 1 masked after the hand-back");
+                m->native = true;
+            }
+        }
+        finish(m);
+    }
+    for (int k = 0; k < 3; k++) {
+        CHECK(got[0][k] == got[1][k], "part %d: %d and %d frames", k, got[0][k], got[1][k]);
+        CHECK(memcmp(out[0][k], out[1][k], (size_t)got[0][k] * 2 * sizeof(int16_t)) == 0,
+              "part %d renders the same across the hand-off", k);
+    }
+    CHECK(energy(out[1][1], got[1][1]) > 0, "the emulated part is silent");
+}
+
+/* ---- emulated mode: the port sequences, canonicalised as a shadow run would ---- */
+
+static SemTrace captured;
+
+static uint32_t capture_in(Machine *m, uint16_t port, int size)
+{
+    uint32_t v = port == 0x22A ? 0xAA : 0xFF;
+    sem_trace_port(&captured, port, size, v, false);
+    return v;
+}
+
+static void capture_out(Machine *m, uint16_t port, uint32_t value, int size)
+{
+    sem_trace_port(&captured, port, size, value, true);
+}
+
+static void expect_event(size_t k, SemKind kind, uint32_t a, uint32_t b)
+{
+    const SemEvent *e = k < captured.nsem ? &captured.sem[k] : NULL;
+    CHECK(e && e->kind == kind && e->a == a && e->b == b, "event %zu: want kind %d (%X, %X), got kind %d (%X, %X)",
+          k, kind, a, b, e ? (int)e->kind : -1, e ? e->a : 0, e ? e->b : 0);
+}
+
+static void test_port_sequences_are_events(void)
+{
+    static const uint16_t PORTS[] = { 0x02, 0x03, 0x0A, 0x0B, 0x0C, 0x83, 0x226, 0x22A, 0x22C, 0x22E };
+    Machine *m = boot();
+    for (size_t i = 0; i < sizeof PORTS / sizeof PORTS[0]; i++)
+        port_register(m, PORTS[i], PORTS[i], capture_in, capture_out);
+    memset(&captured, 0, sizeof captured);
+    sem_trace_init(&captured);
+    host_audio_sb_reset(m);
+    host_audio_sb_identify(m, 0x5A);
+    host_audio_sb_version(m);
+    host_audio_sb_speaker(m, true);
+    host_audio_sb_time_constant(m, TC_100US);
+    host_audio_pcm_start(m, 0x12345, 1000, 0, false);
+    host_audio_pcm_start(m, 0x30000, 512, 22050, true);
+    host_audio_pcm_stop(m);
+    host_audio_pcm_mask(m);
+    host_audio_sb_ack(m);
+    host_audio_sb_speaker(m, false);
+    sem_trace_finish(&captured);
+    size_t k = 0;
+    expect_event(k++, SEM_SB_RESET, 0, 0);
+    expect_event(k++, SEM_SB_DATA, 0, 0xAA);
+    expect_event(k++, SEM_SB_IDENT, 0xE0, 0x5A);
+    expect_event(k++, SEM_SB_DATA, 0, 0xAA);
+    expect_event(k++, SEM_SB_IDENT, 0xE1, 0);
+    expect_event(k++, SEM_SB_DATA, 0, 0xAA);
+    expect_event(k++, SEM_SB_DATA, 0, 0xAA);
+    expect_event(k++, SEM_SB_SPEAKER, 1, 0);
+    expect_event(k++, SEM_SB_TIME_CONSTANT, TC_100US, 0);
+    expect_event(k++, SEM_DMA_MASK, 1, 1);
+    expect_event(k++, SEM_DMA_PROGRAM, 0x49012345, 999);
+    expect_event(k++, SEM_DMA_MASK, 1, 0);
+    expect_event(k++, SEM_SB_PCM_START, 0, 999);
+    expect_event(k++, SEM_SB_TIME_CONSTANT, 211, 0);
+    expect_event(k++, SEM_DMA_MASK, 1, 1);
+    expect_event(k++, SEM_DMA_PROGRAM, 0x59030000, 511);
+    expect_event(k++, SEM_DMA_MASK, 1, 0);
+    expect_event(k++, SEM_SB_BLOCK_SIZE, 511, 0);
+    expect_event(k++, SEM_SB_PCM_START, 1, 511);
+    expect_event(k++, SEM_SB_PCM_STOP, 0, 0);
+    expect_event(k++, SEM_DMA_MASK, 1, 1);
+    expect_event(k++, SEM_DMA_MASK, 1, 1);
+    expect_event(k++, SEM_SB_SPEAKER, 0, 0);
+    CHECK(captured.nsem == k && captured.nraw == 0, "%zu events (want %zu), %zu raw", captured.nsem, k, captured.nraw);
+    sem_trace_free(&captured);
+    finish(m);
 }
 
 int main(void)
@@ -223,7 +451,13 @@ int main(void)
     test_write_sounds_like_ports();
     test_replay_does_not_write();
     test_native_safepoint_charges();
-    test_pcm_unimplemented();
+    test_pcm_renders_like_sb();
+    test_pcm_irq_at_block_end();
+    test_pcm_auto_init_and_stop();
+    test_pcm_rate();
+    test_dsp_answers();
+    test_handoff_round_trip();
+    test_port_sequences_are_events();
     if (failures) {
         fprintf(stderr, "test_host_audio: %d failure(s)\n", failures);
         return 1;

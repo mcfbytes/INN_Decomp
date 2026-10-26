@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "devices.h"
+#include "host_audio.h"
 #include "host_input.h"
 #include "host_link.h"
 #include "host_timer.h"
@@ -171,6 +172,7 @@ bool native_poll_deliver(Machine *m)
     host_input_poll(m);
     host_link_pump(m);
     host_timer_poll(m);
+    host_audio_poll(m);
     return (m->cpu.flags & F_IF) && native_deliver_irq(m);
 }
 
