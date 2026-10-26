@@ -233,6 +233,10 @@ fills a handle for the oldest queued host message. GetStatus reports connected (
 2400, the tick-counter pointer is `0000:04F0`, the shared block (256 bytes) and the previous-program name
 live in the ROM area.
 
+The stand-in's own state (the queued host messages, the handles waiting for the next Poll to free them) is part of
+the shadow-verification snapshot (`dos_snapshot.c`): a lifted function that calls Send, Poll or Receive runs against
+the same queue as the original did, a Send is answered once, and the queue is compared like memory.
+
 The frontend's `--tsn-host rules.txt` (`runtime/frontend/host_rules.c`) answers from a rule file:
 
 ```
