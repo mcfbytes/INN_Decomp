@@ -74,6 +74,7 @@ typedef struct Frontend {
     InputScript *script;        /* headless runs */
     uint64_t end_us;            /* headless runs end at this emulated time (--run-ms) */
     uint64_t script_due_us;     /* a nested wait applies the script once past the current chunk */
+    uint64_t chunk_base_us;     /* headless chunks end on a fixed grid from here */
     SDL_Window *window;
     SDL_Renderer *renderer;
     SDL_Texture *texture;
@@ -441,6 +442,14 @@ static void headless_wait_point(Machine *m)
     frontend_audio_pump(m);
 }
 
+/* The end of the headless chunk under way at emulated time now. Chunks keep a fixed grid, so a lifted
+ * call that runs past a chunk's end (MT32.DRV's init takes 4 s inside one machine_step) does not move
+ * the later chunk ends at which the input script is applied. */
+static uint64_t chunk_end(const Frontend *f, uint64_t now)
+{
+    return f->chunk_base_us + ((now - f->chunk_base_us) / HEADLESS_CHUNK_US + 1) * HEADLESS_CHUNK_US;
+}
+
 /* A nested wait that outlasts the current chunk (a native start running inside the hybrid build)
  * gets the script at the chunk rate of the headless loop. */
 static void headless_nested_yield(Machine *m)
@@ -448,13 +457,14 @@ static void headless_nested_yield(Machine *m)
     Frontend *f = g_frontend;
     if (m->virtual_us < f->script_due_us && m->virtual_us < f->end_us)
         return;
-    f->script_due_us = m->virtual_us + HEADLESS_CHUNK_US;
+    f->script_due_us = chunk_end(f, m->virtual_us);
     headless_wait_point(m);
 }
 
 static int start_headless(Frontend *f, const Options *o)
 {
     f->end_us = f->m->virtual_us + o->run_ms * 1000;
+    f->chunk_base_us = f->m->virtual_us;
     if (o->script && !(f->script = input_script_load(o->script))) {
         fprintf(stderr, "cannot load script %s\n", o->script);
         return -1;
@@ -471,8 +481,8 @@ static int run_headless(Frontend *f)
     while (f->m->virtual_us < f->end_us && !f->m->exit_requested) {
         if (f->script)
             input_script_apply(f->script, f->m);
-        f->script_due_us = f->m->virtual_us + HEADLESS_CHUNK_US;
-        machine_run_for(f->m, HEADLESS_CHUNK_US);
+        f->script_due_us = chunk_end(f, f->m->virtual_us);
+        machine_run_for(f->m, f->script_due_us - f->m->virtual_us);
         frontend_audio_pump(f->m);
     }
     return 0;
