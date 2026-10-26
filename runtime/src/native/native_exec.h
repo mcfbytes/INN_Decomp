@@ -28,5 +28,9 @@ void native_handoff_from_emulator(Machine *m);
 /* INN_DUMP_AT=<point>:<n> and INN_DUMP_DIR write memory and DOS state at the n-th hit of exec, kernel
  * or start (docs/lifting.md). */
 void native_dump_point(Machine *m, const char *point);
+/* A point MODULE:SSSS:OOOO (segment relative to the module's load segment) is reached when a far call
+ * lands there (lift_far_call_probe); true when INN_DUMP_AT names one. */
+bool native_dump_far_call_points(void);
+void native_dump_far_call(Machine *m);
 
 #endif

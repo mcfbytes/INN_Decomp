@@ -6,7 +6,7 @@
 #include "lift.h"
 
 enum { SHADOW_STALL_INSNS = 200000000 };
-enum { MAX_TABLES = 64, MAX_ACTIVE = 8192, MAX_NESTING = 64, HOOK_BITMAP_BYTES = MEM_ONE_MEG / 8 };
+enum { MAX_TABLES = 64, MAX_ACTIVE = 8192, MAX_NESTING = 64, HOOK_BITMAP_BYTES = MEM_ONE_MEG / 8, MAX_IMAGES = 16 };
 
 /* Shadow-verification counts of one entry, kept across loads (overlays come and go). */
 typedef struct HookStats {
@@ -65,6 +65,10 @@ typedef struct LiftState {
     LiftUnresolvedFn unresolved; /* lift_set_unresolved */
     bool native_control; /* INN_NATIVE_CONTROL=1: native-only entries are armed in a hybrid build */
     bool native_seen;    /* m->native was set when a module was armed: native-only entries stay armed */
+    /* Images the program loads itself (lift_add_image): where each is announced now, 0 when nowhere. */
+    struct { const LiftedImage *image; uint16_t load_seg; } images[MAX_IMAGES];
+    int image_count;
+    bool dump_far_calls; /* INN_DUMP_AT names a module address point (native_dump_far_call) */
 } LiftState;
 
 struct VerifyState;
@@ -81,6 +85,8 @@ static inline LiftState *lift_state(Machine *m) { return m->lift; }
 void lift_set_hook_bit(Machine *m, uint32_t linear, bool on);
 /* Runs guest code until the pending nested call returns (see NestedCall). */
 void lift_run_nested(Machine *m, uint32_t return_linear, uint16_t return_sp, bool sp_above);
+/* Sets m->far_call_probe from the images still waiting and the dump points. */
+void lift_update_probe(Machine *m);
 /* Whether name is one of the comma-separated names in list. */
 bool lift_listed(const char *list, const char *name);
 /* Runs a lifted function, marking lifted C as running for port-time accounting. */

@@ -8,12 +8,15 @@
 #include "lift_internal.h"
 #include "native_exec.h"
 
-enum { DUMP_BYTES = 0x10FFF0, MAX_SPECS = 16, POINT_LEN = 16, MAX_MCBS = 1024, IVT_ENTRIES = 256 };
+enum { DUMP_BYTES = 0x10FFF0, MAX_SPECS = 16, POINT_LEN = 48, MODULE_LEN = 32, MAX_MCBS = 1024, IVT_ENTRIES = 256 };
 
 typedef struct DumpSpec {
     char point[POINT_LEN];
     int target;  /* occurrence to dump */
     int seen;    /* times the point was reached */
+    bool far_call; /* a module address point MODULE:SSSS:OOOO, reached by a far call */
+    char module[MODULE_LEN];
+    uint16_t seg, off;
 } DumpSpec;
 
 static DumpSpec specs[MAX_SPECS];
@@ -30,7 +33,7 @@ static void parse_specs(const char *env)
     char copy[sizeof parsed_from];
     snprintf(copy, sizeof copy, "%s", env);
     for (char *tok = strtok(copy, ","); tok && spec_count < MAX_SPECS; tok = strtok(NULL, ",")) {
-        char *colon = strchr(tok, ':');
+        char *colon = strrchr(tok, ':');
         if (!colon)
             continue;
         *colon = 0;
@@ -38,6 +41,40 @@ static void parse_specs(const char *env)
         snprintf(s->point, sizeof s->point, "%s", tok);
         s->target = atoi(colon + 1);
         s->seen = 0;
+        unsigned seg, off;
+        char module[MODULE_LEN];
+        s->far_call = sscanf(tok, "%31[^:]:%x:%x", module, &seg, &off) == 3;
+        if (s->far_call) {
+            snprintf(s->module, sizeof s->module, "%s", module);
+            s->seg = (uint16_t)seg;
+            s->off = (uint16_t)off;
+        }
+    }
+}
+
+bool native_dump_far_call_points(void)
+{
+    const char *at = getenv("INN_DUMP_AT");
+    if (!at || !*at)
+        return false;
+    parse_specs(at);
+    for (int i = 0; i < spec_count; i++)
+        if (specs[i].far_call)
+            return true;
+    return false;
+}
+
+void native_dump_far_call(Machine *m)
+{
+    const char *at = getenv("INN_DUMP_AT");
+    if (!at || !*at)
+        return;
+    parse_specs(at);
+    uint32_t linear = m->cpu.seg_base[S_CS] + (m->cpu.eip & 0xFFFF);
+    for (int i = 0; i < spec_count; i++) {
+        uint16_t base = specs[i].far_call ? lift_module_base(m, specs[i].module) : 0;
+        if (base && real_addr((uint16_t)(base + specs[i].seg), specs[i].off) == linear)
+            native_dump_point(m, specs[i].point);
     }
 }
 
@@ -85,6 +122,8 @@ static void write_ivt(Machine *m, FILE *f)
 
 static void write_dos(Machine *m, FILE *f)
 {
+    if (!m->dos)
+        return; /* a bare machine (tests) */
     DosState *d = dos_state(m);
     fprintf(f, "[dos]\ncwd=%c:%s\ncur_psp=%04X shell_psp=%04X depth=%d\n", 'A' + d->cur_drive,
             d->cwd, d->cur_psp, d->shell_psp, d->depth);

@@ -68,6 +68,26 @@ uint16_t lift_module_base(Machine *m, const char *module);
  * file value. Re-arms the overlay there and evicts what it replaced (docs/lifting.md, "Overlays"). */
 void lift_overlay_loaded(Machine *m, const char *module, uint16_t load_seg, uint32_t image_bytes,
                          uint16_t reloc_base);
+/* A raw code image the program loads by itself (module.txt `announce entry`, docs/lifting.md "Images
+ * loaded by the program"): announced at the first far call to offset 0 of a paragraph holding its head. */
+enum { LIFT_IMAGE_HEAD_LEN = 32 };
+typedef struct LiftedImage {
+    const char *module;     /* the name its entries are registered under, e.g. "DRIVER.OVL" */
+    uint32_t bytes;         /* image size */
+    uint8_t head[LIFT_IMAGE_HEAD_LEN]; /* the image's first bytes, as in the file */
+    uint32_t head_mask;     /* bit i: head byte i is compared (not relocated, inside the image) */
+} LiftedImage;
+/* Adds an image to look for; the struct is static data owned by the caller. */
+void lift_add_image(Machine *m, const LiftedImage *image);
+/* Runs when m->far_call_probe is set and a far call (CALLF, guest_call_far) has reached CS:IP: announces
+ * a pending image found there and writes INN_DUMP_AT module address points. */
+void lift_far_call_probe(Machine *m);
+static inline void lift_far_call_landed(Machine *m)
+{
+    if (__builtin_expect(m->far_call_probe, 0))
+        lift_far_call_probe(m);
+}
+
 /* Deactivates every hook inside [load_seg, load_seg + paragraphs). */
 void lift_module_unloaded(Machine *m, uint16_t load_seg, uint32_t paragraphs);
 

@@ -117,6 +117,7 @@ struct Machine {
     bool ticks_frozen;   /* device replay's lifted run: no device tickers, emulated time stands still */
     void *lift;
     void *coverage;      /* INN_COVERAGE: call targets seen (lift_coverage.c); NULL when off */
+    bool far_call_probe; /* a far call target is looked at (lift_far_call_probe): an image or dump point waits */
 
     void *dos, *bios, *pic, *pit, *vga, *kbd, *mouse, *uart, *ems, *xms, *frontend;
     void *audio, *opl, *speaker, *dma, *sb;

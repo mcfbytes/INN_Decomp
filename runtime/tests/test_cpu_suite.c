@@ -21,6 +21,7 @@ bool lift_dispatch(Machine *m, uint32_t linear) { return false; } /* no hooks: e
 void lift_io_callback(Machine *m, int id) {}
 void lift_io_halt(Machine *m) {}
 void lift_irq_boundary(Machine *m) {}
+void lift_far_call_probe(Machine *m) {} /* far_call_probe is never set here */
 void native_cpu_entry(Machine *m) {} /* m->native is never set here */
 void log_msg(const char *fmt, ...) {}
 void fatal(const char *fmt, ...)

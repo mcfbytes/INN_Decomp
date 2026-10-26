@@ -108,6 +108,16 @@ The current server already routes Send and multicast (router C3) and answers hos
 properties and the land-side queue are missing. Golf's needs are similar (joinNet kind 1 type 0x66,
 GrpJoin echo, GrpMem); dosrt's GOLF reaches the first tee against a five-rule stand-in.
 
+## The code images
+
+RB decompresses `vmcode2.ovl` and `sxcode2.ovl` from the volumes into its own heap and calls them
+through far pointers, so no DOS read announces them. Their lifted directories say `announce entry`
+([lifting.md](lifting.md), "Images loaded by the program"): each is announced at the first far call to
+its start, as `VMCODE2.OVL` (the VGA driver) and `SXCODE2.OVL` (the AdLib driver for this drive's
+`LSCI.CFG`). The loader applies no fixups, so the bytes cut from a dump at that call are the image file
+(`work/baron-ovl/`, with `INN_DUMP_AT` and `tools/extract_image.py`); coverage then names their
+addresses instead of RB.EXE segments past the image.
+
 ## Status
 
 RB boots and flies under the interpreter against the stand-in host; from INN it stops where the

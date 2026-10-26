@@ -89,6 +89,33 @@ segment, as Borland's map files and the far calls in the resident code name it.
 The manager may read several consecutive overlays in one read (`DARKSTRT` reads its first two
 together); each is announced.
 
+## Images loaded by the program
+
+Some programs load code that no DOS read lands whole: Red Baron decompresses its video and sound drivers
+from its data volumes into its own heap and far-calls them. Such a raw image is announced when it is
+first called:
+
+- **Marking.** The lifted directory's `module.txt` names the image (any name, e.g. `VMCODE2.OVL`), the
+  path of the image as it sits in memory once loaded, and a line `announce entry`. Entries are marked
+  with segment 0 and their offset in the image. `tools/gen_lift_table.py` adds a `LiftedImage` to the
+  table: the image's size and its first 32 bytes, with relocated words (none in a raw image) and bytes
+  past its end left uncompared.
+- **Announcing.** While an image is not announced, every far call (CPU `CALLF`, direct and through a
+  pointer, and `guest_call_far` from lifted code) is looked at once it lands: when the target is offset
+  0 of a paragraph that is no announced module's load segment and the paragraph holds the image's head,
+  `lift_module_loaded` announces the image there (`lift: image NAME found at SEG` in the log). Its entries
+  are armed before the called instruction runs, coverage names its addresses (`IMAGE.OVL:0000:0100`),
+  and synthetic call triggers can name it. A lifted loader that calls the image's start keeps the
+  announcement, through `guest_call_far`; it may also call `lift_module_loaded` itself.
+- **Cost.** A far call pays one more not-taken test; the target is looked at only while an image is
+  waiting (or a dump point below is set), and once every image is announced that stops. Freeing the
+  memory that holds an image disarms it and makes it wait for its next load, which may be elsewhere.
+- **Getting the bytes.** The image file is cut from a memory dump taken at the first far call into it:
+  `INN_DUMP_AT=PROG.EXE:SSSS:OOOO:1` (below) with the image's address relative to the program, then
+  `tools/extract_image.py <dump.bin> <linear or seg:off> <bytes> <out>`. The size comes from the loader
+  (or the DOS block that holds the image). Compare the image with a later dump to see which bytes are its
+  own data; the head and the lifted entries must not be among them.
+
 ## Workflow per function
 
 1. Ghidra (`/mnt/source/tools/ghidra/ghidra_12.1.4_PUBLIC`) with the unpacked binary, runtime
@@ -351,8 +378,10 @@ emulator; termination unwinds to it through the DOS terminate hook.
 
 `INN_DUMP_AT=<point>:<n>[,...]` with `INN_DUMP_DIR=<dir>` writes `<point>-<n>.bin` (memory 0 to
 10FFEFh) and `.txt` (registers, MCB chain, IVT, DOS handles, current directory, PSP) the n-th time the
-point is reached; points are `exec` (AH=4Bh AL=0 or `native_exec`), `start` (a program is entered) and
-`kernel`. `tools/m9_dump_diff.py` compares two dumps.
+point is reached; points are `exec` (AH=4Bh AL=0 or `native_exec`), `start` (a program is entered),
+`kernel`, and module addresses `MODULE:SSSS:OOOO` (hex, segment relative to the module's load segment),
+reached when a far call lands there (`RB.EXE:1234:0000:1` writes `RB.EXE:1234:0000-1.bin`).
+`tools/m9_dump_diff.py` compares two dumps.
 
 ## Direct calls
 
