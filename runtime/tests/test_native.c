@@ -268,6 +268,22 @@ static void test_timer(void)
     machine_destroy(m);
 }
 
+/* The speaker: on sets both port 61h gates and channel 2's rate for the mixer; off clears the gates only. */
+static void test_speaker(void)
+{
+    Machine *m = make_machine(true);
+    native_set_port61(m, 0x30);
+    host_timer_speaker(m, 0x0B5A, true);
+    double hz = 0;
+    CHECK(pit_speaker(m, &hz), "the speaker sounds");
+    CHECK(hz > 409 && hz < 411, "at the PIT clock over the divisor, got %f", hz);
+    CHECK(native_port61(m) == 0x33, "both gates read back, got %02X", native_port61(m));
+    host_timer_speaker(m, 0, false);
+    CHECK(!pit_speaker(m, NULL) && !pit_speaker_held(m), "off is silent");
+    CHECK(native_port61(m) == 0x30, "the other bits are kept, got %02X", native_port61(m));
+    machine_destroy(m);
+}
+
 static void test_native_int(void)
 {
     Machine *m = make_machine(false);
@@ -514,6 +530,7 @@ int main(void)
     test_priority();
     test_if();
     test_timer();
+    test_speaker();
     test_native_int();
     test_rom_lifts();
     test_waits();

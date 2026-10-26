@@ -53,6 +53,8 @@ double pit_timer_hz(Machine *m);
 bool pit_speaker(Machine *m, double *hz);
 /* True while port 61h enables the speaker but channel 2 is not counting (its output stays high). */
 bool pit_speaker_held(Machine *m);
+/* Native speaker: channel 2 as a square wave of divisor (0 = 65536) with both 61h gates on, or the gates off. */
+void pit_set_speaker(Machine *m, uint16_t divisor, bool on);
 
 /* ---- 8237 DMA controller, channels 0-3 (ports 00h-0Fh, pages 87h/83h/81h/82h) ---- */
 

@@ -243,6 +243,24 @@ double pit_timer_hz(Machine *m)
     return (double)PIT_CLOCK_HZ / pit_state(m)->ch[0].reload;
 }
 
+/* Native speaker (host_timer_speaker): what the port sequence leaves. On: channel 2 counts divisor in
+ * mode 3 from now with both gates set (control B6h, low, high, then 61h); off: both gates clear. */
+void pit_set_speaker(Machine *m, uint16_t divisor, bool on)
+{
+    Pit *p = pit_state(m);
+    audio_sync(m);
+    if (!on) {
+        p->sysctl_b &= (uint8_t)~(SYSB_GATE2 | SYSB_SPEAKER);
+        return;
+    }
+    PitChannel *c = &p->ch[2];
+    c->mode = 3;
+    c->access = ACCESS_LOHI;
+    c->latched = c->read_hi = c->write_hi = false;
+    channel_load(m, c, divisor);
+    p->sysctl_b |= SYSB_GATE2 | SYSB_SPEAKER;
+}
+
 bool pit_speaker(Machine *m, double *hz)
 {
     Pit *p = pit_state(m);
