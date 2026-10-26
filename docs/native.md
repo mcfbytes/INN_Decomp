@@ -616,7 +616,7 @@ Sound Blaster digital audio on the native path, and an Asyncify fallback for bro
 
 | Scenario | What differs |
 |---|---|
-| `inn_casino` | Traffic and two screens. A game random value follows the timing model. Known flaky. |
+| `inn_casino` | Compared in part (`private/lifted/scenarios/inn_casino.compare`). `Random` is seeded once from the TSNEXEC tick counter and then drawn once per animation cycle (about 3300 draws hybrid, 3900 native in one run), so a seed one tick apart or a different draw count changes the roulette result (`02 .. 68 00` message, bytes 8-9) and the blackjack cards, and the scripted blackjack clicks then play different hands. Re-timing cannot fix it: the seed tick differs by one in every build pair, and the draw counts differ by 20%. The sidecar masks the roulette result, stops the traffic comparison before the first blackjack message and compares the five screens taken before blackjack; blackjack and the exit are checked only by the hybrid suite. |
 | `tw_combat` | Traffic and three screens. The encounter varies between runs of one build. Known flaky. |
 | `ys_create` | Traffic matches. `final.png` differs by 2042 of 64000 pixels (3.1906%), box 49,0–219,141, just over the 3% tolerance. Same on a second run. |
 | `inn_sierraland` | One run diverged on the way out of 3-D golf (extra leave and occupancy messages, and `sl_end.png`). A second run passed. |
