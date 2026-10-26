@@ -160,18 +160,20 @@ system exclusive messages are written whole, real-time bytes, system common mess
 F7 escapes, each event stamped at the byte that completes it. The file is finished when the machine is
 shut down. Native builds reach the same sink through `host_audio_midi_write` (docs/native.md).
 
-Timestamps of the same driver calls differ between runs where emulated time does:
+The lifted `MT32.DRV` charges the original's instructions with exact time (`lift_time.h`, see
+[lifting.md](lifting.md), "Waiting in lifted code") and takes the timer interrupts that fall inside its
+4 s init where the original does, so `INN_LIFT_ONLY=none` and `INN_LIFT_ONLY=mt32_entry` write the same
+file, timestamps included, wherever the original repeats itself. Timestamps of the same driver calls
+differ where emulated time does:
 
 - Shadow verification stops emulated time during a verified call's original run, so a verified init
-  writes its whole patch upload at one millisecond.
+  writes its whole patch upload at one millisecond, and later music moves by that much.
 - Native mode skips the driver's handshakes and delays (a host sink needs neither), so init takes no
-  time there; hybrid lifted C charges the port reads and loop instructions of those delays (init takes
-  about 3.8 s of emulated time at 20 MIPS, as the original).
-- Lifted and original runs drift by the original's per-call instruction time (milliseconds over a
-  session), and the scripted input does not move with it: a script-driven message (master volume, a
-  sound stopped by a click) can then land a few events earlier or later in the stream, or one more
-  sequencer tick of notes can be sent before it. The bytes each call sends are compared exactly by
-  shadow verification.
+  time there.
+- Runs that talk to a live server are not repeatable past the point where its timing matters, as
+  innkeeperd's answers arrive by the host's clock: on `ev_input` (2026-10-26) six runs of the original
+  agree for the first 871 events and then start the land's music between 86 510 and 86 524 ms, each
+  giving a different file, and `inn_hub` varies when ten runs share the machine.
 
 ## Conventional memory
 
@@ -213,6 +215,12 @@ with file not found.
 13900 up 48
 14000 type guybrush\n            # US layout, \n is Enter
 ```
+
+The headless loop runs the machine in 10 ms chunks and applies the events due at each chunk's end.
+The chunk ends keep a fixed grid from the start of the run, so a lifted call that outlasts a chunk (one
+machine step can run `MT32.DRV`'s 4 s init) does not move the later ones, and an event lands at the
+same emulated time with or without lifted code. A nested wait (a guest call from lifted C) applies due
+events when it passes a chunk end of the grid.
 
 `tools/ppm2png.py` converts screenshots. Example end-to-end run against the sibling server:
 

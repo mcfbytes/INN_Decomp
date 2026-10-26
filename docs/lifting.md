@@ -312,10 +312,21 @@ scenario) merge.
 
 ## Waiting in lifted code
 
-Lifted C runs no instructions, so two things keep its waits working:
+Lifted C runs no instructions, so these keep its waits working:
 
 - Port accesses made from lifted C (outside shadow runs) charge their bus time to emulated time and
   end scheduler slices as they fill, so a C poll loop sees retrace, UART and timer state change.
+- Exact time (`runtime/src/lift_time.h`), for a lifted function hooked from the CPU whose timing shows
+  (a driver's busy loops, `MT32.DRV`): `lift_time_begin` at the entry counts the hooked instruction,
+  `lift_time_insns(m, t, n, irqs)` charges the next n instructions of the original's path (a port
+  access just before joins the first of them as its bus cycles), `lift_time_end` hands the scheduler
+  back. Slices end where the CPU's would, dropping what an instruction takes past the end, and with
+  `irqs` (interrupts on after those instructions, the caller's IF permitting) an interrupt that came due
+  runs its handler at that instruction boundary. Lifted code for a stretch between CLI and POPF clears
+  IF in the flags meanwhile (`hw_mpu.h` does), so the PIT owes lifted C no edges. The call then takes
+  the original's emulated time exactly (`runtime/tests/test_lift_time.c`); a direct call from other
+  lifted C, a shadow, synthetic or native run falls back to `machine_charge_c` (`lift_time_begin`
+  returns false).
 - A nested guest call that waits (a dial, kWait) calls the frontend's yield hook between slices
   (`lift_set_nested_yield`): it keeps emulated time with the wall clock, presents frames, takes input
   and, in the browser, returns to the event loop through Emscripten's Asyncify, so WebSocket data
