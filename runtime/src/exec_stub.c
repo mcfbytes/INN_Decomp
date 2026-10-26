@@ -135,6 +135,11 @@ static CallbackResult x_send(Machine *m)
         ret16(m, 0);
         return CB_DONE;
     }
+    if (m->io_mode == IO_REPLAY) {
+        /* The lifted half of a shadow run: the host already saw this message from the original half. */
+        ret16(m, 1);
+        return CB_DONE;
+    }
     uint32_t p = deref(m, handle);
     uint8_t buf[MSG_MAX];
     for (uint16_t i = 0; i < len; i++)
