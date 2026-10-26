@@ -93,14 +93,23 @@ stores in every format, rounding and precision control, compares, `FXAM`, transc
 faults, masked and unmasked exceptions, `FSTENV`/`FSAVE`/`FRSTOR` layouts); it also passes when built
 with Emscripten and run under Node.
 
+Lifted C uses the same unit through `fpu.h`: `fpu_mem(m, opcode, reg, seg, off)` and `fpu_reg(m, opcode, modrm)`
+run one escape instruction exactly as the CPU would (FWAIT first), and named wrappers spell out the forms
+(`fpu_fld_m32/m64/m80`, `fpu_fild_m16/m32/m64`, `fpu_fstp_m64`, `fpu_fistp_m16`, `fpu_fadd_m64`,
+`fpu_fsubr_i16`, `fpu_fcompp`, `fpu_fsqrt`, `fpu_fsin`, `fpu_frndint`, `fpu_fstsw_ax`, ...). `fpu_st`, `fpu_sw`
+and `fpu_top` read the state, `fpu_push`/`fpu_pop` move host values, and `fpu_state_matches` is the comparison
+shadow verification makes (docs/lifting.md, "Floating point"). `runtime/tests/test_lift_fpu.c` runs one long
+sequence under eight control words both ways and compares the results bit for bit; it also passes under
+Emscripten and Node.
+
 Users: Red Baron has no floating point at all (its math is fixed point, `s\util\amath.c`). GOLF links
 Borland's emulator: its code holds `INT 34h`-`3Dh` sequences (2581 in the image) that the emulator's
 handlers either interpret in software (no FPU) or patch in place into `FWAIT` + x87 opcodes (FPU present).
 Both run under dosrt: with the FPU on, GOLF reaches the first tee executing real x87 instructions
-(D8-DF with memory operands of every size, `FCOMPP`, `FSTSW`, the arithmetic-and-pop forms). For lifting
-GOLF later: verification must compare `Cpu.fpu` (registers and status) as it compares the CPU
-registers, and lifted C replacing emulator sequences must reproduce the patched or unpatched bytes the
-original leaves in memory.
+(D8-DF with memory operands of every size, `FCOMPP`, `FSTSW`, the arithmetic-and-pop forms). Verification
+compares `Cpu.fpu` and accepts code the original patched where lifted C did not (docs/lifting.md, "Floating
+point"). Lifted x87 code assumes the coprocessor: with `--no-fpu` the emulator keeps its own software state,
+which the lifted C does not model.
 
 ## Port I/O costs bus time
 
