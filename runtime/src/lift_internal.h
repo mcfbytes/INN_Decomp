@@ -33,6 +33,7 @@ typedef struct NestedCall {
     uint32_t return_linear;
     uint16_t return_sp;
     bool sp_above; /* match any SP above return_sp: the callee may pop its own arguments */
+    bool sp_any;   /* match any SP: the callee may move its caller's frame (LiftedEntry.lower_sp) */
     bool returned;
 } NestedCall;
 
@@ -87,6 +88,8 @@ void lift_set_hook_bit(Machine *m, uint32_t linear, bool on);
 void lift_run_nested(Machine *m, uint32_t return_linear, uint16_t return_sp, bool sp_above);
 /* Sets m->far_call_probe from the images still waiting and the dump points. */
 void lift_update_probe(Machine *m);
+/* As lift_run_nested, ending at the first arrival at return_linear whatever SP is then. */
+void lift_run_nested_any_sp(Machine *m, uint32_t return_linear);
 /* Whether name is one of the comma-separated names in list. */
 bool lift_listed(const char *list, const char *name);
 /* Runs a lifted function, marking lifted C as running for port-time accounting. */

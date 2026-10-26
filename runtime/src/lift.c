@@ -528,7 +528,9 @@ static bool nested_return_reached(Machine *m, LiftState *s, uint32_t linear)
         return false;
     NestedCall *n = &s->nested[s->nesting - 1];
     uint16_t sp = m->cpu.r[R_SP].w;
-    if (n->return_linear != linear || (n->sp_above ? sp <= n->return_sp : sp != n->return_sp))
+    if (n->return_linear != linear)
+        return false;
+    if (!n->sp_any && (n->sp_above ? sp <= n->return_sp : sp != n->return_sp))
         return false;
     n->returned = true;
     m->cpu.stop = true;
@@ -569,13 +571,13 @@ void lift_set_nested_yield(Machine *m, void (*fn)(Machine *m))
     lift_state(m)->nested_yield = fn;
 }
 
-void lift_run_nested(Machine *m, uint32_t return_linear, uint16_t return_sp, bool sp_above)
+static void run_nested(Machine *m, NestedCall call)
 {
     LiftState *s = lift_state(m);
     if (s->nesting >= MAX_NESTING)
         fatal("lifted code nested too deeply");
     NestedCall *n = &s->nested[s->nesting++];
-    *n = (NestedCall){ .return_linear = return_linear, .return_sp = return_sp, .sp_above = sp_above };
+    *n = call;
     uint64_t start = m->cpu.instructions, stall_report = start + SHADOW_STALL_INSNS;
     int c_depth = s->c_depth;
     s->c_depth = 0;
@@ -597,6 +599,16 @@ void lift_run_nested(Machine *m, uint32_t return_linear, uint16_t return_sp, boo
     }
     s->c_depth = c_depth;
     s->nesting--;
+}
+
+void lift_run_nested(Machine *m, uint32_t return_linear, uint16_t return_sp, bool sp_above)
+{
+    run_nested(m, (NestedCall){ .return_linear = return_linear, .return_sp = return_sp, .sp_above = sp_above });
+}
+
+void lift_run_nested_any_sp(Machine *m, uint32_t return_linear)
+{
+    run_nested(m, (NestedCall){ .return_linear = return_linear, .sp_any = true });
 }
 
 /* An interrupt the CPU would take at the callee's first instruction boundary. Native mode delivers
@@ -880,6 +892,29 @@ void guest_call_near(Machine *m, uint16_t off)
         s->direct_fallbacks++;
     if (!direct || !back) /* a call to the caller's own address looks returned before it ran */
         lift_run_nested(m, entry_linear, sp_after_return, false);
+    m->cpu.eip = entry_ip;
+}
+
+/* The return address pushed is the original call's own (CS:ret_off), hooked for the call's length, and
+ * the call ends at the first arrival there whatever SP is then. */
+void guest_call_near_ret(Machine *m, uint16_t off, uint16_t ret_off)
+{
+    uint16_t entry_ip = (uint16_t)m->cpu.eip;
+    uint32_t ret_linear = m->cpu.seg_base[S_CS] + ret_off;
+    bool was_hooked = lift_hooked(m, ret_linear);
+    lift_set_hook_bit(m, ret_linear, true);
+    cpu_push16(m, ret_off);
+    m->cpu.eip = off;
+    lift_coverage_hit(m, LIFT_COVERAGE_CALL);
+    LiftState *s = lift_state(m);
+    bool direct = call_direct(m, s);
+    bool back = m->cpu.seg_base[S_CS] + (m->cpu.eip & 0xFFFF) == ret_linear;
+    if (direct && !back)
+        s->direct_fallbacks++;
+    if (!direct || !back)
+        lift_run_nested_any_sp(m, ret_linear);
+    if (!was_hooked)
+        lift_set_hook_bit(m, ret_linear, false);
     m->cpu.eip = entry_ip;
 }
 

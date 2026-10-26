@@ -150,6 +150,13 @@ a modem driver) are marked `LIFT_FAR_REPLAY` / `LIFT_NEAR_REPLAY` and verified w
 (below). Functions whose original ends the process, or whose effects no snapshot can undo, are marked
 `LIFT_FAR_NOSHADOW` / `LIFT_NEAR_NOSHADOW`: they are hooked but only ever checked functionally, and the
 summary lists them as not shadowed.
+A function that may return with SP lower than its RET implies, because code it calls moved its frame
+down the stack (Borland C0's `_setargv` pops its caller's return address, builds argv below it and comes
+back by a jump), adds `_LOWSP` to its kind (`LIFT_NEAR_LOWSP`, `LIFT_FAR_REPLAY_LOWSP`, ...). The original's
+shadow run then ends at the first arrival at the return address whatever SP is, and the stack between
+the exit SP and the entry SP is compared too. Its lifted code calls such a callee with
+`guest_call_near_ret(m, off, ret_off)`: that pushes the original call's own return address (a callee
+that keeps it in memory leaves the same bytes there) and ends at the first return to it at any SP.
 `LIFTED_PREFIX(seg, off, fn, kind, scratch, n)` is `LIFTED` with a signature of only the first `n` bytes, for an
 entry whose code is followed by data the loader or the host fills in (the file does not hold those bytes).
 During the lifted run, VGA port accesses also reach the device (its state is snapshotted), so mode

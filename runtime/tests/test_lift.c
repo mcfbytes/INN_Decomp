@@ -154,6 +154,64 @@ static void test_overlays(void)
     machine_destroy(m);
 }
 
+/* ---- a callee that moves its caller's frame down (LIFT_NEAR_LOWSP, guest_call_near_ret) ---- */
+
+enum { LOW_P = 0x40, LOW_P_RET = 0x43, LOW_M = 0x50 };
+
+/* main: call P / hlt.  P: call M / ret.  M: pop bx / pop cx / sub sp,4 / push cx / jmp bx: it comes back
+ * to P with P's return address moved 4 bytes down, as Borland's _setargv does with argv. */
+static const uint8_t LOW_PROGRAM[] = {
+    [0x00] = 0xE8, LOW_P - 3, 0x00, 0xF4,
+    [LOW_P] = 0xE8, LOW_M - LOW_P_RET, 0x00, 0xC3, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90,
+    [LOW_M] = 0x5B, 0x59, 0x83, 0xEC, 0x04, 0x51, 0xFF, 0xE3,
+};
+
+static void lifted_low(Machine *m)
+{
+    guest_call_near_ret(m, LOW_M, LOW_P_RET);
+    lift_ret_near(m, 0);
+}
+
+/* As lifted_low, then a write into the moved words the original leaves alone. */
+static void lifted_low_bad(Machine *m)
+{
+    guest_call_near_ret(m, LOW_M, LOW_P_RET);
+    mem_wr16(m, real_addr(SS, (uint16_t)(SP + 2)), 0xBEEF);
+    lift_ret_near(m, 0);
+}
+
+static int run_low(LiftedFn fn, bool lower_sp)
+{
+    static LiftedEntry low[1];
+    Machine *m = machine_create();
+    memcpy(m->mem + real_addr(CODE_SEG, 0), LOW_PROGRAM, sizeof LOW_PROGRAM);
+    low[0] = (LiftedEntry){ .module = "TEST.EXE", .off = LOW_P, .fn = fn, .name = "low", .near_return = true,
+                            .lower_sp = lower_sp };
+    memcpy(low[0].signature, LOW_PROGRAM + LOW_P, LIFT_SIGNATURE_LEN);
+    lift_add_table(m, low, 1);
+    lift_verify_enable(m, 10);
+    lift_module_loaded(m, "TEST.EXE", CODE_SEG, sizeof LOW_PROGRAM);
+    cpu_set_seg(&m->cpu, S_CS, CODE_SEG);
+    cpu_set_seg(&m->cpu, S_SS, STACK_SEG);
+    SP = 0x100;
+    m->cpu.eip = 0;
+    m->cpu.flags &= ~F_IF;
+    for (int i = 0; i < 100 && !m->cpu.halted; i++)
+        machine_step(m);
+    CHECK(m->cpu.halted && SP == 0x100 - 4, "the lowered return reached hlt (SP=%04X)", SP);
+    int mismatches = lift_verify_mismatches(m);
+    machine_destroy(m);
+    return mismatches;
+}
+
+static void test_lower_sp(void)
+{
+    int n = run_low(lifted_low, true);
+    CHECK(n == 0, "a faithful LOWSP lift verifies (%d mismatches)", n);
+    n = run_low(lifted_low_bad, true);
+    CHECK(n == 1, "a write between the two SPs is caught (%d mismatches)", n);
+}
+
 int main(void)
 {
     enum { ORIGINAL_RESULT = 5 * 2 + 1, LIFTED_F_RESULT = 5 * 3 + 1 + 100 };
@@ -178,6 +236,7 @@ int main(void)
     CHECK(r.ax == LIFTED_F_RESULT, "INN_LIFT_ONLY with the name hooks it (AX=%u)", r.ax);
     unsetenv("INN_LIFT_ONLY");
     test_overlays();
+    test_lower_sp();
     if (failures)
         fprintf(stderr, "%d check(s) failed\n", failures);
     return failures != 0;
