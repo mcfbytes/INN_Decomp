@@ -452,12 +452,19 @@ static void hold_link(void *ctx)
 
 /* A nested wait that outlasts the current chunk (a native start running inside the hybrid build)
  * gets the script at the chunk rate of the headless loop. */
+/* The script is applied on a fixed grid of HEADLESS_CHUNK_US, so a lift whose guest calls run past a
+ * chunk's end (applying the script from inside) does not move the later events against the program. */
+static uint64_t headless_chunk_end(uint64_t now_us)
+{
+    return (now_us / HEADLESS_CHUNK_US + 1) * HEADLESS_CHUNK_US;
+}
+
 static void headless_nested_yield(Machine *m)
 {
     Frontend *f = g_frontend;
     if (m->virtual_us < f->script_due_us && m->virtual_us < f->end_us)
         return;
-    f->script_due_us = m->virtual_us + HEADLESS_CHUNK_US;
+    f->script_due_us = headless_chunk_end(m->virtual_us);
     headless_wait_point(m);
 }
 
@@ -482,8 +489,8 @@ static int run_headless(Frontend *f)
     while (f->m->virtual_us < f->end_us && !f->m->exit_requested) {
         if (f->script && input_script_apply(f->script, f->m) != 0)
             return -1;
-        f->script_due_us = f->m->virtual_us + HEADLESS_CHUNK_US;
-        machine_run_for(f->m, HEADLESS_CHUNK_US);
+        f->script_due_us = headless_chunk_end(f->m->virtual_us);
+        machine_run_for(f->m, f->script_due_us - f->m->virtual_us);
         frontend_audio_pump(f->m);
     }
     return 0;
