@@ -171,6 +171,47 @@ static void test_tones(void)
     printf("OPL2 %.1f Hz rms %.0f, speaker %.1f Hz rms %.0f\n", a.hz, a.rms, s.hz, s.rms);
 }
 
+/* The tap counts what each source renders, by name. */
+static void test_tap(void)
+{
+    Machine *m = boot();
+    audio_enable(m, true);
+    audio_tap_enable(m, true);
+    speaker_play_1khz(m);
+    const uint8_t spin[] = { 0xEB, 0xFE };
+    memcpy(m->mem + real_addr(CODE_SEG, 0), spin, sizeof spin);
+    cpu_set_seg(&m->cpu, S_CS, CODE_SEG);
+    m->cpu.eip = 0;
+    m->cpu.flags = 0x0002;
+    machine_run_for(m, 300 * 1000);
+    audio_sync(m);
+    CHECK(audio_tap_peak(m, "speaker") > 1000, "speaker tap peak %d", (int)audio_tap_peak(m, "speaker"));
+    CHECK(audio_tap_peak(m, "opl") == 0, "opl tap peak %d, want 0", (int)audio_tap_peak(m, "opl"));
+    CHECK(audio_tap_peak(m, "sb") == 0, "sb tap peak %d, want 0", (int)audio_tap_peak(m, "sb"));
+    CHECK(audio_tap_peak(m, "nothing") == 0, "unknown name");
+    finish(m);
+}
+
+/* F2h (IRQ test) raises IRQ 7 a little after the command, not inside it: drivers that probe the IRQ clear
+ * their flag after sending the command and wait for the interrupt (GOLF.EXE's Sound Blaster detection). */
+static void test_sb_irq_test(void)
+{
+    Machine *m = boot();
+    port_out(m, SB_BASE + 6, 1, 1);
+    port_out(m, SB_BASE + 6, 0, 1);
+    port_out(m, 0x21, 0x00, 1); /* unmask every IRQ */
+    const uint8_t spin[] = { 0xEB, 0xFE }; /* jmp $ with interrupts off: time passes, nothing is taken */
+    memcpy(m->mem + real_addr(CODE_SEG, 0), spin, sizeof spin);
+    cpu_set_seg(&m->cpu, S_CS, CODE_SEG);
+    m->cpu.eip = 0;
+    m->cpu.flags = 0x0002;
+    port_out(m, SB_BASE + 0xC, 0xF2, 1);
+    CHECK(!m->irq_pending, "the IRQ arrived inside the command");
+    machine_run_for(m, 500);
+    CHECK(m->irq_pending, "the IRQ never arrived");
+    finish(m);
+}
+
 /* A device clock 0.3% fast against emulated time: the queue must settle near the target
  * without underruns once primed, and never exceed the latency cap. */
 static void test_pacing(void)
@@ -203,6 +244,8 @@ int main(void)
     test_detection();
     test_tones();
     test_pacing();
+    test_tap();
+    test_sb_irq_test();
     if (failures) {
         fprintf(stderr, "%d failures\n", failures);
         return 1;

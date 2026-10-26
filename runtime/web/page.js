@@ -277,7 +277,33 @@ function watchLog(text) {
   }
 }
 
+// ?audiotap=1: the runtime logs "audio: tap" lines (per source: frames, peak, RMS per second; audio.c) and this
+// page adds what the worklet received. window.innAudioTap is the latest of both (docs/web.md, "Sound").
+const AUDIO_TAP = params.get('audiotap') === '1';
+const audioTap = { sources: {}, lines: 0, worklet: null, posted: null };
+if (AUDIO_TAP) {
+  window.innAudioTap = audioTap;
+  setInterval(() => {
+    const s = Module.innAudio;
+    if (!s || !s.tap) return;
+    audioTap.worklet = { ...s.tap, peakSec: s.tapWin || 0 };
+    s.tapWin = 0;
+    audioTap.posted = { messages: s.posts || 0, frames: s.postedFrames || 0 };
+    log(`audio: tap worklet messages=${s.tap.messages} received=${s.tap.received} peak=${s.tap.peak} peaksec=${audioTap.worklet.peakSec} posted=${s.posts || 0}/${s.postedFrames || 0}`);
+  }, 1000);
+}
+
+function tapLine(text) {
+  const m = /^audio: tap t=(\d+)(.*)$/.exec(text);
+  if (!m) return;
+  audioTap.lines++;
+  audioTap.t = Number(m[1]);
+  for (const f of m[2].matchAll(/(\w+) frames=(\d+) peak=(\d+) rms=(\d+) total=(\d+) max=(\d+)/g))
+    audioTap.sources[f[1]] = { frames: +f[2], peak: +f[3], rms: +f[4], totalFrames: +f[5], maxPeak: +f[6] };
+}
+
 function log(text) {
+  if (AUDIO_TAP) tapLine(text);
   console.log(text);
   watchLog(text);
   const pre = $('log');
@@ -640,6 +666,7 @@ function runtimeArgs(server) {
   }
   const args = ['--com1', spec];
   if (params.get('perf')) args.push('--perf');
+  if (AUDIO_TAP) args.push('--audiotap');
   if (params.get('ips')) args.push('--ips', params.get('ips'));
   if (params.get('idle') === '0') args.push('--no-idle-skip');
   return args.concat([DRIVE, `${PROGRAM.dir}\\${PROGRAM.exe}`], PROGRAM.args);
@@ -957,6 +984,7 @@ var Module = {
   canvas: document.getElementById('canvas'),
   print: log,
   printErr: log,
+  innAudioTapOn: AUDIO_TAP,
   onControlText: (text) => InnSaves.onControl(text),
   onFileClosed: (path) => InnSaves.onFileClosed(path),
   // The client is hanging up (Hayes "+++", then ATH0): the host ends the save channel at ATH0.

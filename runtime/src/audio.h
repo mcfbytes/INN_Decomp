@@ -22,6 +22,15 @@ uint64_t audio_frame_ns(Machine *m, int i);
 
 /* ---- mixer ---- */
 
+/* Debug tap (--audiotap, page ?audiotap=1): per source, the frames rendered and their peak and RMS, logged as
+ * "audio: tap" once per second of output. Off by default; when off the mixer takes one branch per chunk. */
+void audio_tap_enable(Machine *m, bool on);
+/* Names source index (from audio_add_source) for the tap; the name is not copied. */
+void audio_name_source(Machine *m, int source, const char *name);
+/* Peak |sample| a named source has rendered since the tap was enabled (rolled into the last whole second
+ * plus the one in progress); 0 when the name is unknown. For tests and tools. */
+int32_t audio_tap_peak(Machine *m, const char *name);
+
 void audio_init(Machine *m);
 void audio_shutdown(Machine *m);
 /* Returns the source index, or -1 when the table is full. */

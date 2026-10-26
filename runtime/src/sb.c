@@ -14,6 +14,7 @@ enum {
     SILENCE = 0x80,
     SAMPLE_SHIFT = 8,
     NS_PER_US = 1000,
+    IRQ_TEST_DELAY_NS = 30000, /* F2h raises the IRQ about 30 us after the command */
     DEFAULT_TIME_CONSTANT = 0xD2, /* 22.7 kHz, a common default */
 };
 
@@ -34,6 +35,8 @@ typedef struct Sb {
     int out_head, out_count;
     uint8_t out_last, test_reg;
     bool resetting, speaker, irq_line;
+    bool irq_test_due;   /* F2h answers a little later, as the chip does */
+    uint64_t irq_test_ns;
 
     uint64_t period_ns; /* (256 - time constant) us */
     uint32_t block;     /* bytes, from 48h or the last 14h */
@@ -204,7 +207,10 @@ static void execute(Machine *m, Sb *s)
         break;
     case CMD_WRITE_TEST: s->test_reg = s->args[0]; break;
     case CMD_READ_TEST: push_out(s, s->test_reg); break;
-    case CMD_IRQ_TEST: raise_irq(m, s); break;
+    case CMD_IRQ_TEST:
+        s->irq_test_due = true;
+        s->irq_test_ns = machine_now_ns(m) + IRQ_TEST_DELAY_NS;
+        break;
     default: break;
     }
 }
@@ -276,6 +282,10 @@ static void sb_out(Machine *m, uint16_t port, uint32_t value, int size)
 static void sb_tick(Machine *m)
 {
     Sb *s = sb_state(m);
+    if (s->irq_test_due && machine_now_ns(m) >= s->irq_test_ns) {
+        s->irq_test_due = false;
+        raise_irq(m, s);
+    }
     if (s->active && !s->paused && s->next_ns + (s->left - 1) * s->period_ns <= machine_now_ns(m))
         catch_up(m);
 }
@@ -368,7 +378,7 @@ void sb_init(Machine *m)
     port_register(m, SB_BASE + PORT_WRITE, SB_BASE + PORT_WRITE, sb_in, sb_out);
     port_register(m, SB_BASE + PORT_STATUS, SB_BASE + PORT_STATUS, sb_in, sb_out);
     dma_set_sync(m, SB_DMA_CHANNEL, sb_dma_sync);
-    audio_add_source(m, sb_render);
+    audio_name_source(m, audio_add_source(m, sb_render), "sb");
     machine_add_ticker(m, sb_tick);
 }
 
