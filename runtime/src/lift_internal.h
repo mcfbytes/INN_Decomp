@@ -134,8 +134,9 @@ typedef struct SynthResult {
     bool has_bytes;
 } SynthResult;
 /* Verifies the call the machine is set up for (CS:IP at h's entry, return address pushed) and leaves
- * the machine in that state again; label names the call list line; budget caps the original run. */
-SynthResult lift_verify_synthetic(Machine *m, ActiveHook *h, const char *label, uint64_t budget);
+ * the machine in that state again, or with keep_end in the original's end state when the call
+ * returned and matched; label names the call list line; budget caps the original run. */
+SynthResult lift_verify_synthetic(Machine *m, ActiveHook *h, const char *label, uint64_t budget, bool keep_end);
 void lift_synth_module(Machine *m, const char *module, uint16_t load_seg);
 void lift_synth_unloaded(Machine *m, uint32_t lo, uint32_t hi);
 void lift_synth_reached(Machine *m, uint32_t linear);

@@ -27,6 +27,10 @@ typedef struct SynthCall {
     char label[96];  /* file:line, for reports */
     char module[32], target[NAME_LEN];
     char *items;     /* arguments and registers, evaluated when the trigger fires */
+    char **pokes;    /* "SEG:off bytes(...)|words(...)", written after the items are evaluated */
+    int poke_count;
+    bool chained;    /* `chain`: starts from the end state of the call before it */
+    bool forced;     /* `call!` / `chain!`: a LIFT_*_NOSHADOW entry, shadowed anyway */
 } SynthCall;
 
 typedef struct SynthTrigger {
@@ -47,6 +51,9 @@ typedef struct Synth {
     struct { char module[32]; uint16_t seg; } dgroups[16];
     int dgroup_count;
     bool check, log;
+    char **pending; /* poke lines waiting for the call they belong to */
+    int pending_count;
+    char pending_label[96];
     /* the machine at the trigger */
     Cpu cpu;
     uint8_t *mem, *vga, *dos, *hooks;
@@ -134,9 +141,21 @@ static void load_file(Synth *y, const char *path)
             continue;
         char label[96];
         snprintf(label, sizeof label, "%s:%d", strrchr(path, '/') ? strrchr(path, '/') + 1 : path, lineno);
+        if (!strncmp(p, "poke", 4) && isspace((unsigned char)p[4])) { /* belongs to the next call */
+            if (y->trigger_count == 0)
+                fatal("INN_SYNTH %s: a poke needs an 'after' line before it", label);
+            y->pending = realloc(y->pending, (size_t)(y->pending_count + 1) * sizeof *y->pending);
+            if (!y->pending || !(y->pending[y->pending_count++] = strdup(trim(p + 4))))
+                fatal("out of memory");
+            snprintf(y->pending_label, sizeof y->pending_label, "%s", label);
+            continue;
+        }
         if (sscanf(p, "%15s %31s %63s %n", word, module, target, &used) < 3)
-            fatal("INN_SYNTH %s: expected 'dgroup|after|call <module> <entry> ...'", label);
+            fatal("INN_SYNTH %s: expected 'dgroup|after|call|chain <module> <entry> ...' or 'poke SEG:off ...'", label);
         const char *rest = p + used;
+        if (y->pending_count && strcmp(word, "call") && strcmp(word, "call!") && strcmp(word, "chain") &&
+            strcmp(word, "chain!"))
+            fatal("INN_SYNTH %s: a poke must be followed by the call it sets up", y->pending_label);
         if (!strcmp(word, "dgroup")) {
             unsigned seg;
             if (sscanf(target, "%x", &seg) != 1 || y->dgroup_count == 16)
@@ -165,14 +184,21 @@ static void load_file(Synth *y, const char *path)
                 else
                     fatal("INN_SYNTH %s: after <module> <entry> [n] [near|far]", label);
             }
-        } else if (!strcmp(word, "call")) {
+        } else if (!strcmp(word, "call") || !strcmp(word, "call!") || !strcmp(word, "chain") ||
+                   !strcmp(word, "chain!")) {
             if (y->trigger_count == 0)
                 fatal("INN_SYNTH %s: a call needs an 'after' line before it", label);
+            bool chained = word[1] == 'h';
+            if (chained && y->triggers[y->trigger_count - 1].call_count == 0)
+                fatal("INN_SYNTH %s: chain needs a call before it under the same 'after'", label);
             y->calls = realloc(y->calls, (size_t)(y->call_count + 1) * sizeof *y->calls);
             if (!y->calls)
                 fatal("out of memory");
             SynthCall *c = &y->calls[y->call_count++];
-            *c = (SynthCall){ 0 };
+            *c = (SynthCall){ .chained = chained, .forced = word[strlen(word) - 1] == '!',
+                              .pokes = y->pending, .poke_count = y->pending_count };
+            y->pending = NULL;
+            y->pending_count = 0;
             snprintf(c->label, sizeof c->label, "%s", label);
             snprintf(c->module, sizeof c->module, "%s", module);
             snprintf(c->target, sizeof c->target, "%s", target);
@@ -183,6 +209,8 @@ static void load_file(Synth *y, const char *path)
             fatal("INN_SYNTH %s: unknown directive '%s'", label, word);
         }
     }
+    if (y->pending_count)
+        fatal("INN_SYNTH %s: a poke must be followed by the call it sets up", y->pending_label);
     fclose(f);
 }
 
@@ -300,14 +328,19 @@ static _Noreturn void fail(Eval *ev, const char *msg)
     longjmp(ev->fail, 1);
 }
 
-static void eval_init(Eval *ev, Machine *m, const char *items, uint16_t dgroup, bool trigger_near)
+/* chained: the call continues the one before it, so its names and HMA buffers are kept. */
+static void eval_init(Eval *ev, Machine *m, const char *items, uint16_t dgroup, bool trigger_near, bool chained)
 {
-    memset(ev, 0, sizeof *ev);
+    if (!chained) {
+        memset(ev, 0, sizeof *ev);
+        ev->hma_next = HMA_LO;
+    }
     ev->m = m;
     ev->p = items;
     ev->dgroup = dgroup;
     ev->trigger_near = trigger_near;
-    ev->hma_next = HMA_LO;
+    ev->push_count = 0;
+    ev->reg_count = 0;
 }
 
 static void skip_space(Eval *ev)
@@ -458,6 +491,36 @@ static uint32_t memory_ref(Eval *ev)
     return real_addr(seg, off);
 }
 
+/* The list of words(...) or bytes(...) after the name, little-endian into data; returns its length. */
+static size_t elements(Eval *ev, bool words, uint8_t *data, size_t cap)
+{
+    expect(ev, '(');
+    size_t n = 0;
+    if (accept(ev, ')'))
+        return 0;
+    do {
+        Val v = expr(ev);
+        uint16_t parts[2] = { 0 };
+        int count = 1;
+        if (v.kind == V_PTR && words) {
+            parts[0] = (uint16_t)v.n;
+            parts[1] = v.seg;
+            count = 2;
+        } else {
+            parts[0] = words ? word_of(ev, v) : (uint16_t)(uint8_t)number_arg_value(ev, v);
+        }
+        for (int i = 0; i < count; i++) {
+            if (n + 2 > cap)
+                fail(ev, "too many elements");
+            data[n++] = (uint8_t)parts[i];
+            if (words)
+                data[n++] = (uint8_t)(parts[i] >> 8);
+        }
+    } while (accept(ev, ','));
+    expect(ev, ')');
+    return n;
+}
+
 static Val call_fn(Eval *ev, const char *fn)
 {
     if (!strcmp(fn, "buf")) { /* buf(size [, "text" | byte | fill=byte]...) */
@@ -493,32 +556,8 @@ static Val call_fn(Eval *ev, const char *fn)
         return b;
     }
     if (!strcmp(fn, "words") || !strcmp(fn, "bytes")) { /* words(a, b, ...): a buffer holding them */
-        bool words = fn[0] == 'w';
-        expect(ev, '(');
         uint8_t data[512];
-        size_t n = 0;
-        if (!accept(ev, ')')) {
-            do {
-                Val v = expr(ev);
-                uint16_t parts[2] = { 0 };
-                int count = 1;
-                if (v.kind == V_PTR && words) {
-                    parts[0] = (uint16_t)v.n;
-                    parts[1] = v.seg;
-                    count = 2;
-                } else {
-                    parts[0] = words ? word_of(ev, v) : (uint16_t)(uint8_t)number_arg_value(ev, v);
-                }
-                for (int i = 0; i < count; i++) {
-                    if (n + 2 > sizeof data)
-                        fail(ev, "too many elements");
-                    data[n++] = (uint8_t)parts[i];
-                    if (words)
-                        data[n++] = (uint8_t)(parts[i] >> 8);
-                }
-            } while (accept(ev, ','));
-            expect(ev, ')');
-        }
+        size_t n = elements(ev, fn[0] == 'w', data, sizeof data);
         Val b = alloc_buf(ev, n ? (uint32_t)n : 1);
         for (size_t i = 0; i < n; i++)
             put8(ev, b, (uint32_t)i, data[i]);
@@ -750,7 +789,35 @@ static void item(Eval *ev)
     push_val(ev, expr(ev));
 }
 
-static bool eval_items(Eval *ev, char *err, size_t cap)
+/* poke SEG:off bytes(...)|words(...): writes the values at that address. */
+static void poke(Eval *ev)
+{
+    uint16_t seg = segment_name(ev);
+    expect(ev, ':');
+    uint16_t off = word_of(ev, expr(ev));
+    skip_space(ev);
+    char id[8];
+    int n = ident(ev, id, sizeof id);
+    if (!n || (strcmp(id, "bytes") && strcmp(id, "words")))
+        fail(ev, "poke SEG:off bytes(...)|words(...)");
+    ev->p += n;
+    uint8_t data[512];
+    size_t len = elements(ev, id[0] == 'w', data, sizeof data);
+    skip_space(ev);
+    if (*ev->p)
+        fail(ev, "one value list per poke");
+    uint32_t at = real_addr(seg, off);
+    if (at + len > SNAPSHOT_BYTES)
+        fail(ev, "poke past the end of memory");
+    for (size_t i = 0; ev->m && i < len; i++) /* below 1 MB through the bus, so VGA memory works */
+        if (at + i < MEM_ONE_MEG)
+            mem_wr8(ev->m, at + (uint32_t)i, data[i]);
+        else
+            ev->m->mem[at + i] = data[i];
+}
+
+/* The call's items, then its pokes (which may name the items' buffers). */
+static bool eval_items(Eval *ev, const SynthCall *c, char *err, size_t cap)
 {
     if (setjmp(ev->fail)) {
         snprintf(err, cap, "%s", ev->err);
@@ -760,6 +827,10 @@ static bool eval_items(Eval *ev, char *err, size_t cap)
         item(ev);
         if (*ev->p && !isspace((unsigned char)*ev->p))
             fail(ev, "expected a space between items");
+    }
+    for (int i = 0; i < c->poke_count; i++) {
+        ev->p = c->pokes[i];
+        poke(ev);
     }
     return true;
 }
@@ -785,17 +856,20 @@ static bool validate(Machine *m, Synth *y)
         HookStats *stats;
         const LiftedEntry *e = find_entry(s, c->module, c->target, &stats);
         char err[200];
+        /* a chained call's names come from the calls before it, so the chain is evaluated in order */
+        eval_init(ev, NULL, c->items, 0, false, c->chained);
         if (!e) {
             log_msg("synth: %s: no lifted entry %s %s in this build", c->label, c->module, c->target);
+            eval_items(ev, c, err, sizeof err); /* names for the calls chained to it */
             continue; /* not fatal: a call list may cover entries of another build */
         }
-        if (e->region || e->no_shadow) {
-            log_msg("synth: %s: %s cannot be called synthetically (region or not shadowed)", c->label, e->name);
+        if (e->region || (e->no_shadow && !c->forced)) {
+            log_msg("synth: %s: %s cannot be called synthetically (%s)", c->label, e->name,
+                    e->region ? "region" : "not shadowed; call! opts in");
             ok = false;
             continue;
         }
-        eval_init(ev, NULL, c->items, 0, false);
-        if (!eval_items(ev, err, sizeof err)) {
+        if (!eval_items(ev, c, err, sizeof err)) {
             log_msg("synth: %s: %s", c->label, err);
             ok = false;
         }
@@ -870,9 +944,10 @@ static void check_restored(Machine *m, Synth *y, const char *label)
 static bool setup_call(Machine *m, Synth *y, const SynthCall *c, const ActiveHook *h, bool trigger_near, Eval *ev)
 {
     char err[200];
-    memset(m->mem + HMA_LO, 0, HMA_HI - HMA_LO);
-    eval_init(ev, m, c->items, dgroup_of(m, y, c->module), trigger_near);
-    if (!eval_items(ev, err, sizeof err)) {
+    if (!c->chained)
+        memset(m->mem + HMA_LO, 0, HMA_HI - HMA_LO);
+    eval_init(ev, m, c->items, dgroup_of(m, y, c->module), trigger_near, c->chained);
+    if (!eval_items(ev, c, err, sizeof err)) {
         log_msg("synth: %s: %s", c->label, err);
         return false;
     }
@@ -925,23 +1000,38 @@ static void fire(Machine *m, Synth *y, SynthTrigger *t)
     if (!ev)
         fatal("out of memory");
     save_trigger(m, y);
-    int checked = 0, mismatched = 0;
-    for (int i = t->first_call; i < t->first_call + t->call_count; i++) {
+    int checked = 0, mismatched = 0, end = t->first_call + t->call_count;
+    bool chain_ok = false; /* the machine holds the end state of the call before this one */
+    for (int i = t->first_call; i < end; i++) {
         const SynthCall *c = &y->calls[i];
+        bool keep_end = i + 1 < end && y->calls[i + 1].chained, kept = false;
         ActiveHook h;
+        if (c->chained && !chain_ok) {
+            log_msg("synth: %s: skipped: the call it chains from did not run, return or match", c->label);
+            chain_ok = false;
+            continue;
+        }
+        chain_ok = false;
         if (!target_hook(m, c, &h)) {
             log_msg("synth: %s: %s %s is not loaded here; skipped", c->label, c->module, c->target);
+            restore_trigger(m, y);
             continue;
         }
         if (!lift_entry_bytes_match(m, &h)) {
             log_msg("synth: %s: %s bytes differ at the entry; skipped", c->label, h.entry->name);
+            restore_trigger(m, y);
             continue;
+        }
+        if (c->chained) { /* the next call starts on the trigger's stack */
+            cpu_set_seg(&m->cpu, S_SS, y->cpu.seg[S_SS]);
+            m->cpu.r[R_SP].w = y->cpu.r[R_SP].w;
         }
         if (setup_call(m, y, c, &h, t->near, ev)) {
             m->slice_left = 2 * SYNTH_BUDGET_INSNS; /* no slice ends: devices stand still */
-            SynthResult r = lift_verify_synthetic(m, &h, c->label, SYNTH_BUDGET_INSNS);
+            SynthResult r = lift_verify_synthetic(m, &h, c->label, SYNTH_BUDGET_INSNS, keep_end);
             checked++;
             mismatched += r.mismatch;
+            kept = keep_end && r.returned && !r.mismatch;
             if (y->log) {
                 char text[sizeof r.at_result * 4 + 8] = "";
                 size_t n = 0;
@@ -952,6 +1042,10 @@ static void fire(Machine *m, Synth *y, SynthTrigger *t)
                         r.dx, r.ax, r.has_bytes ? " -> \"" : "", text, r.has_bytes ? "\"" : "",
                         r.mismatch ? " MISMATCH" : "");
             }
+        }
+        if (kept) {
+            chain_ok = true;
+            continue;
         }
         restore_trigger(m, y);
         if (y->check)
@@ -993,8 +1087,12 @@ void lift_synth_shutdown(Machine *m)
             log_msg("synth: %s after %s %s %d never fired (entered %d times); %d calls not checked",
                     y->triggers[i].label, y->triggers[i].module, y->triggers[i].target, y->triggers[i].nth,
                     y->triggers[i].count, y->triggers[i].call_count);
-    for (int i = 0; i < y->call_count; i++)
+    for (int i = 0; i < y->call_count; i++) {
         free(y->calls[i].items);
+        for (int k = 0; k < y->calls[i].poke_count; k++)
+            free(y->calls[i].pokes[k]);
+        free(y->calls[i].pokes);
+    }
     free(y->calls);
     free(y->triggers);
     free(y->mem);

@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #include "lift_internal.h"
@@ -20,17 +21,19 @@ static int failures;
     } while (0)
 
 enum { CODE_SEG = 0x1000, DATA_SEG = 0x3000, STACK_SEG = 0x2000, T_OFF = 0x40, F_OFF = 0x50, G_OFF = 0x70,
-       H_OFF = 0x80 };
+       H_OFF = 0x80, K_OFF = 0x90, KN_OFF = 0xA0, ENTRIES = 5 };
 
 /* main: mov cx,3 / call far T / loop / mov ax,1234h / hlt.  T: retf (the trigger).
  * F(a, b, far *p): *p = a + b, returns it in AX.  G(a, b) near, callee pops: returns a - b + DX.
- * H: never returns. */
+ * H: never returns.  K: returns the word at DS:200h (KN: the same code, LIFT_FAR_NOSHADOW). */
 static const uint8_t PROGRAM[] = {
     [0x00] = 0xB9, 0x03, 0x00, 0x9A, T_OFF, 0x00, CODE_SEG & 0xFF, CODE_SEG >> 8, 0xE2, 0xF9, 0xB8, 0x34, 0x12, 0xF4,
     [T_OFF] = 0xCB,
     [F_OFF] = 0x55, 0x8B, 0xEC, 0x8B, 0x46, 0x06, 0x03, 0x46, 0x08, 0xC4, 0x5E, 0x0A, 0x26, 0x89, 0x07, 0x5D, 0xCB,
     [G_OFF] = 0x55, 0x8B, 0xEC, 0x8B, 0x46, 0x04, 0x2B, 0x46, 0x06, 0x03, 0xC2, 0x5D, 0xC2, 0x04, 0x00,
     [H_OFF] = 0xEB, 0xFE, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90,
+    [K_OFF] = 0xA1, 0x00, 0x02, 0xCB, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90,
+    [KN_OFF] = 0xA1, 0x00, 0x02, 0xCB, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90,
 };
 
 static uint16_t seen_a, seen_b, seen_seg;
@@ -62,9 +65,23 @@ static void g_good(Machine *m)
 
 static void h_returns(Machine *m) { lift_ret_far(m, 0); }
 
-static LiftedEntry entries[3];
+/* K's lift: the word at DS:200h, or k_value whatever memory holds. */
+static LiftedFn k_impl;
+static uint16_t k_value;
+static void k_good(Machine *m)
+{
+    AX = mem_rd16(m, real_addr(DS, 0x200));
+    lift_ret_far(m, 0);
+}
+static void k_fixed(Machine *m)
+{
+    AX = k_value;
+    lift_ret_far(m, 0);
+}
 
-typedef struct Run { int mismatches, synth_calls[3], synth_mismatches[3], result_diffs; } Run;
+static LiftedEntry entries[ENTRIES];
+
+typedef struct Run { int mismatches, synth_calls[ENTRIES], synth_mismatches[ENTRIES], result_diffs; } Run;
 
 static Run run(LiftedFn f, const char *list, uint16_t f_scratch)
 {
@@ -81,9 +98,13 @@ static Run run(LiftedFn f, const char *list, uint16_t f_scratch)
                                 .scratch_regs = LIFT_REG_FLAGS };
     entries[2] = (LiftedEntry){ .module = "TEST.EXE", .off = H_OFF, .fn = h_returns, .name = "h",
                                 .scratch_regs = LIFT_REG_FLAGS };
-    for (int i = 0; i < 3; i++)
+    entries[3] = (LiftedEntry){ .module = "TEST.EXE", .off = K_OFF, .fn = k_impl ? k_impl : k_good, .name = "k",
+                                .scratch_regs = LIFT_REG_FLAGS };
+    entries[4] = (LiftedEntry){ .module = "TEST.EXE", .off = KN_OFF, .fn = k_impl ? k_impl : k_good, .name = "kn",
+                                .scratch_regs = LIFT_REG_FLAGS, .no_shadow = true };
+    for (int i = 0; i < ENTRIES; i++)
         memcpy(entries[i].signature, PROGRAM + entries[i].off, LIFT_SIGNATURE_LEN);
-    lift_add_table(m, entries, 3);
+    lift_add_table(m, entries, ENTRIES);
     setenv("INN_SYNTH_CHECK", "1", 1); /* a restore that is not exact ends the test */
     lift_synth_load(m, path);
     remove(path);
@@ -113,7 +134,7 @@ static Run run(LiftedFn f, const char *list, uint16_t f_scratch)
     }
     HookStats *stats = s->tables[t].stats;
     Run r = { .mismatches = lift_verify_mismatches(m), .result_diffs = stats[0].synth_result_diffs };
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < ENTRIES; i++) {
         r.synth_calls[i] = stats[i].synth_calls;
         r.synth_mismatches[i] = stats[i].synth_mismatches;
         CHECK(stats[i].shadow_calls == 0, "no live call was verified");
@@ -167,6 +188,82 @@ int main(void)
     /* an overlay is named PROG.EXE#stub: a # inside a word is part of the name, not a comment */
     r = run(f_good, "after TEST.EXE#1000 f 1   # not reached\ncall TEST.EXE#1000 f 1 2 buf(2)\n", F_SCRATCH);
     CHECK(r.synth_calls[0] == 0, "an overlay module name parses and its trigger is not reached");
+
+    /* poke: written in the setup of the next call only, on top of the trigger state */
+    static const char POKE[] = "after TEST.EXE 0000:0040 2\n"
+                               "poke DS:0x200 words(9)\n"
+                               "call TEST.EXE k\n"
+                               "call TEST.EXE k\n"
+                               "poke DGROUP:0x200 bytes(0x34, 0x12)   # DGROUP is DS here\n"
+                               "poke [DS:0x202]:0x10 words(off(q), seg(q))   # a nested address, a call's name\n"
+                               "call TEST.EXE k let q=buf(4)\n";
+    k_impl = k_good;
+    r = run(f_good, POKE, F_SCRATCH);
+    CHECK(r.synth_calls[3] == 3 && r.mismatches == 0, "poked calls verify (%d calls, %d mismatches)",
+          r.synth_calls[3], r.mismatches);
+    k_impl = k_fixed;
+    k_value = 9;
+    r = run(f_good, POKE, F_SCRATCH);
+    CHECK(r.synth_mismatches[3] == 2, "the poke reaches the original; the next call starts without it (%d)",
+          r.synth_mismatches[3]);
+    k_value = 0x1234;
+    r = run(f_good, POKE, F_SCRATCH);
+    CHECK(r.synth_mismatches[3] == 2, "bytes() pokes little-endian (%d)", r.synth_mismatches[3]);
+
+    /* chain: the end state of a call (memory, its buffers and names) is the start of the next */
+    static const char CHAIN[] = "after TEST.EXE 0000:0040 2\n"
+                                "call TEST.EXE f 3 4 p=buf(2)\n"
+                                "chain TEST.EXE f [0xFFFF:0x10] 2 p\n"
+                                "chain TEST.EXE f [0xFFFF:0x10] 0 far(DS,0x200)\n"
+                                "chain TEST.EXE k\n"
+                                "call TEST.EXE k\n";
+    k_impl = k_good;
+    r = run(f_good, CHAIN, F_SCRATCH);
+    CHECK(r.synth_calls[0] == 3 && r.synth_calls[3] == 2 && r.mismatches == 0, "chained calls verify (%d, %d, %d)",
+          r.synth_calls[0], r.synth_calls[3], r.mismatches);
+    k_impl = k_fixed;
+    k_value = 9;
+    r = run(f_good, CHAIN, F_SCRATCH);
+    CHECK(r.synth_mismatches[3] == 1 && r.synth_calls[3] == 2,
+          "the chain carries 3+4+2 to k; the plain call after it starts from the trigger (%d)",
+          r.synth_mismatches[3]);
+    k_impl = k_good;
+    r = run(f_bad_memory, CHAIN, F_SCRATCH);
+    CHECK(r.synth_calls[0] == 1 && r.synth_calls[3] == 1, "a mismatch ends the chain (f %d, k %d)",
+          r.synth_calls[0], r.synth_calls[3]);
+
+    /* call!: a NOSHADOW entry, shadowed on request */
+    r = run(f_good, "after TEST.EXE 0000:0040 2\npoke DS:0x200 words(3)\ncall! TEST.EXE kn\nchain! TEST.EXE kn\n",
+            F_SCRATCH);
+    CHECK(r.synth_calls[4] == 2 && r.mismatches == 0, "call! verifies a NOSHADOW entry (%d, %d)", r.synth_calls[4],
+          r.mismatches);
+    k_impl = k_fixed;
+    k_value = 5;
+    r = run(f_good, "after TEST.EXE 0000:0040 2\npoke DS:0x200 words(3)\ncall! TEST.EXE kn\n", F_SCRATCH);
+    CHECK(r.synth_mismatches[4] == 1, "call! compares the NOSHADOW lift (%d)", r.synth_mismatches[4]);
+    k_impl = NULL;
+
+    /* list errors end the run before it starts */
+    static const char *const BAD[] = {
+        "after TEST.EXE 0000:0040 2\ncall TEST.EXE kn\n",              /* NOSHADOW without call! */
+        "after TEST.EXE 0000:0040 2\ncall TEST.EXE k\npoke DS:0 words(1)\n", /* a poke with no call after it */
+        "after TEST.EXE 0000:0040 2\nchain TEST.EXE k\n",              /* nothing to chain from */
+        "after TEST.EXE 0000:0040 2\npoke DS:0 words(1) words(2)\ncall TEST.EXE k\n",
+        "after TEST.EXE 0000:0040 2\ncall TEST.EXE k let q=buf(2)\ncall TEST.EXE k q\n", /* names end with the chain */
+    };
+    for (size_t i = 0; i < sizeof BAD / sizeof BAD[0]; i++) {
+        fflush(NULL);
+        pid_t pid = fork();
+        if (pid == 0) {
+            if (!freopen("/dev/null", "w", stderr))
+                _exit(2);
+            run(f_good, BAD[i], F_SCRATCH);
+            _exit(0);
+        }
+        int status = 0;
+        waitpid(pid, &status, 0);
+        CHECK(WIFEXITED(status) && WEXITSTATUS(status) == 1, "bad list %zu is rejected (status %d)", i, status);
+    }
     if (failures)
         fprintf(stderr, "%d check(s) failed\n", failures);
     return failures != 0;
