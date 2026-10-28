@@ -670,7 +670,7 @@ CasinoLand and SierraLand pairs follow the same views, but only the hub's was ex
 (`docs/legal.md` is the checklist). Fields: `siteName`, `operatorName`, `contactEmail`, `privacyEmail` (optional,
 falls back to `contactEmail`), `dmcaAgent` `{name, address, email, phone}`, `governingLaw`, `serverLocation`,
 `effectiveDate`, `termsVersion` (an integer, starting at 1), `minimumAge` (18). Optional extras: `auditRetentionDays`
-(shown in the privacy notice, default 90), `telemetryRetentionDays` (shown in the privacy notice, default 365, the
+(shown in the privacy notice, default 90), `telemetryRetentionDays` (shown in the privacy notice, default 90, the
 Log Analytics workspace's retention), `siteUrl` (see "Search and link previews"), `telemetry` `{connectionString}`
 (see "Diagnostics"), `authServer` (overrides `AUTH_SERVER`) and `gameServer`. The game line
 the page dials is `gameServer` when set, else the sign-in server's origin as `ws(s)` (innkeeperd serves both on one
@@ -1086,15 +1086,20 @@ under GPC or DNT; stored as `inn.diag` in `localStorage`, inside try/catch like 
 
 | What | Envelope | Fields |
 |---|---|---|
-| page view | `PageviewData` | `name` and `url` = the path only (no query string, no hash), `duration` = load time |
-| runtime started | `EventData` `runtime_started` | measurements `runtimeDownloadMs` (request to the wasm arriving) and `runtimeStartMs` |
-| errors | `ExceptionData` | `typeName`, `message` (1 KB at most), `stack` (2 KB at most) |
-| online session | `EventData` `connect` | `result` = `ok`, `failed` or `closed`; `duration` bucket (`under-2s`, `2-5s`, `5-15s`, `15-60s`, `1-5min`, `5-30min`, `over-30min`) |
+| page view | `PageviewData` | `id` (the trace's root span), `name` and `url` = the path only (no query string, no hash), `duration` = load time |
+| page starts the runtime | `RemoteDependencyData` `start dosrt` | type `Runtime`, target `dosrt`, `duration` = download and start, `resultCode` `ok` |
+| runtime start | `RequestData` `start` (role `dosrt`) | `duration` = start; property `runtime` = `dosbox` or `native`; measurement `downloadMs` |
+| runtime started | `EventData` `runtime_started` (role `dosrt`) | measurements `runtimeDownloadMs` (request to the wasm arriving) and `runtimeStartMs` |
+| errors | `ExceptionData` | `typeName`, `message` (1 KB at most), `stack` (2 KB at most); role `dosrt` when the stack is in the wasm or the runtime's loader, else `web` |
+| online session | `EventData` `connect` (role `dosrt`) | `result` = `ok`, `failed` or `closed`; `duration` bucket (`under-2s`, `2-5s`, `5-15s`, `15-60s`, `1-5min`, `5-30min`, `over-30min`) |
+| the line | `RemoteDependencyData` `WS line` (role `dosrt`) | type `WebSocket`, target `innkeeperd` (never the address), `duration` from dialling to the end, `resultCode` `closed`, `failed`, or at `pagehide` `open` or `dialing` |
+| an /auth call | `RemoteDependencyData` `<METHOD> <route>` | type `Fetch`, target `innkeeperd`, the route with numbers as `{id}` and long values as `{value}` (no query), `resultCode` = the HTTP status (`0`: no answer) |
 | display filter | `EventData` `display_filter` | `filter` (an id from the fixed list), when the visitor picks one |
 | capabilities | `EventData` `capabilities` | `webgl2`, `jspi` (true or false) |
 
 Every envelope has `iKey`, `time`, and the tags `ai.session.id` (random per page load, kept in memory only),
-`ai.operation.name` (the path) and `ai.internal.sdkVersion`. There is no user, device or location tag: Application
+`ai.operation.name` (the path), `ai.operation.id` (the trace, random per page load, in memory only), `ai.cloud.role`
+(`web` or `dosrt`), `ai.operation.parentId` (except the page view) and `ai.internal.sdkVersion`. There is no user, device or location tag: Application
 Insights derives browser and OS from the User-Agent header and masks the IP address (coarse location only). No
 cookie is set and no persistent ID exists. Error text is scrubbed first: web addresses become file names (no host,
 directory, query or hash), `ws:`, `wss:` and any other address become `[address]`, bare `host:port` and IPv4
@@ -1105,9 +1110,29 @@ installation, server addresses. An example envelope:
 ```
 {"name":"Microsoft.ApplicationInsights.00000000111122223333444444444444.Event","time":"2026-10-18T02:12:43.361Z",
  "iKey":"00000000-1111-2222-3333-444444444444",
- "tags":{"ai.session.id":"521bf2e6c3900bf4","ai.operation.name":"/","ai.internal.sdkVersion":"web-diag:1"},
+ "tags":{"ai.session.id":"521bf2e6c3900bf4","ai.operation.name":"/","ai.operation.id":"6f1c0b3e9a2d47c58e0f1a2b3c4d5e6f",
+  "ai.cloud.role":"dosrt","ai.operation.parentId":"a4c2e8f01b3d5769","ai.internal.sdkVersion":"web-diag:2"},
  "data":{"baseType":"EventData","baseData":{"ver":2,"name":"connect","properties":{"result":"ok","duration":"5-15s"},"measurements":{}}}}
 ```
+
+#### The trace
+
+One page load is one trace (one `ai.operation.id`), so the portal's transaction view and Application Map show the
+page, the runtime and the server together:
+
+```
+web  page view ─ start dosrt ─▶ dosrt  start ─ WS line ─▶ innkeeperd  WS line ─ <message kind> ─▶ <land>
+web  page view ─ GET /auth/session ─▶ innkeeperd  GET /auth/session
+```
+
+The server joins it only when asked: with diagnostics on, the line's WebSocket address carries
+`traceparent=00-<trace>-<WS line span>-01` (beside `session=`) and each `/auth` fetch the header `traceparent`
+(W3C trace context; innkeeperd allows the header in CORS). Both hold only the two random IDs. With diagnostics off,
+under GPC or DNT, or without a connection string, neither is added and the server sends nothing for that line or
+call; turning the switch off mid-session stops the page at once and the server from the next connection. What
+innkeeperd then sends (the line's result and length, one item per client message with its kind, land and result,
+one per save request and per `/auth` call, never an account, name, identity, address or content) is in the server
+repo's `docs/server/innkeeperd.md`, section 10, and `docs/server/privacy.md`.
 
 The privacy notice (`legal/privacy.html`) says all of this to visitors. Local test: put a dummy string whose
 `IngestionEndpoint` is `http://127.0.0.1:<port>/` in `site.json` (loopback http is accepted for that) and run a fake
@@ -1227,7 +1252,7 @@ to test the generator.
 
 The values must equal what the servers run with, since the page states them to visitors: `termsVersion` is the server's
 `--terms-version`, `minimumAge` its `--minimum-age`, `auditRetentionDays` its `--audit-retention-days`, and
-`telemetryRetentionDays` the retention of the diagnostics workspace (the generator writes 90 when the variable is blank; a site.json without the field shows 365). `docs/legal.md` describes each field and what
+`telemetryRetentionDays` the retention of the diagnostics workspace (the generator writes 90 when the variable is blank; a site.json without the field shows 90). `docs/legal.md` describes each field and what
 the legal pages do with it. `SITE_URL`, `SITE_AUTH_SERVER` and `SITE_GAME_SERVER` also feed the CSP, so change them
 only together with the servers' `--page-origin`.
 

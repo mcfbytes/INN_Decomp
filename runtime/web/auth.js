@@ -139,15 +139,21 @@ const InnAuth = (() => {
   // words), 'server' (5xx, such as 503 busy). `code` is the server's error code.
   async function call(method, path, body, opts = {}) {
     let res;
+    // null with diagnostics off (or no telemetry.js, as under Node): no header, nothing sent.
+    const traced = typeof Telemetry === 'undefined' ? null : Telemetry.traceFetch(method, path);
     try {
       res = await fetch(`${st.base}${path}`, {
         method,
         signal: opts.timeout ? AbortSignal.timeout(opts.timeout) : undefined,
         headers: Object.assign({ accept: 'application/json' }, st.token ? { authorization: `Bearer ${st.token}` } : {},
-          body === undefined ? {} : { 'content-type': 'application/json' }),
+          body === undefined ? {} : { 'content-type': 'application/json' }, traced ? { traceparent: traced.header } : {}),
         body: body === undefined ? undefined : JSON.stringify(body),
       });
-    } catch { throw new AuthError('network', 'The sign-in server did not answer.'); }
+    } catch {
+      if (traced) traced.done(0);
+      throw new AuthError('network', 'The sign-in server did not answer.');
+    }
+    if (traced) traced.done(res.status);
     if (res.status === 204 && opts.empty !== false) return null;
     let data = null;
     try { data = await res.json(); } catch { /* no body */ }
