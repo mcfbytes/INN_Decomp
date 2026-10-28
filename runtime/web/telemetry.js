@@ -155,11 +155,11 @@ const Telemetry = (() => {
   }
 
   const sessionId = spanId();     // per page load, in memory only
-  // The trace's fixed spans: page view, the page starting the runtime, the runtime's start, and its line.
+  // The trace's fixed spans: page view, the page starting the runtime, the runtime's start, and its connect.
   const trace = { operationId: randomHex(16), page: spanId(), start: spanId(), runtime: spanId(), line: spanId() };
   const WEB = { role: 'web', parentId: trace.page };
   const DOSRT = { role: 'dosrt', parentId: trace.runtime };
-  const line = { armed: false, opened: false, sent: false, t0: 0 };
+  const line = { armed: false, sent: false, t0: 0 };
   let conn = null;                // set by init() when site.json has a usable connection string
   let started = false;           // init() has run
   let on = false;                 // diagnostics are being sent
@@ -279,15 +279,15 @@ const Telemetry = (() => {
     // What the line's address carries so the server joins this trace; empty, and nothing reaches the server, when off.
     lineTraceparent() {
       if (!on) return '';
-      Object.assign(line, { armed: true, opened: false, sent: false, t0: performance.now() });
+      Object.assign(line, { armed: true, sent: false, t0: performance.now() });
       return traceparent(trace.operationId, trace.line);
     },
     // The online-session result: ok (the line opened), failed (it did not), closed (an open line ended).
-    // Only the result and a coarse duration; never the address. The line's own span goes out once it is over.
+    // Only the result and a coarse duration; never the address. The connect span ends when the line opens or fails:
+    // the session's length is the server's WS line request, so App Map's edge shows the wait to connect.
     connect(result, ms) {
       api.event('connect', { result, duration: bucket(ms) }, {}, DOSRT);
-      if (result === 'ok') line.opened = true;
-      else endLine(result);
+      if (result !== 'closed') endConnect(result);
     },
     // An /auth call: the header to add (or null when off) and done(status) once it answered (0: no answer).
     traceFetch(method, path) {
@@ -314,13 +314,13 @@ const Telemetry = (() => {
   });
   addEventListener('unhandledrejection', (e) => api.error(e.reason));
 
-  function endLine(result) {
+  function endConnect(result) {
     if (!line.armed || line.sent) return;
     line.sent = true;
-    add('RemoteDependencyData', dependencyBase(trace.line, 'WS line', 'WebSocket', SERVER, performance.now() - line.t0, result, result !== 'failed'), DOSRT);
+    add('RemoteDependencyData', dependencyBase(trace.line, 'WS connect', 'WebSocket', SERVER, performance.now() - line.t0, result, result !== 'failed'), DOSRT);
   }
   // pagehide is the last reliable moment on every browser; hidden covers a tab that is switched away from and killed.
-  addEventListener('pagehide', () => { endLine(line.opened ? 'open' : 'dialing'); flush(true); });
+  addEventListener('pagehide', () => { endConnect('dialing'); flush(true); });
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flush(true); });
 
   return api;
