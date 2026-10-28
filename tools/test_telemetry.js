@@ -80,9 +80,9 @@ const rq = T.envelope(conn, child, 'RequestData', T.requestBase('555566667777888
 assert.equal(rq.name.split('.').pop(), 'Request');
 assert.deepEqual(rq.data.baseData, { ver: 2, id: '5555666677778888', name: 'start', duration: '00:00:02.500', responseCode: 'ok', success: true,
   properties: { runtime: 'dosbox' }, measurements: { downloadMs: 900 } });
-const dep = T.envelope(conn, child, 'RemoteDependencyData', T.dependencyBase('9999aaaabbbbcccc', 'WS line', 'WebSocket', 'innkeeperd', 60000, 'failed', false), when);
+const dep = T.envelope(conn, child, 'RemoteDependencyData', T.dependencyBase('9999aaaabbbbcccc', 'WS connect', 'WebSocket', 'innkeeperd', 60000, 'failed', false), when);
 assert.equal(dep.name.split('.').pop(), 'RemoteDependency');
-assert.deepEqual(dep.data.baseData, { ver: 2, id: '9999aaaabbbbcccc', name: 'WS line', type: 'WebSocket', target: 'innkeeperd', duration: '00:01:00.000',
+assert.deepEqual(dep.data.baseData, { ver: 2, id: '9999aaaabbbbcccc', name: 'WS connect', type: 'WebSocket', target: 'innkeeperd', duration: '00:01:00.000',
   resultCode: 'failed', success: false, properties: {} });
 assert.equal(T.traceparent(OP, '9999aaaabbbbcccc'), `00-${OP}-9999aaaabbbbcccc-01`);
 assert.match(T.traceparent(OP, '9999aaaabbbbcccc'), /^00-[0-9a-f]{32}-[0-9a-f]{16}-01$/);

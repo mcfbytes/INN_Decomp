@@ -1092,7 +1092,7 @@ under GPC or DNT; stored as `inn.diag` in `localStorage`, inside try/catch like 
 | runtime started | `EventData` `runtime_started` (role `dosrt`) | measurements `runtimeDownloadMs` (request to the wasm arriving) and `runtimeStartMs` |
 | errors | `ExceptionData` | `typeName`, `message` (1 KB at most), `stack` (2 KB at most); role `dosrt` when the stack is in the wasm or the runtime's loader, else `web` |
 | online session | `EventData` `connect` (role `dosrt`) | `result` = `ok`, `failed` or `closed`; `duration` bucket (`under-2s`, `2-5s`, `5-15s`, `15-60s`, `1-5min`, `5-30min`, `over-30min`) |
-| the line | `RemoteDependencyData` `WS line` (role `dosrt`) | type `WebSocket`, target `innkeeperd` (never the address), `duration` from dialling to the end, `resultCode` `closed`, `failed`, or at `pagehide` `open` or `dialing` |
+| the connect | `RemoteDependencyData` `WS connect` (role `dosrt`) | type `WebSocket`, target `innkeeperd` (never the address), `duration` from dialling until the line opens or fails, `resultCode` `ok`, `failed`, or at `pagehide` while still dialling `dialing`; sent at once, not when the line ends |
 | an /auth call | `RemoteDependencyData` `<METHOD> <route>` | type `Fetch`, target `innkeeperd`, the route with numbers as `{id}` and long values as `{value}` (no query), `resultCode` = the HTTP status (`0`: no answer) |
 | display filter | `EventData` `display_filter` | `filter` (an id from the fixed list), when the visitor picks one |
 | capabilities | `EventData` `capabilities` | `webgl2`, `jspi` (true or false) |
@@ -1121,12 +1121,14 @@ One page load is one trace (one `ai.operation.id`), so the portal's transaction 
 page, the runtime and the server together:
 
 ```
-web  page view ─ start dosrt ─▶ dosrt  start ─ WS line ─▶ innkeeperd  WS line ─ <message kind> ─▶ <land>
+web  page view ─ start dosrt ─▶ dosrt  start ─ WS connect ─▶ innkeeperd  WS line ─ <message kind> ─▶ <land>
 web  page view ─ GET /auth/session ─▶ innkeeperd  GET /auth/session
 ```
 
-The server joins it only when asked: with diagnostics on, the line's WebSocket address carries
-`traceparent=00-<trace>-<WS line span>-01` (beside `session=`) and each `/auth` fetch the header `traceparent`
+The dosrt -> innkeeperd edge is the wait to connect (`WS connect`, sent as soon as the line opens or fails); how
+long a session lasted, and how it ended, is innkeeperd's `WS line` request, so Application Map's average on the edge
+is not a session length. The server joins it only when asked: with diagnostics on, the line's WebSocket address carries
+`traceparent=00-<trace>-<WS connect span>-01` (beside `session=`) and each `/auth` fetch the header `traceparent`
 (W3C trace context; innkeeperd allows the header in CORS). Both hold only the two random IDs. With diagnostics off,
 under GPC or DNT, or without a connection string, neither is added and the server sends nothing for that line or
 call; turning the switch off mid-session stops the page at once and the server from the next connection. What
