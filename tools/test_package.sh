@@ -115,7 +115,7 @@ for k, v in sh.items():
     if v.endswith('.glsl'):
         t = open(os.path.join(d, v)).read()
         assert re.search(r'copyright|public domain|license|licence', t, re.I), k + ' lost its licence header'
-app = [f for f in os.listdir(os.path.join(d, 'assets')) if f.startswith('app.')][0]
+app = [f for f in os.listdir(os.path.join(d, 'assets')) if f.startswith('app.') and f.endswith('.js')][0]
 js = open(os.path.join(d, 'assets', app)).read()
 assert 'Filters' in js and 'glcanvas' in js and not re.search(r'\beval\s*\(|new Function', js)
 P
