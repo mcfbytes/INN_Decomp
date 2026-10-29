@@ -163,6 +163,59 @@ void lift_add_table(Machine *m, const LiftedEntry *entries, int count)
     s->table_count++;
 }
 
+void lift_add_module(Machine *m, const LiftedModule *module)
+{
+    LiftState *s = lift_state(m);
+    if (s->module_meta_count >= MAX_MODULE_META)
+        fatal("too many lifted module images");
+    s->module_meta[s->module_meta_count++] = module;
+}
+
+static uint64_t image_hash(const uint8_t *p, uint32_t n)
+{
+    uint64_t h = 0xCBF29CE484222325ULL; /* FNV-1a, as in tools/gen_lift_table.py */
+    for (uint32_t i = 0; i < n; i++)
+        h = (h ^ p[i]) * 0x100000001B3ULL;
+    return h;
+}
+
+/* Whether this module name has a recorded build image at all (tests and images loaded by a program do not). */
+static bool module_has_meta(const LiftState *s, const char *module)
+{
+    for (int i = 0; i < s->module_meta_count; i++)
+        if (!strcmp(s->module_meta[i]->name, module))
+            return true;
+    return false;
+}
+
+static bool module_image_matches(const LiftState *s, const char *module, uint32_t bytes, uint64_t hash)
+{
+    for (int i = 0; i < s->module_meta_count; i++) {
+        const LiftedModule *meta = s->module_meta[i];
+        if (!strcmp(meta->name, module) && meta->image_bytes == bytes && meta->image_hash == hash)
+            return true;
+    }
+    return false;
+}
+
+/* Whether the module at load_seg is the build its tables describe; true for modules without a recorded image. */
+static bool module_build_matches(const LiftState *s, const char *module, uint16_t load_seg)
+{
+    for (int i = 0; i < s->module_count; i++)
+        if (s->modules[i].load_seg == load_seg && !strcmp(s->modules[i].name, module))
+            return s->modules[i].build_matches;
+    return true;
+}
+
+static void set_module_build(LiftState *s, const char *module, uint16_t load_seg, bool matches)
+{
+    for (int i = 0; i < s->module_count; i++)
+        if (s->modules[i].load_seg == load_seg && !strcmp(s->modules[i].name, module)) {
+            s->modules[i].build_matches = matches;
+            return;
+        }
+}
+
 static int by_linear(const void *a, const void *b)
 {
     const ActiveHook *x = a, *y = b;
@@ -237,6 +290,7 @@ static void remember_module(LiftState *s, const char *module, uint16_t load_seg)
             return;
         s->module_count++;
         snprintf(s->modules[i].name, sizeof s->modules[i].name, "%s", module);
+        s->modules[i].build_matches = true;
     }
     s->modules[i].load_seg = load_seg;
 }
@@ -352,6 +406,7 @@ void lift_module_loaded(Machine *m, const char *module, uint16_t load_seg, uint3
     if (!s)
         return;
     remember_module(s, module, load_seg);
+    set_module_build(s, module, load_seg, true);
     if (m->trace)
         log_msg("lift: module %s at %04X (%u bytes)", module, load_seg, image_bytes);
     arm_module(m, module, load_seg, image_bytes, load_seg, false);
@@ -364,10 +419,44 @@ void lift_module_loaded(Machine *m, const char *module, uint16_t load_seg, uint3
     }
 }
 
+bool lift_module_loaded_image(Machine *m, const char *module, uint16_t load_seg, const uint8_t *image,
+                              uint32_t image_bytes)
+{
+    LiftState *s = lift_state(m);
+    if (!s)
+        return false;
+    uint64_t hash = image_hash(image, image_bytes);
+    if (module_has_meta(s, module) && !module_image_matches(s, module, image_bytes, hash)) {
+        if (module_build_matches(s, module, load_seg))
+            log_msg("lift: %s at %04X is a different build (%u bytes, hash %016llX); running its original code",
+                    module, load_seg, image_bytes, (unsigned long long)hash);
+        remember_module(s, module, load_seg);
+        set_module_build(s, module, load_seg, false);
+        lift_module_unloaded(m, load_seg, (image_bytes + 15) / 16);
+        lift_coverage_module(m, module, load_seg, image_bytes, false);
+        return false;
+    }
+    lift_module_loaded(m, module, load_seg, image_bytes);
+    return true;
+}
+
 void lift_overlay_loaded(Machine *m, const char *module, uint16_t load_seg, uint32_t image_bytes,
                          uint16_t reloc_base)
 {
-    if (!lift_state(m))
+    LiftState *s = lift_state(m);
+    if (!s)
+        return;
+    /* Overlay code comes from the program's own EXE: a program that is another build had its
+     * resident entries rejected, and its overlays go with them. */
+    const char *owner = module;
+    char program[16];
+    const char *hash = strchr(module, '#');
+    if (hash && (size_t)(hash - module) < sizeof program) {
+        memcpy(program, module, (size_t)(hash - module));
+        program[hash - module] = 0;
+        owner = program;
+    }
+    if (!module_build_matches(s, owner, reloc_base))
         return;
     if (m->trace)
         log_msg("lift: overlay %s at %04X (%u bytes)", module, load_seg, image_bytes);

@@ -6,7 +6,8 @@
 #include "lift.h"
 
 enum { SHADOW_STALL_INSNS = 200000000 };
-enum { MAX_TABLES = 64, MAX_ACTIVE = 8192, MAX_NESTING = 64, HOOK_BITMAP_BYTES = MEM_ONE_MEG / 8, MAX_IMAGES = 16 };
+enum { MAX_TABLES = 64, MAX_ACTIVE = 8192, MAX_NESTING = 64, HOOK_BITMAP_BYTES = MEM_ONE_MEG / 8, MAX_IMAGES = 16,
+       MAX_MODULE_META = 128 };
 
 /* Shadow-verification counts of one entry, kept across loads (overlays come and go). */
 typedef struct HookStats {
@@ -55,8 +56,10 @@ typedef struct LiftState {
     struct Replay *replay;
     const char *only; /* INN_LIFT_ONLY: comma-separated names to hook, all when NULL */
     struct VerifyState *verify;
-    struct { char name[16]; uint16_t load_seg; } modules[16];
+    struct { char name[16]; uint16_t load_seg; bool build_matches; } modules[16];
     int module_count;
+    const LiftedModule *module_meta[MAX_MODULE_META];
+    int module_meta_count;
     struct Synth *synth;     /* INN_SYNTH: synthetic call lists (lift_synth.c), NULL when off */
     uint64_t nested_budget;  /* nonzero: nested runs stop once cpu.instructions reaches it */
     bool nested_abort;       /* set when the budget ran out; every nested run then unwinds */
