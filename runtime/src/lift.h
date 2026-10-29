@@ -66,6 +66,9 @@ void lift_shutdown(Machine *m);
 void lift_add_table(Machine *m, const LiftedEntry *entries, int count);
 
 /* A loader announces where a module image now lives; matching entries become active. */
+/* Module name a loader announces for a DOS path: upper-case file name, with the CAWDOR gallery's
+ * TWGENN.EXE told apart from Twinion's build. */
+void lift_module_name(const char *dos_path, char *out, size_t cap);
 void lift_module_loaded(Machine *m, const char *module, uint16_t load_seg, uint32_t image_bytes);
 /* Load segment of a module announced by lift_module_loaded, or 0 if it is not loaded. */
 uint16_t lift_module_base(Machine *m, const char *module);
