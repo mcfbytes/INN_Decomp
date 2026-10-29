@@ -154,6 +154,21 @@ static void test_overlays(void)
     machine_destroy(m);
 }
 
+static void test_module_names(void)
+{
+    char name[16];
+    lift_module_name("C:\\INN\\CAWDOR\\TWGENN.EXE", name, sizeof name);
+    CHECK(!strcmp(name, "TWGENN-CAW.EXE"), "Cawdor gallery is its own module (%s)", name);
+    lift_module_name("c:\\inn\\cawdor\\twgenn.exe", name, sizeof name);
+    CHECK(!strcmp(name, "TWGENN-CAW.EXE"), "case-insensitive Cawdor gallery (%s)", name);
+    lift_module_name("C:\\INN\\TWINION\\TWGENN.EXE", name, sizeof name);
+    CHECK(!strcmp(name, "TWGENN.EXE"), "Twinion gallery keeps its name (%s)", name);
+    lift_module_name("C:\\INN\\CAWDOR\\RUINS.EXE", name, sizeof name);
+    CHECK(!strcmp(name, "RUINS.EXE"), "RUINS is its own module (%s)", name);
+    lift_module_name("C:\\INN\\YSERBIUS\\DARKSTRT.EXE", name, sizeof name);
+    CHECK(!strcmp(name, "DARKSTRT.EXE"), "a plain program name (%s)", name);
+}
+
 int main(void)
 {
     enum { ORIGINAL_RESULT = 5 * 2 + 1, LIFTED_F_RESULT = 5 * 3 + 1 + 100 };
@@ -177,6 +192,7 @@ int main(void)
     r = run_program(lifted_f, F_OFF, false, true, false);
     CHECK(r.ax == LIFTED_F_RESULT, "INN_LIFT_ONLY with the name hooks it (AX=%u)", r.ax);
     unsetenv("INN_LIFT_ONLY");
+    test_module_names();
     test_overlays();
     if (failures)
         fprintf(stderr, "%d check(s) failed\n", failures);

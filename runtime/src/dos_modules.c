@@ -40,13 +40,50 @@ static bool image_start(const DosFile *f, off_t *start)
     return true;
 }
 
-/* Upper-case file name of a DOS path, as loaders announce modules. */
-static void module_name(const char *dos_path, char *out, size_t cap)
+/* True when the path contains this directory component, case-insensitively. */
+static bool has_component(const char *path, const char *component)
+{
+    size_t n = strlen(component);
+    for (const char *p = path; *p; p++) {
+        if (*p != '\\' && *p != '/')
+            continue;
+        const char *q = p + 1;
+        size_t i = 0;
+        while (i < n && q[i] && toupper((unsigned char)q[i]) == component[i])
+            i++;
+        if (i == n && (q[i] == '\\' || q[i] == '/' || q[i] == 0))
+            return true;
+    }
+    return false;
+}
+
+/* Upper-case file name of a DOS path, as loaders announce modules. The 1995 Cawdor client ships its
+ * own TWGENN.EXE build under \INN\CAWDOR; it has different code from Twinion's gallery at the same
+ * module name, so it is announced under its own name. */
+static bool name_is(const char *name, const char *want)
+{
+    for (; *name && *want; name++, want++)
+        if (toupper((unsigned char)*name) != *want)
+            return false;
+    return *name == 0 && *want == 0;
+}
+
+void lift_module_name(const char *dos_path, char *out, size_t cap)
 {
     const char *base = strrchr(dos_path, '\\');
-    snprintf(out, cap, "%s", base ? base + 1 : dos_path);
+    base = base ? base + 1 : dos_path;
+    if (has_component(dos_path, "CAWDOR") && name_is(base, "TWGENN.EXE")) {
+        snprintf(out, cap, "TWGENN-CAW.EXE");
+        return;
+    }
+    snprintf(out, cap, "%s", base);
     for (char *p = out; *p; p++)
         *p = (char)toupper((unsigned char)*p);
+}
+
+static void module_name(const char *dos_path, char *out, size_t cap)
+{
+    lift_module_name(dos_path, out, cap);
 }
 
 /* Overlay list of the EXE behind f, parsed once per file. */
