@@ -50,8 +50,12 @@ translation unit and cannot see file-local definitions. Each lifted source file 
 at their load segment. Drivers (`*.DRV` and Miles `*.ADV`, raw images) and LSCI DLLs (`*.DLL`, image after the
 relocation list) are announced when a file read lands their image start on a paragraph
 boundary (`runtime/src/dos_modules.c`); their `seg:off` are relative to the image start. Borland
-overlays are announced per overlay (section "Overlays"). Freeing
-a DOS memory block disarms every hook inside it. On first execution the bytes at the entry are compared with the signature; a
+overlays are announced per overlay (section "Overlays"). The generator also records each module's load image
+(size and an FNV-1a hash of the file's image bytes), and a DLL, driver or Miles `.ADV` whose image is not one of
+that module's recorded builds is not armed at all: it logs one line naming the module and runs entirely as the
+original, so code from one build is never patched into another. (Programs (EXEs) are not compared this way: a
+packed program unpacks over its own image after the announcement, so their entries rely on the signature check.)
+Freeing a DOS memory block disarms every hook inside it. On first execution the bytes at the entry are compared with the signature; a
 mismatch (another build, or code not yet unpacked) logs once and runs the original instead.
 
 ## Overlays

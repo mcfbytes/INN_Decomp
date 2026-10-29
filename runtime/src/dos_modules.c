@@ -148,5 +148,11 @@ void dos_note_module_read(Machine *m, const DosFile *f, off_t file_pos, uint16_t
     lseek(f->fd, file_pos + bytes, SEEK_SET);
     char name[16];
     module_name(f->dos_path, name, sizeof name);
-    lift_module_loaded(m, name, (uint16_t)(image_linear / PARAGRAPH), (uint32_t)(size - start));
+    uint32_t image_bytes = size > start ? (uint32_t)(size - start) : 0;
+    uint8_t *image = image_bytes ? malloc(image_bytes) : NULL;
+    if (image && pread(f->fd, image, image_bytes, start) == (ssize_t)image_bytes)
+        lift_module_loaded_image(m, name, (uint16_t)(image_linear / PARAGRAPH), image, image_bytes);
+    else
+        lift_module_loaded(m, name, (uint16_t)(image_linear / PARAGRAPH), image_bytes);
+    free(image);
 }

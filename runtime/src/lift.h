@@ -65,6 +65,19 @@ void lift_shutdown(Machine *m);
 /* Adds a table of lifted functions; tables are static data owned by the caller. */
 void lift_add_table(Machine *m, const LiftedEntry *entries, int count);
 
+/* The load image a module was lifted from (gen_lift_table.py emits one per module): a loader that
+ * reads an image from a file compares it before arming, so another build runs its original code. */
+typedef struct LiftedModule {
+    const char *name;
+    uint32_t image_bytes;
+    uint64_t image_hash; /* FNV-1a over the image's bytes, as in the file */
+} LiftedModule;
+void lift_add_module(Machine *m, const LiftedModule *module);
+/* lift_module_loaded for an image read from a file: matching entries become active only when image
+ * is the load image of one of the module's builds. Returns whether they were armed. */
+bool lift_module_loaded_image(Machine *m, const char *module, uint16_t load_seg, const uint8_t *image,
+                              uint32_t image_bytes);
+
 /* A loader announces where a module image now lives; matching entries become active. */
 /* Module name a loader announces for a DOS path: upper-case file name, with the CAWDOR gallery's
  * TWGENN.EXE told apart from Twinion's build. */

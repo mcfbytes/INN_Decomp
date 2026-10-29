@@ -154,6 +154,61 @@ static void test_overlays(void)
     machine_destroy(m);
 }
 
+/* The recorded load image: a DLL, driver or .ADV of another build never gets its entries armed. */
+static uint64_t test_image_hash(const uint8_t *p, size_t n)
+{
+    uint64_t h = 0xCBF29CE484222325ULL;
+    for (size_t i = 0; i < n; i++)
+        h = (h ^ p[i]) * 0x100000001B3ULL;
+    return h;
+}
+
+static uint16_t run_program_here(Machine *m)
+{
+    memcpy(m->mem + real_addr(CODE_SEG, 0), PROGRAM, sizeof PROGRAM);
+    cpu_set_seg(&m->cpu, S_CS, CODE_SEG);
+    cpu_set_seg(&m->cpu, S_SS, STACK_SEG);
+    SP = 0x100;
+    m->cpu.eip = 0;
+    m->cpu.halted = false;
+    m->cpu.flags &= ~F_IF;
+    AX = 0;
+    for (int i = 0; i < 100 && !m->cpu.halted; i++)
+        machine_step(m);
+    CHECK(m->cpu.halted && SP == 0x100, "program reached hlt with a balanced stack");
+    return AX;
+}
+
+static void test_module_image(void)
+{
+    enum { ORIGINAL_RESULT = 5 * 2 + 1, LIFTED_F_RESULT = 5 * 3 + 1 + 100 };
+    static LiftedModule meta;
+    meta.name = "TEST.EXE";
+    meta.image_bytes = sizeof PROGRAM;
+    meta.image_hash = test_image_hash(PROGRAM, sizeof PROGRAM);
+    uint8_t other[sizeof PROGRAM];
+    memcpy(other, PROGRAM, sizeof other);
+    other[0] ^= 0xFF;
+
+    Machine *m = machine_create();
+    entries[0] = (LiftedEntry){ .module = "TEST.EXE", .off = F_OFF, .fn = lifted_f, .name = "fn",
+                                .scratch_regs = LIFT_REG_FLAGS };
+    memcpy(entries[0].signature, PROGRAM + F_OFF, LIFT_SIGNATURE_LEN);
+    lift_add_table(m, entries, 1);
+    lift_add_module(m, &meta);
+
+    CHECK(!lift_module_loaded_image(m, "TEST.EXE", CODE_SEG, other, sizeof other),
+          "an image of another build is not armed");
+    CHECK(run_program_here(m) == ORIGINAL_RESULT, "another build runs its original (AX=%u)", AX);
+    CHECK(lift_module_loaded_image(m, "TEST.EXE", CODE_SEG, PROGRAM, sizeof PROGRAM),
+          "the recorded image is armed");
+    CHECK(run_program_here(m) == LIFTED_F_RESULT, "the recorded image runs lifted (AX=%u)", AX);
+    CHECK(!lift_module_loaded_image(m, "TEST.EXE", CODE_SEG, PROGRAM, sizeof PROGRAM - 1),
+          "a truncated image is not armed");
+    CHECK(run_program_here(m) == ORIGINAL_RESULT, "a truncated image runs the original (AX=%u)", AX);
+    machine_destroy(m);
+}
+
 static void test_module_names(void)
 {
     char name[16];
@@ -193,6 +248,7 @@ int main(void)
     CHECK(r.ax == LIFTED_F_RESULT, "INN_LIFT_ONLY with the name hooks it (AX=%u)", r.ax);
     unsetenv("INN_LIFT_ONLY");
     test_module_names();
+    test_module_image();
     test_overlays();
     if (failures)
         fprintf(stderr, "%d check(s) failed\n", failures);
