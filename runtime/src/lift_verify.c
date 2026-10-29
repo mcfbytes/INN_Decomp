@@ -13,6 +13,8 @@ enum {
     SNAPSHOT_BYTES = MEM_ONE_MEG + 0x10000,
     IO_LOG_MAX = 1 << 20,
     DEAD_STACK_BYTES = 0x2000, /* below the entry SP: locals of the call, dead after return */
+    MAX_OTHER_STACKS = 8,      /* nested lifted entries entered on another stack, per verified call */
+    OTHER_STACK_DEAD_BYTES = 0x200, /* below such an entry's SP */
     MAX_REPORTED_BYTES = 16,
 };
 
@@ -38,6 +40,10 @@ typedef struct VerifyState {
     struct { uint16_t port; int next; } read_cursor[32]; /* per port: next original read to replay */
     int read_cursors;
     const char *synth_label; /* set while a synthetic call (lift_synth.c) is verified: its call list line */
+    /* Dead stack below lifted entries the lifted run entered on another stack than the verified call's
+     * (code an ISR runs on its private stack): linear [lo, hi). */
+    struct { uint32_t lo, hi; } other_dead[MAX_OTHER_STACKS];
+    int other_dead_count;
 } VerifyState;
 
 static VerifyState *verify(Machine *m) { return lift_state(m)->verify; }
@@ -271,12 +277,22 @@ static bool registers_match(const Cpu *a, const Cpu *b, uint32_t scratch, char *
     return true;
 }
 
-/* First differing byte outside the dead stack below the entry SP, or -1. An emulator sequence in its INT form
- * in the lifted state (a) and patched in the original's (b) is equal (docs/lifting.md, "Floating point"). */
-static long first_memory_difference(const uint8_t *a, const uint8_t *b, uint32_t dead_lo, uint32_t dead_hi)
+static bool in_other_dead(const VerifyState *v, uint32_t i)
+{
+    for (int k = 0; k < v->other_dead_count; k++)
+        if (i >= v->other_dead[k].lo && i < v->other_dead[k].hi)
+            return true;
+    return false;
+}
+
+/* First differing byte outside the dead stack below the entry SP (and below nested entries on other stacks),
+ * or -1. An emulator sequence in its INT form in the lifted state (a) and patched in the original's (b) is
+ * equal (docs/lifting.md, "Floating point"). */
+static long first_memory_difference(const VerifyState *v, const uint8_t *a, const uint8_t *b, uint32_t dead_lo,
+                                    uint32_t dead_hi)
 {
     for (uint32_t i = 0; i < SNAPSHOT_BYTES; i++) {
-        if (a[i] == b[i] || (i >= dead_lo && i < dead_hi))
+        if (a[i] == b[i] || (i >= dead_lo && i < dead_hi) || in_other_dead(v, i))
             continue;
         int len = lift_emu_int_len(a + i, (int)(SNAPSHOT_BYTES - i < 3 ? SNAPSHOT_BYTES - i : 3));
         if (len && lift_emu_is_patch_of(a + i, b + i, len)) {
@@ -326,6 +342,36 @@ static void note_result_difference(Machine *m, ActiveHook *h)
                 b->r[R_AX].w);
 }
 
+/* A lifted entry entered inside the lifted run of a verified call. When its SP lies outside the call's
+ * own stack (code an ISR runs on its private stack: a lifted ISR, or one device replay delivers), the
+ * memory just below it is dead stack too: the original's callees leave frames there, the lifted C keeps
+ * its locals on the host. */
+void lift_verify_nested_entry(Machine *m)
+{
+    LiftState *s = lift_state(m);
+    VerifyState *v = s->verify;
+    if (!v || !s->in_shadow || s->hooks_off)
+        return;
+    uint32_t ss_base = m->cpu.seg_base[S_SS], sp = ss_base + m->cpu.r[R_SP].w;
+    uint32_t outer_base = v->cpu_before.seg_base[S_SS], outer_sp = outer_base + v->cpu_before.r[R_SP].w;
+    uint32_t outer_lo = outer_sp > outer_base + DEAD_STACK_BYTES ? outer_sp - DEAD_STACK_BYTES : outer_base;
+    if (sp >= outer_lo && sp <= outer_sp)
+        return;
+    uint32_t lo = sp > ss_base + OTHER_STACK_DEAD_BYTES ? sp - OTHER_STACK_DEAD_BYTES : ss_base;
+    for (int k = 0; k < v->other_dead_count; k++)
+        if (lo <= v->other_dead[k].hi && sp >= v->other_dead[k].lo) {
+            if (lo < v->other_dead[k].lo)
+                v->other_dead[k].lo = lo;
+            if (sp > v->other_dead[k].hi)
+                v->other_dead[k].hi = sp;
+            return;
+        }
+    if (v->other_dead_count < MAX_OTHER_STACKS) {
+        v->other_dead[v->other_dead_count].lo = lo;
+        v->other_dead[v->other_dead_count++].hi = sp;
+    }
+}
+
 /* Memory below hi_sp, down to 0x2000 below lo_sp but not below SS:0, is dead stack: a lift whose
  * locals wrap below the stack segment (into static data of a small DGROUP stack) is caught. */
 static void compare(Machine *m, ActiveHook *h, uint16_t lo_sp, uint16_t hi_sp)
@@ -355,7 +401,7 @@ static void compare(Machine *m, ActiveHook *h, uint16_t lo_sp, uint16_t hi_sp)
     uint32_t stack_top = v->cpu_before.seg_base[S_SS] + hi_sp, stack_low = v->cpu_before.seg_base[S_SS] + lo_sp;
     uint32_t ss_base = v->cpu_before.seg_base[S_SS];
     uint32_t dead_lo = stack_low > ss_base + DEAD_STACK_BYTES ? stack_low - DEAD_STACK_BYTES : ss_base;
-    long at = first_memory_difference(m->mem, v->mem_original, dead_lo, stack_top);
+    long at = first_memory_difference(v, m->mem, v->mem_original, dead_lo, stack_top);
     if (at >= 0) {
         snprintf(why, sizeof why, "memory %05lX lifted %02X original %02X", (unsigned long)at,
                  m->mem[at], v->mem_original[at]);
@@ -529,6 +575,7 @@ bool lift_verify_call(Machine *m, ActiveHook *h)
     dos_journal_begin(m);
     v->log_len = 0;
     v->io_diverged = false;
+    v->other_dead_count = 0;
 
     if (h->entry->region) {
         verify_region(m, h);
@@ -588,6 +635,7 @@ SynthResult lift_verify_synthetic(Machine *m, ActiveHook *h, const char *label, 
     dos_journal_begin(m);
     v->log_len = 0;
     v->io_diverged = false;
+    v->other_dead_count = 0;
     int before = v->mismatches;
 
     s->nested_budget = m->cpu.instructions + budget;

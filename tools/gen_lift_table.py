@@ -177,6 +177,8 @@ def entries_of(module_dir, name, native, image, relocs, overlays):
                 signature = image[start:start + SIGNATURE_LEN]
                 mask = reloc_mask(start, relocs)
                 source_code = image
+                if match[6] and len(signature) < SIGNATURE_LEN and 0 < int(match[6]) <= len(signature):
+                    signature = signature.ljust(SIGNATURE_LEN, b'\0')  # a prefix entry near the image end
             if len(signature) != SIGNATURE_LEN:
                 sys.exit(f'{source}: {match[3]} lies outside the image')
             kind = match[4]
