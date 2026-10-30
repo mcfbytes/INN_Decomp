@@ -23,6 +23,7 @@
 #include "host_link.h"
 #endif
 #include "machine.h"
+#include "mpu401.h"
 #if __has_include("dos.h")
 #include "dos.h"
 #include "emsxms.h"
@@ -61,6 +62,7 @@ typedef struct Options {
     const char *script;
     const char *sync_dir;
     const char *wav;
+    const char *midi_out;
     unsigned conv_kb;
     unsigned ems_kb, xms_kb; /* 0: none, as without these options */
     bool no_fpu, no_idle_skip;
@@ -75,6 +77,7 @@ typedef struct Frontend {
     InputScript *script;        /* headless runs */
     uint64_t end_us;            /* headless runs end at this emulated time (--run-ms) */
     uint64_t script_due_us;     /* a nested wait applies the script once past the current chunk */
+    uint64_t chunk_base_us;     /* headless chunks end on a fixed grid from here */
     SDL_Window *window;
     SDL_Renderer *renderer;
     SDL_Texture *texture;
@@ -454,6 +457,14 @@ static void hold_link(void *ctx)
 #endif
 }
 
+/* The end of the headless chunk under way at emulated time now. Chunks keep a fixed grid, so a lifted
+ * call that runs past a chunk's end (MT32.DRV's init takes 4 s inside one machine_step) does not move
+ * the later chunk ends at which the input script is applied. */
+static uint64_t chunk_end(const Frontend *f, uint64_t now)
+{
+    return f->chunk_base_us + ((now - f->chunk_base_us) / HEADLESS_CHUNK_US + 1) * HEADLESS_CHUNK_US;
+}
+
 /* A nested wait that outlasts the current chunk (a native start running inside the hybrid build)
  * gets the script at the chunk rate of the headless loop. */
 static void headless_nested_yield(Machine *m)
@@ -461,13 +472,14 @@ static void headless_nested_yield(Machine *m)
     Frontend *f = g_frontend;
     if (m->virtual_us < f->script_due_us && m->virtual_us < f->end_us)
         return;
-    f->script_due_us = m->virtual_us + HEADLESS_CHUNK_US;
+    f->script_due_us = chunk_end(f, m->virtual_us);
     headless_wait_point(m);
 }
 
 static int start_headless(Frontend *f, const Options *o)
 {
     f->end_us = f->m->virtual_us + o->run_ms * 1000;
+    f->chunk_base_us = f->m->virtual_us;
     if (o->script && !(f->script = input_script_load(o->script))) {
         fprintf(stderr, "cannot load script %s\n", o->script);
         return -1;
@@ -488,8 +500,8 @@ static int run_headless(Frontend *f)
     while (f->m->virtual_us < f->end_us && !f->m->exit_requested) {
         if (f->script && input_script_apply(f->script, f->m) != 0)
             return -1;
-        f->script_due_us = f->m->virtual_us + HEADLESS_CHUNK_US;
-        machine_run_for(f->m, HEADLESS_CHUNK_US);
+        f->script_due_us = chunk_end(f, f->m->virtual_us);
+        machine_run_for(f->m, f->script_due_us - f->m->virtual_us);
         frontend_audio_pump(f->m);
     }
     return 0;
@@ -710,7 +722,7 @@ static int run_native(Frontend *f)
 
 static void usage(void)
 {
-    fprintf(stderr, "usage: inn [--trace N] [--ips N] [--com1 host:port|ws://host:port] [--perf] [--audiotap] [--wav out.wav] [--conv-kb N] [--ems-kb N] [--xms-kb N] [--no-fpu] [--no-idle-skip] [--tsn-host rules.txt] "
+    fprintf(stderr, "usage: inn [--trace N] [--ips N] [--com1 host:port|ws://host:port] [--perf] [--audiotap] [--wav out.wav] [--midi-out out.mid] [--conv-kb N] [--ems-kb N] [--xms-kb N] [--no-fpu] [--no-idle-skip] [--tsn-host rules.txt] "
                     "[--headless --run-ms N --screenshot out.ppm --script input.txt [--sync-dir dir]] <c-drive-dir> <program> [args]\n");
 }
 
@@ -735,6 +747,7 @@ static int parse_args(int argc, char **argv, Options *o)
         else if (!strcmp(a, "--script")) o->script = next;
         else if (!strcmp(a, "--sync-dir")) o->sync_dir = next;
         else if (!strcmp(a, "--wav")) o->wav = next;
+        else if (!strcmp(a, "--midi-out")) o->midi_out = next;
         else if (!strcmp(a, "--tsn-host")) o->host_rules = next;
         else if (!strcmp(a, "--conv-kb")) o->conv_kb = (unsigned)strtoul(next, NULL, 10);
         else if (!strcmp(a, "--ems-kb")) o->ems_kb = (unsigned)strtoul(next, NULL, 10);
@@ -776,6 +789,10 @@ static HostRules *host_rules;
 static int boot(Machine *m, const Options *o)
 {
     bios_init(m);
+    if (o->midi_out && mpu401_open_midi_out(m, o->midi_out) != 0) {
+        fprintf(stderr, "cannot write %s\n", o->midi_out);
+        return -1;
+    }
     if (o->host_rules) {
         exec_stub_install(m, NULL, NULL);
         if (!(host_rules = host_rules_load(m, o->host_rules))) {

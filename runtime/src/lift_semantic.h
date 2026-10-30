@@ -32,6 +32,7 @@ typedef enum SemKind {
     SEM_SB_PCM_STOP,      /* a = 0 halt (D0h), 1 end auto-init after this block (DAh) */
     SEM_SB_PCM_CONTINUE,  /* D4h */
     SEM_SB_SPEAKER,       /* a = 1 on (D1h), 0 off (D3h) */
+    SEM_MIDI_BYTE,        /* a = byte written to the MPU-401 data port */
     SEM_KIND_COUNT
 } SemKind;
 

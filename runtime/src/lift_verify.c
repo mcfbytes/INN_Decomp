@@ -11,7 +11,7 @@
 
 enum {
     SNAPSHOT_CAP = MEM_SIZE, /* Machine.snapshot_bytes of it are used; untouched pages cost nothing */
-    IO_LOG_MAX = 65536,
+    IO_LOG_MAX = 1 << 22, /* MT32.DRV's init (with INN's 64 timbres) reads the MPU status 3.3 million times */
     DEAD_STACK_BYTES = 0x2000, /* below the entry SP: locals of the call, dead after return */
     MAX_OTHER_STACKS = 8,      /* nested lifted entries entered on another stack, per verified call */
     OTHER_STACK_DEAD_BYTES = 0x200, /* below such an entry's SP */

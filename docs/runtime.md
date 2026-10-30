@@ -153,6 +153,37 @@ Sinks, in `runtime/frontend/audio_sdl.c`:
 | AudioWorklet (browser) | the same pacing with a 100 ms target (frames are posted from the busy main thread); the frames go to `runtime/web/audio-worklet.js` by `postMessage` and play on the audio thread ([web.md](web.md), "Sound") |
 | `--wav out.wav` | every rendered frame, unpaced; with `--headless` this is the test path |
 
+### MPU-401
+
+`mpu401.c` is a Roland MPU-401 at 330h (data) and 331h (status, commands), as far as a UART-mode driver
+(`MT32.DRV`, chosen with `music = mt32.drv` in `LSCI.CFG`) uses it. Status bit 6 (DRR) is always clear:
+the card always takes a byte; bit 7 (DSR) is clear while an answer waits at 330h. Every command is
+answered with FEh, reset (FFh) included; 3Fh enters UART mode, where every command but reset is ignored
+(so `MT32.DRV`'s second and third 3Fh time out after 65535 polls each, as on a real card). In UART mode
+data bytes go to MIDI OUT; intelligent mode is not emulated (data is dropped, commands only
+acknowledged). An empty queue reads FEh, as DOSBox's MPU does. No IRQ: the driver polls.
+
+Nothing is synthesised (MT-32 ROMs are not distributable). `--midi-out out.mid` writes MIDI OUT as a
+type 0 Standard MIDI File, one tick per millisecond of emulated time: running status is expanded,
+system exclusive messages are written whole, real-time bytes, system common messages and stray data as
+F7 escapes, each event stamped at the byte that completes it. The file is finished when the machine is
+shut down. Native builds reach the same sink through `host_audio_midi_write` (docs/native.md).
+
+The lifted `MT32.DRV` charges the original's instructions with exact time (`lift_time.h`, see
+[lifting.md](lifting.md), "Waiting in lifted code") and takes the timer interrupts that fall inside its
+4 s init where the original does, so `INN_LIFT_ONLY=none` and `INN_LIFT_ONLY=mt32_entry` write the same
+file, timestamps included, wherever the original repeats itself. Timestamps of the same driver calls
+differ where emulated time does:
+
+- Shadow verification stops emulated time during a verified call's original run, so a verified init
+  writes its whole patch upload at one millisecond, and later music moves by that much.
+- Native mode skips the driver's handshakes and delays (a host sink needs neither), so init takes no
+  time there.
+- Runs that talk to a live server are not repeatable past the point where its timing matters, as
+  innkeeperd's answers arrive by the host's clock: on `ev_input` (2026-10-26) six runs of the original
+  agree for the first 871 events and then start the land's music between 86 510 and 86 524 ms, each
+  giving a different file, and `inn_hub` varies when ten runs share the machine.
+
 ## Conventional memory
 
 `--conv-kb N` leaves programs only the first N KB of conventional memory; the rest becomes a DOS
@@ -212,6 +243,12 @@ found; without `--xms-kb`, INT 2Fh AX=4300h returns AL=0 ("Conventional memory")
 13900 up 48
 14000 type guybrush\n            # US layout, \n is Enter
 ```
+
+The headless loop runs the machine in 10 ms chunks and applies the events due at each chunk's end.
+The chunk ends keep a fixed grid from the start of the run, so a lifted call that outlasts a chunk (one
+machine step can run `MT32.DRV`'s 4 s init) does not move the later ones, and an event lands at the
+same emulated time with or without lifted code. A nested wait (a guest call from lifted C) applies due
+events when it passes a chunk end of the grid.
 
 `tools/ppm2png.py` converts screenshots. Example end-to-end run against the sibling server:
 
@@ -290,6 +327,8 @@ itself, not `TSNEXEC.EXE`: `inn --tsn-host rules.txt <drive> 'INN\BARON\RB.EXE' 
 - **Mouse (INT 33h, HLE).** User event handlers (AX=0Ch/14h) run from IRQ12: host events queue,
   IRQ12 enters a ROM trampoline that saves registers, far-calls the handler with the event in
   AX/BX/CX/DX/SI/DI, restores, EOIs and IRETs. One queued event per call.
+- **MPU-401 (330h/331h).** UART mode, no IRQ; see "MPU-401" under Sound. Shadow verification treats it
+  as every non-VGA device: only the original run's bytes reach MIDI OUT.
 - **Game port (201h).** Nothing attached: reads return FFh (no one-shot ever fires, no button),
   writes are ignored. Red Baron polls it every frame.
 - **VGA.** B8000h is the text buffer; the A0000h window is routed through `vga_mem_read/write`.

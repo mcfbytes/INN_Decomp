@@ -35,6 +35,7 @@ enum {
     DSP_DMA_SINGLE = 0x14, DSP_DMA_AUTO = 0x1C, DSP_TIME_CONSTANT = 0x40, DSP_BLOCK_SIZE = 0x48,
     DSP_HS_AUTO = 0x90, DSP_HS_SINGLE = 0x91, DSP_HALT = 0xD0, DSP_SPEAKER_ON = 0xD1, DSP_SPEAKER_OFF = 0xD3,
     DSP_CONTINUE = 0xD4, DSP_EXIT_AUTO = 0xDA, DSP_IDENTIFY = 0xE0, DSP_VERSION = 0xE1,
+    PORT_MPU_DATA = 0x330,
 };
 
 static const uint32_t SB_NO_BLOCK = 0xFFFFFFFFu;
@@ -441,12 +442,22 @@ static bool sb_port(SemTrace *t, uint16_t port, int size, uint32_t value, bool i
     }
 }
 
+/* MPU-401 data port writes are MIDI bytes; its status polls and commands stay raw. */
+static bool mpu_port(SemTrace *t, uint16_t port, int size, uint32_t value, bool is_out)
+{
+    if (port != PORT_MPU_DATA || !is_out || size != 1)
+        return false;
+    sem_trace_event(t, SEM_MIDI_BYTE, value & 0xFF, 0);
+    return true;
+}
+
 void sem_trace_port(SemTrace *t, uint16_t port, int size, uint32_t value, bool is_out)
 {
     if (opl_port(t, port, size, value, is_out) || dac_port(t, port, size, value, is_out) ||
         crtc_port(t, port, size, value, is_out) || pit_port(t, port, size, value, is_out) ||
         pic_port(t, port, size, value, is_out) || kbd_port(t, port, size, value, is_out) ||
-        dma_port(t, port, size, value, is_out) || sb_port(t, port, size, value, is_out))
+        dma_port(t, port, size, value, is_out) || sb_port(t, port, size, value, is_out) ||
+        mpu_port(t, port, size, value, is_out))
         return;
     if (port == 0x3DA && !is_out)
         return; /* input status: retrace polling */
@@ -485,7 +496,7 @@ bool sem_trace_next_read(SemTrace *t, SemKind kind, uint32_t *b)
 static const char *const KIND_NAME[SEM_KIND_COUNT] = {
     "opl_write", "dac_set", "dac_get", "crtc_start", "pit_divisor", "pic_eoi", "pic_mask", "kbd_data", "kbd_ack",
     "dma_mask", "dma_program", "sb_reset", "sb_data", "sb_ident", "sb_time_constant", "sb_block_size",
-    "sb_pcm_start", "sb_pcm_stop", "sb_pcm_continue", "sb_speaker",
+    "sb_pcm_start", "sb_pcm_stop", "sb_pcm_continue", "sb_speaker", "midi_byte",
 };
 
 static bool is_read_kind(SemKind k) { return k == SEM_DAC_GET || k == SEM_KBD_DATA || k == SEM_SB_DATA; }

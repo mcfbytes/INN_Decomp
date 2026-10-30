@@ -414,6 +414,8 @@ void host_audio_sb_time_constant(Machine *m, uint8_t tc);  /* 40h; pcm_start wit
 uint32_t host_audio_sb_rate(uint8_t tc);                   /* 1000000 / (256 - tc) */
 void host_audio_pcm_mask(Machine *m);                      /* channel 1 masked alone: the block stalls */
 uint8_t host_audio_sb_ack(Machine *m);                     /* 22Eh read */
+/* One byte to the MPU-401's MIDI OUT (MT32.DRV's 330h data write); see runtime.md, "MPU-401". */
+void host_audio_midi_write(Machine *m, uint8_t byte);
 ```
 
 **Sound Blaster output.** In native mode a mixer source in `audio.c` (the host PCM) plays 8-bit unsigned

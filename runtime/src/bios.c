@@ -8,6 +8,7 @@
 #include "bios_internal.h"
 #include "font.h"
 #include "lift.h"
+#include "mpu401.h"
 #include "native.h"
 
 enum {
@@ -348,6 +349,7 @@ void bios_init(Machine *m)
     audio_init(m);
     opl_init(m);
     sb_init(m);
+    mpu401_init(m);
     speaker_init(m);
 }
 
@@ -355,6 +357,7 @@ void bios_shutdown(Machine *m)
 {
     void **parts[] = { &m->bios, &m->pic, &m->pit, &m->vga, &m->kbd, &m->mouse };
     speaker_shutdown(m);
+    mpu401_shutdown(m);
     sb_shutdown(m);
     opl_shutdown(m);
     dma_shutdown(m);

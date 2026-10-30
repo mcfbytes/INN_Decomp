@@ -263,6 +263,11 @@ static void end_slice(Machine *m)
         m->tickers[i](m);
 }
 
+void machine_end_slice(Machine *m)
+{
+    end_slice(m);
+}
+
 void machine_idle_poll(Machine *m, IdlePoll kind, uint32_t result)
 {
     IdleState *s = &m->idle;
@@ -309,6 +314,7 @@ void machine_step(Machine *m)
         return;
     if (m->slice_left == 0)
         m->slice_left = m->ips * TICK_SLICE_US / 1000000;
+    m->step_start_insn = m->cpu.instructions;
     uint64_t done = cpu_run(m, m->slice_left);
     if (m->cpu.hook_pending) {
         m->cpu.hook_pending = false;
