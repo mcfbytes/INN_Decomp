@@ -18,6 +18,7 @@ typedef struct HookStats {
     int replay_calls; /* shadow calls verified with device replay */
     int cost_diffs; /* INN_VERIFY_COST: calls whose lifted instruction count differs from the original's */
     uint64_t cost_original, cost_lifted;
+    int interrupted;  /* INN_VERIFY_KEEP_TIME: calls not compared, an interrupt or input came during the original's run */
 } HookStats;
 
 typedef struct ActiveHook {

@@ -299,6 +299,7 @@ void frontend_nested_yield(Machine *m)
     if (wall < NESTED_PRESENT_US || now - f->last_present_us < NESTED_PRESENT_US)
         return;
     SDL_Event e;
+    m->input_points++;
     while (SDL_PollEvent(&e))
         handle_event(f, &e);
     frontend_audio_pump(m);
@@ -483,6 +484,7 @@ static void headless_nested_yield(Machine *m)
     Frontend *f = g_frontend;
     if (m->virtual_us < f->script_due_us && m->virtual_us < f->end_us)
         return;
+    m->input_points++;
     f->script_due_us = chunk_end(f, m->virtual_us);
     headless_wait_point(m);
 }
@@ -641,6 +643,7 @@ static void mixed_yield(Machine *m)
     }
     if (now - f->last_present_us < NESTED_PRESENT_US)
         return;
+    m->input_points++;
     platform_poll_events(f, m);
     frontend_audio_pump(m);
     present(f);

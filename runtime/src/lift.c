@@ -86,6 +86,9 @@ static void log_verify_line(const LiftedEntry *e, const HookStats *st)
     else if (st->armed_once)
         log_msg("verify: %s %s: %d calls checked, %d mismatches", e->module, e->name, st->shadow_calls,
                 st->shadow_mismatches);
+    if (st->interrupted)
+        log_msg("verify: %s %s: %d calls not compared (an interrupt or input came during the original's run)", e->module,
+                e->name, st->interrupted);
     if (st->cost_original || st->cost_lifted)
         log_msg("verify: cost %s: original %llu instructions, lifted %llu, %d calls differ", e->name,
                 (unsigned long long)st->cost_original, (unsigned long long)st->cost_lifted, st->cost_diffs);
@@ -703,7 +706,7 @@ static void run_nested(Machine *m, NestedCall call)
             s->nested_abort = true;
         if (m->native) /* the non-strict fallback: interrupts and yields come from the native core */
             native_safepoint(m);
-        else if (s->nested_yield && !s->in_shadow)
+        else if (s->nested_yield && (!s->in_shadow || m->shadow_live))
             s->nested_yield(m);
         if (s->shadow_of && m->cpu.instructions >= stall_report) {
             /* Interrupts are held during a shadow run, so code that waits on a timer tick spins. */

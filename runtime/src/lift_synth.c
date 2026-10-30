@@ -927,7 +927,7 @@ static void check_restored(Machine *m, Synth *y, const char *label)
     else if (memcmp(y->vga_after, y->vga, vga_snapshot_size()) != 0)
         what = "VGA";
     else if (memcmp(y->dos_after, y->dos, dos_snapshot_size()) != 0)
-        what = "DOS state";
+        what = "DOS state (or the INT 33h driver's)";
     else if (memcmp(y->snd_after, y->snd, sound_snapshot_size()) != 0)
         what = "Sound Blaster or DMA state";
     else if (memcmp(m->exec_hooks, y->hooks, HOOK_BITMAP_BYTES) != 0)

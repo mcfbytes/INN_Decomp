@@ -1,6 +1,7 @@
 /* INT 33h mouse driver (HLE). User handlers (AX=0Ch/14h) run from IRQ12 through a ROM
  * trampoline that passes the event in AX-DI; design in docs/runtime.md, "Devices". */
 #include <stdlib.h>
+#include <string.h>
 
 #include "bios_internal.h"
 #include "lift.h"
@@ -183,6 +184,22 @@ void mouse_drop_handler(Machine *m)
 }
 
 bool mouse_cursor_visible(Machine *m) { return mouse_state(m)->show_count >= 0; }
+
+size_t mouse_state_size(void) { return sizeof(Mouse); }
+
+void mouse_state_save(Machine *m, void *dst)
+{
+    if (m->mouse)
+        memcpy(dst, m->mouse, sizeof(Mouse));
+    else
+        memset(dst, 0, sizeof(Mouse));
+}
+
+void mouse_state_load(Machine *m, const void *src)
+{
+    if (m->mouse)
+        memcpy(m->mouse, src, sizeof(Mouse));
+}
 
 void mouse_cursor_pos(Machine *m, int frame_w, int frame_h, int *x, int *y)
 {

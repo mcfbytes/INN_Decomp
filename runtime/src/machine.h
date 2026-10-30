@@ -117,6 +117,11 @@ struct Machine {
     bool irq_hold;       /* no interrupt delivery while a shadow run compares two paths */
     bool irq_gate;       /* device replay: interrupts are delivered by lift_irq_boundary (lift_replay.c) */
     bool ticks_frozen;   /* device replay's lifted run: no device tickers, emulated time stands still */
+    uint64_t irqs_taken; /* interrupts the CPU loop has delivered (INN_VERIFY_KEEP_TIME looks for one in a run) */
+    bool verify_keep_time; /* INN_VERIFY_KEEP_TIME (lift_verify.c): shadow runs keep emulated time exact */
+    bool shadow_live;    /* INN_VERIFY_KEEP_TIME: a shadow run's original runs as unverified (its idle polls count) */
+    bool tickers_still;  /* INN_VERIFY_KEEP_TIME's lifted run: the clock moves, no device ticks */
+    uint64_t input_points; /* a nested run reached a frontend input point (INN_VERIFY_KEEP_TIME looks for one) */
     void *lift;
     void *coverage;      /* INN_COVERAGE: call targets seen (lift_coverage.c); NULL when off */
     bool far_call_probe; /* a far call target is looked at (lift_far_call_probe): an image or dump point waits */

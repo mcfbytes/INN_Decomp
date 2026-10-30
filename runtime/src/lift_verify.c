@@ -35,6 +35,7 @@ typedef struct VerifyState {
     bool io_diverged;
     /* semantic port comparison (lift_semantic.c) */
     bool semantic;            /* INN_VERIFY_SEMANTIC */
+    bool keep_time;           /* INN_VERIFY_KEEP_TIME: the original runs as unverified, the lifted run takes no time */
     bool sem_active;          /* the lifted run is recording; its ports are canonicalised, not replayed in order */
     bool sem_valid;           /* a lifted run has finished and compare() has not looked at it yet */
     int sem_missing;          /* 1 + SemKind of the first lifted read the original made no value for */
@@ -76,6 +77,9 @@ void lift_verify_enable(Machine *m, int calls_per_entry)
             fatal("out of memory");
     }
     s->verify->calls_per_entry = calls_per_entry;
+    const char *keep_time = getenv("INN_VERIFY_KEEP_TIME");
+    s->verify->keep_time = keep_time && *keep_time == '1';
+    m->verify_keep_time = s->verify->keep_time;
     const char *semantic = getenv("INN_VERIFY_SEMANTIC");
 #ifdef INN_NATIVE_HW
     s->verify->semantic = !semantic || *semantic != '0';
@@ -425,7 +429,7 @@ static void compare(Machine *m, ActiveHook *h, uint16_t lo_sp, uint16_t hi_sp)
     }
     dos_snapshot_save(m, v->dos_lifted);
     if (memcmp(v->dos_lifted, v->dos_original, dos_snapshot_size()) != 0) {
-        report(m, h, "DOS state (open files, positions, current directory) or TSN stand-in state (queue, pending frees) differs");
+        report(m, h, "DOS state (open files, positions, current directory), TSN stand-in state (queue, pending frees) or mouse driver state differs");
         return;
     }
     note_result_difference(m, h);
@@ -533,12 +537,18 @@ static void verify_replayed(Machine *m, ActiveHook *h, uint16_t entry_sp)
     run_original(m, h);
     lift_replay_record_end(m);
     save(m, &v->cpu_original, v->mem_original, v->vga_original, v->dos_original, v->snd_original);
+    uint64_t slice_left = m->slice_left, slice_start = m->slice_start_insn, c_io_ns = m->c_io_ns;
     restore(m, &v->cpu_before, v->mem_before, v->vga_before, v->dos_before, v->snd_before);
     dos_journal_undo(m);
     m->io_mode = IO_REPLAY;
     exec_stub_replay_rewind(m, false);
     bool same_events = lift_replay_play(m, h->entry->fn);
     m->io_mode = IO_LIVE;
+    if (v->keep_time) { /* the scheduler slice goes on where the original's run left it */
+        m->slice_left = slice_left;
+        m->slice_start_insn = slice_start;
+        m->c_io_ns = c_io_ns;
+    }
     int before = v->mismatches;
     if (!same_events) {
         char why[200];
@@ -632,8 +642,20 @@ bool lift_verify_call(Machine *m, ActiveHook *h)
         s->shadow_of = NULL;
         return true;
     }
+    /* INN_VERIFY_KEEP_TIME: the original runs first as it would unverified, interrupts and time flowing,
+     * and the game goes on from where it ends; the frontend applies its input script there as it would.
+     * A call during which an interrupt came or input was applied is not compared (its end state holds
+     * the handler's work or the input, which the lifted run would not see); otherwise the lifted run
+     * follows as usual, without device ticks, and the clock is put back to the original's end after it. */
+    uint64_t irqs = m->irqs_taken, inputs = m->input_points;
     uint64_t cost_start = m->cpu.instructions + m->cpu.stall;
+    if (v->keep_time) {
+        m->irq_hold = false;
+        m->shadow_live = true;
+    }
     run_original(m, h);
+    m->irq_hold = true;
+    m->shadow_live = false;
     /* less the slot of the return hook run_original adds */
     uint64_t cost_original = m->cpu.instructions + m->cpu.stall - cost_start - 1;
     v->cpu_original = m->cpu;
@@ -641,14 +663,43 @@ bool lift_verify_call(Machine *m, ActiveHook *h)
     vga_snapshot_save(m, v->vga_original);
     dos_snapshot_save(m, v->dos_original);
     sound_snapshot_save(m, v->snd_original);
+    if (v->keep_time) { /* the dispatch counts one instruction for the call and one for reaching the return
+                          * address, which the original's run and the caller's next instruction count already */
+        v->cpu_original.instructions -= 2;
+        m->cpu.instructions -= 2;
+        m->slice_left += 2;
+    }
+    if (v->keep_time && (m->irqs_taken != irqs || m->input_points != inputs)) {
+        h->stats->shadow_calls--;
+        h->stats->interrupted++;
+        dos_journal_end(m);
+        m->cpu.stop = false;
+        m->irq_hold = false;
+        s->in_shadow = false;
+        s->shadow_of = NULL;
+        return true;
+    }
+    uint64_t at_us = m->virtual_us, slice_left = m->slice_left, slice_start = m->slice_start_insn;
+    uint64_t c_io_ns = m->c_io_ns;
+    IdleState idle = m->idle;
 
     restore(m, &v->cpu_before, v->mem_before, v->vga_before, v->dos_before, v->snd_before);
     dos_journal_undo(m);
+    if (v->keep_time)
+        m->tickers_still = true;
     run_lifted(m, h);
     note_cost(m, h, cost_original, m->cpu.instructions + m->cpu.stall - cost_start + 1);
     compare(m, h, entry_sp, entry_sp);
 
     restore(m, &v->cpu_original, v->mem_original, v->vga_original, v->dos_original, v->snd_original);
+    if (v->keep_time) {
+        m->tickers_still = false;
+        m->virtual_us = at_us;
+        m->slice_left = slice_left;
+        m->slice_start_insn = slice_start;
+        m->c_io_ns = c_io_ns;
+        m->idle = idle;
+    }
     dos_journal_end(m);
     m->cpu.stop = false;
     m->irq_hold = false;

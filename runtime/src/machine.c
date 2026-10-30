@@ -259,6 +259,8 @@ static void end_slice(Machine *m)
     m->virtual_us += TICK_SLICE_US;
     m->slice_left = m->ips * TICK_SLICE_US / 1000000;
     m->slice_start_insn = m->cpu.instructions;
+    if (m->tickers_still) /* a code path that waits for the clock (INT 1Ah) still sees it move */
+        return;
     for (int i = 0; i < m->ticker_count; i++)
         m->tickers[i](m);
 }
@@ -280,7 +282,8 @@ void machine_idle_poll(Machine *m, IdlePoll kind, uint32_t result)
     bool quiet = same && gap <= IDLE_GAP_SLOTS && !s->activity;
     s->activity = false;
     /* Shadow verification and lifted C calling a service keep their exact paths. */
-    if (!quiet || s->off || m->native || m->io_mode != IO_LIVE || m->irq_hold || m->ticks_frozen || lift_in_c(m)) {
+    if (!quiet || s->off || m->native || (m->io_mode != IO_LIVE && !m->shadow_live) || m->irq_hold || m->ticks_frozen ||
+        lift_in_c(m)) {
         s->streak = 0;
         return;
     }
@@ -318,6 +321,10 @@ void machine_step(Machine *m)
     uint64_t done = cpu_run(m, m->slice_left);
     if (m->cpu.hook_pending) {
         m->cpu.hook_pending = false;
+        if (m->verify_keep_time) { /* a shadow run inside the call goes on with this slice as it stands */
+            m->slice_left = done < m->slice_left ? m->slice_left - done : 1;
+            done = 0;
+        }
         uint32_t linear = m->cpu.seg_base[S_CS] + (m->cpu.eip & 0xFFFF);
         if (lift_dispatch(m, linear)) {
             done++;

@@ -169,7 +169,8 @@ entry whose code is followed by data the loader or the host fills in (the file d
 or that starts fewer than 12 bytes before the end of the image (n at most the bytes left).
 During the lifted run, VGA port accesses also reach the device (its state is snapshotted), so mode
 sets and palette writes are compared. Interrupts are held and emulated time stands still during
-shadow runs (device replay aside), so the VGA status register toggles vertical retrace by read count instead; code that
+shadow runs (device replay and `INN_VERIFY_KEEP_TIME` aside), so the VGA status register toggles
+vertical retrace by read count instead; code that
 waits for a timer tick still spins there; a shadow
 run still going after 200 million instructions is logged with the hook's name and CS:IP.
 `INN_LIFT_ONLY=name,name,...` hooks only the named functions, which checks functions that are
@@ -190,10 +191,33 @@ runs without a server, the program named by `INN_PROGRAM` against dosrt's TSN ho
 [redbaron.md](redbaron.md), "Verifying lifts"). Multiplayer paths use `tools/verify_two.sh`: two clients,
 each with its own drive copy and output directory, against one server, their scripts kept in step with
 `signal` and `wait` ([runtime.md](runtime.md), "Input scripts"). Snapshots cover guest
-memory, the VGA device (registers, DAC, planes) and host-side DOS state (open files, positions,
-current directory). Host file deletions, renames, creations and growth are journaled and undone
-between the two runs. Known limits: one call may make at most 4M port accesses (MT32.DRV's init makes 3.3M); bytes written to host files are written by both runs and not restored; devices other than VGA (PIT, UART, OPL) see only the original run's I/O, which is the
+memory, the VGA device (registers, DAC, planes), host-side DOS state (open files, positions,
+current directory) and the INT 33h driver's state (position, mickeys, buttons, queued events), so a
+function that reads the mickeys reads them in both runs. Host file deletions, renames, creations and
+growth are journaled and undone between the two runs. Known limits: one call may make at most 4M port accesses (MT32.DRV's init makes 3.3M); bytes written to host files are written by both runs and not restored; devices other than VGA (PIT, UART, OPL) see only the original run's I/O, which is the
 intended behaviour.
+
+A plain shadow run moves the game's timing: interrupts that come during it wait until it ends, the
+lifted run's nested guest calls advance the clock too, and retrace waits end by read count. Over
+thousands of calls that is enough to change what a timing-sensitive game does (a swing meter is read
+at another frame and the ball lands elsewhere) although every call matches. `INN_VERIFY_KEEP_TIME=1`
+makes plain shadow runs leave the timing as an unverified, interpreted run has it:
+
+- The original runs first as it would unverified: interrupts are taken where they fall, devices tick,
+  retrace follows the clock, idle polls count. The game goes on from its end state and its time.
+- A call during which an interrupt was taken or input was applied is not compared (its end state
+  holds the handler's work or the input); the summary adds
+  `N calls not compared (an interrupt or input came during the original's run)`, and those
+  calls do not count toward `INN_VERIFY_LIFTED`.
+- Otherwise the lifted run follows from the same start state and is compared as usual. Its clock moves
+  (a wait on INT 1Ah still ends) but no device ticks, and afterwards the clock is put back where the
+  original's run left it.
+- The scheduler slice, the idle-poll state and the instruction count are kept exactly: a verified call
+  costs what the original's instructions cost, no more (`runtime/tests/test_lift.c`). With it, device
+  replay also continues the slice where the original left it.
+
+Calls past `INN_VERIFY_LIFTED` still run as lifted C in zero emulated time, so a run that hooks a
+function called more often than that can still drift.
 
 ## Floating point
 

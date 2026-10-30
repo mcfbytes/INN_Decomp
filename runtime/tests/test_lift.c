@@ -3,6 +3,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "devices.h"
+#include "dos.h"
 #include "lift.h"
 
 static int failures;
@@ -47,7 +49,7 @@ static void lifted_g(Machine *m)
     lift_ret_near(m, 0);
 }
 
-typedef struct Run { uint16_t ax; int mismatches; } Run;
+typedef struct Run { uint16_t ax; int mismatches; uint64_t insns, us; } Run;
 
 static LiftedEntry entries[1];
 
@@ -72,7 +74,7 @@ static Run run_program_ex(LiftedFn fn, uint16_t off, bool near, bool good_signat
     m->cpu.flags &= ~F_IF;
     for (int i = 0; i < 100 && !m->cpu.halted; i++)
         machine_step(m);
-    Run r = { AX, lift_verify_mismatches(m) };
+    Run r = { AX, lift_verify_mismatches(m), m->cpu.instructions, m->virtual_us };
     CHECK(m->cpu.halted, "program reached hlt");
     CHECK(SP == 0x100, "stack balanced (SP=%04X)", SP);
     machine_destroy(m);
@@ -84,6 +86,71 @@ static Run run_program(LiftedFn fn, uint16_t off, bool near, bool good_signature
     return run_program_ex(fn, off, near, good_signature, verify, false);
 }
 
+
+/* ---- INN_VERIFY_KEEP_TIME over many time slices ---- */
+
+/* mov cx,3000 / L: call G / loop L / hlt, G as above: 9000 instructions, 90 slices of 2000. */
+static Run run_loop(bool hooked)
+{
+    static const uint8_t loop[] = { 0xB9, 0xB8, 0x0B, 0xE8, G_OFF - 6, 0x00, 0xE2, 0xFB, 0xF4 };
+    Machine *m = machine_create();
+    memcpy(m->mem + real_addr(CODE_SEG, 0), PROGRAM, sizeof PROGRAM);
+    memcpy(m->mem + real_addr(CODE_SEG, 0), loop, sizeof loop);
+    entries[0] = (LiftedEntry){ .module = "TEST.EXE", .off = G_OFF, .fn = lifted_g, .name = "fn",
+                                .near_return = true, .scratch_regs = LIFT_REG_FLAGS };
+    memcpy(entries[0].signature, PROGRAM + G_OFF, LIFT_SIGNATURE_LEN);
+    if (!hooked)
+        entries[0].signature[0] ^= 0xFF;
+    lift_add_table(m, entries, 1);
+    lift_verify_enable(m, 100000);
+    lift_module_loaded(m, "TEST.EXE", CODE_SEG, sizeof PROGRAM);
+    cpu_set_seg(&m->cpu, S_CS, CODE_SEG);
+    cpu_set_seg(&m->cpu, S_SS, STACK_SEG);
+    SP = 0x100;
+    m->cpu.eip = 0;
+    m->cpu.flags &= ~F_IF;
+    for (int i = 0; i < 100000 && !m->cpu.halted; i++)
+        machine_step(m);
+    Run r = { AX, lift_verify_mismatches(m), m->cpu.instructions, machine_now_ns(m) / 1000 };
+    CHECK(m->cpu.halted, "loop reached hlt");
+    machine_destroy(m);
+    return r;
+}
+
+/* ---- INT 33h driver state in the snapshot (shadow verification) ---- */
+
+/* A shadow run's lifted half is restored from a snapshot taken before the original ran; the driver's
+ * position, mickeys and buttons are host-side, so a lifted function that reads them (AX=0Bh) sees the
+ * original's values only when they are part of the DOS snapshot. */
+static void test_mouse_snapshot(void)
+{
+    Machine *m = machine_create();
+    bios_init(m); /* wires the VGA and the INT 33h driver (mouse_init) */
+    size_t size = dos_snapshot_size();
+    uint8_t *before = malloc(size), *after = malloc(size);
+    mouse_host_motion(m, 320, 100, 640, 200);
+    dos_snapshot_save(m, before);
+    mouse_host_motion(m, 600, 190, 640, 200);
+    mouse_host_button(m, 0, true);
+    dos_snapshot_save(m, after);
+    CHECK(memcmp(before, after, size) != 0, "mouse motion and buttons change the DOS snapshot");
+    dos_snapshot_load(m, before);
+    dos_snapshot_save(m, after);
+    CHECK(memcmp(before, after, size) == 0, "loading the snapshot restores the INT 33h driver's state");
+    /* Before mouse_init the driver's part is zeros and a load does nothing. */
+    Machine *n = machine_create();
+    memset(after, 0xFF, size);
+    dos_snapshot_save(n, after);
+    bool zero = true;
+    for (size_t i = size - mouse_state_size(); i < size; i++)
+        zero = zero && after[i] == 0;
+    CHECK(zero, "a machine without a mouse saves a zeroed driver state");
+    dos_snapshot_load(n, before);
+    free(before);
+    free(after);
+    machine_destroy(n);
+    machine_destroy(m);
+}
 
 /* ---- overlays: code that an overlay manager reads into a reused buffer ---- */
 
@@ -249,6 +316,29 @@ int main(void)
     unsetenv("INN_LIFT_ONLY");
     test_module_names();
     test_module_image();
+    /* INN_VERIFY_KEEP_TIME: a verified call costs what the original costs, no more. */
+    Run plain = run_program(lifted_g, G_OFF, true, false, false);
+    setenv("INN_VERIFY_KEEP_TIME", "1", 1);
+    r = run_program(lifted_g, G_OFF, true, true, true);
+    CHECK(r.ax == ORIGINAL_RESULT && r.mismatches == 0, "faithful G verifies with the clock kept (AX=%u, %d)", r.ax,
+          r.mismatches);
+    CHECK(r.insns == plain.insns && r.us == plain.us, "verified G takes the original's time (%llu insns %llu us, "
+          "unhooked %llu %llu)", (unsigned long long)r.insns, (unsigned long long)r.us,
+          (unsigned long long)plain.insns, (unsigned long long)plain.us);
+    r = run_program(lifted_f, F_OFF, false, true, true);
+    CHECK(r.mismatches == 1 && r.ax == ORIGINAL_RESULT, "unfaithful F is caught with the clock kept (%d, AX=%u)",
+          r.mismatches, r.ax);
+    CHECK(r.insns == plain.insns, "verified F takes the original's time (%llu insns, unhooked %llu)",
+          (unsigned long long)r.insns, (unsigned long long)plain.insns);
+    Run unhooked = run_loop(false);
+    r = run_loop(true);
+    CHECK(r.mismatches == 0 && r.ax == unhooked.ax, "3000 verified calls of G (AX=%u, %d mismatches)", r.ax,
+          r.mismatches);
+    CHECK(r.insns == unhooked.insns && r.us == unhooked.us, "3000 verified calls take the original's time "
+          "(%llu insns %llu us, unhooked %llu %llu)", (unsigned long long)r.insns, (unsigned long long)r.us,
+          (unsigned long long)unhooked.insns, (unsigned long long)unhooked.us);
+    unsetenv("INN_VERIFY_KEEP_TIME");
+    test_mouse_snapshot();
     test_overlays();
     if (failures)
         fprintf(stderr, "%d check(s) failed\n", failures);

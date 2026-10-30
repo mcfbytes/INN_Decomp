@@ -1564,8 +1564,10 @@ uint64_t cpu_run(Machine *m, uint64_t budget)
             lift_irq_boundary(m);
         } else if ((c->flags & F_IF) && m->irq_pending && !m->irq_hold && !m->native) {
             int vector = pic_acknowledge(m);
-            if (vector >= 0)
+            if (vector >= 0) {
+                m->irqs_taken++;
                 cpu_interrupt(m, (uint8_t)vector);
+            }
         }
         if (c->halted)
             break;

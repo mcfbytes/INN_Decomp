@@ -138,6 +138,11 @@ int mouse_queued(Machine *m);
 bool mouse_cursor_visible(Machine *m);
 /* Pointer position in frame pixels, for the overlay. */
 void mouse_cursor_pos(Machine *m, int frame_w, int frame_h, int *x, int *y);
+/* The driver's state (position, mickeys, buttons, queued events) for shadow verification's snapshots;
+ * save writes zeros and load does nothing before mouse_init. */
+size_t mouse_state_size(void);
+void mouse_state_save(Machine *m, void *dst);
+void mouse_state_load(Machine *m, const void *src);
 
 /* ---- 8250/16550 UART (COM1 3F8h IRQ4, COM2 2F8h IRQ3) ---- */
 

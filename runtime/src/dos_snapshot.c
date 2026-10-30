@@ -1,6 +1,7 @@
 /* DOS host-side state for shadow verification: the state struct plus every open file's position,
  * so a function that reads a file sees the same bytes in both shadow runs. The TSN host stand-in's
- * state (exec_stub.c) follows the struct, so a function that sends or receives sees the same queue. */
+ * state (exec_stub.c) follows the struct, so a function that sends or receives sees the same queue, and the
+ * mouse driver's after it, so a function that reads the mickeys (INT 33h AX=0Bh) reads them in both runs. */
 #include <fcntl.h>
 #include <stdio.h>
 #include <string.h>
@@ -8,6 +9,7 @@
 #include <unistd.h>
 
 #include "dos_int.h"
+#include "devices.h"
 #include "exec_stub.h"
 
 typedef struct DosSnapshot {
@@ -16,8 +18,11 @@ typedef struct DosSnapshot {
 } DosSnapshot;
 
 /* The TSN stand-in's host-side queues (exec_stub.c) follow the DOS state: a shadowed Send would otherwise
- * queue the host's reply once per run. */
-size_t dos_snapshot_size(void) { return sizeof(DosSnapshot) + exec_stub_state_size(); }
+ * queue the host's reply once per run; the mouse driver's state follows the stand-in's, so a function
+ * that reads the mickeys (INT 33h AX=0Bh) reads them in both runs. */
+size_t dos_snapshot_size(void) {
+    return sizeof(DosSnapshot) + exec_stub_state_size() + mouse_state_size();
+}
 
 static void *stub_state(void *snap) { return (uint8_t *)snap + sizeof(DosSnapshot); }
 
@@ -25,6 +30,7 @@ void dos_snapshot_save(Machine *m, void *dst)
 {
     DosSnapshot *snap = dst;
     exec_stub_state_save(m, stub_state(snap));
+    mouse_state_save(m, (uint8_t *)stub_state(snap) + exec_stub_state_size());
     if (!m->dos) {
         memset(snap, 0, sizeof *snap);
         return;
@@ -207,6 +213,7 @@ void dos_snapshot_load(Machine *m, const void *src)
 {
     const DosSnapshot *snap = src;
     exec_stub_state_load(m, (const uint8_t *)snap + sizeof(DosSnapshot));
+    mouse_state_load(m, (const uint8_t *)snap + sizeof(DosSnapshot) + exec_stub_state_size());
     if (!m->dos)
         return;
     DosState *d = dos_state(m);
