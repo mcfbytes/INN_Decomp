@@ -84,6 +84,8 @@ produces the game.
       with no mismatch or fatal, and its gallery lifts are shadow-verified. Remaining FATES package work is listed in the private
       `YSERBIUS-PLAN.md`; the interpreter still runs the un-lifted functions ([yserbius.md](yserbius.md),
       private `CAWDOR-PLAN.md`). Per-overlay registration done ([lifting.md](lifting.md), "Overlays").
+      Open verification blocker: a 20-call shadow run of FATES reaches an invalid opcode at 4D28:2072 after the
+      host-send path; live runs pass, so the remaining fix is replay for the host link rather than another lift.
 - [ ] **M8** Golf, Red Baron, Shoppers Advantage. Status 2026-10-14: the interpreter has a 387
       ([runtime.md](runtime.md), "FPU"; Red Baron turned out to have no floating point, GOLF's Borland
       emulator patches itself into x87 code and runs either way). `--tsn-host` runs a game client without
