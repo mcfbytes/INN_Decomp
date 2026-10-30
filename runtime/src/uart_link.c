@@ -225,6 +225,8 @@ SerialLink serial_link_tcp(const char *host, int port)
 
 void serial_link_drain(SerialLink *link)
 {
+    if (serial_link_settle_drain(link))
+        return;
     if (link && link->recv == tcp_recv)
         tcp_drain(link->ctx);
 }
@@ -246,6 +248,7 @@ int uart_attach_tcp(Machine *m, int com, const char *host, int port)
     SerialLink link = serial_link_tcp(host, port);
     if (!link.send)
         return -1;
+    link = serial_link_settle_env(m, link);
     if (uart_attach(m, com, link) != 0) {
         link.close(link.ctx);
         return -1;

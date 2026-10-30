@@ -150,7 +150,19 @@ tick, the TSNEXEC tick counter maintained by the client). In native mode it adva
   background tab) it jumps forward and the lost time is dropped, as the frame clock does today.
 - **Deterministic mode (headless).** No wall clock: charges and waits only. A run is then independent of
   host speed; only the moments the server's bytes arrive (polled at safe points) tie it to wall time, as
-  in today's headless hybrid runs. Headless hybrid and native runs start that clock at `INN_EPOCH`
+  in today's headless hybrid runs. `INN_LINK_SETTLE_MS` removes that tie for replies (docs/runtime.md,
+  "Link settling"): once the client has sent, what the server sends next is held until 3 ms of emulated
+  time after the client's last byte, and the receive poll at that moment waits in wall time until the
+  server has been quiet for the given milliseconds. The settling sits in the SerialLink, so it covers
+  the UART of the hybrid build (driven by the frame loop's `machine_run_for`) and `host_link` of the
+  native build (driven by this clock's waits and safe points) alike. `tools/verify_lifted.sh` and
+  `tools/m9_suite.sh` turn it on (40 ms). With it three runs of `tw_combat` on one hybrid build give the
+  same traffic and screens, also with the client slowed by a busy loop on its CPU, which without it
+  changes the encounter. Bytes the server sends unprompted still arrive at a wall time. The encounter
+  itself follows this clock: the Yserbius engine seeds its random-number table index from the
+  hundredths of a DOS get-time, so hybrid and native agree on it only while they reach that call
+  within the same hundredth. The host link's line model (section 9) keeps them about 3 ms apart there.
+  Headless hybrid and native runs start that clock at `INN_EPOCH`
   (default 750000000, 8 Oct 1993 UTC). An empty `INN_EPOCH` uses the host clock. The same epoch makes
   two runs of one build repeat. Hybrid and native still start about 0.4 s apart, because they charge
   work differently: a periodic host message can fall on opposite sides of a scripted event. Move the
@@ -476,8 +488,12 @@ void host_link_pump(Machine *m);
 
 `host_link_send` and `host_link_recv` pace the link at the line rate the driver programmed: one byte per
 byte time (10 bits at that rate) in each direction, as the emulated UART does, so the client's timing and
-the games' timer-seeded behaviour stay close to the hybrid build. Pacing is the default. `INN_LINK_PACING=0`
-makes the link unpaced.
+the games' timer-seeded behaviour stay close to the hybrid build. The byte time is rounded up to the
+100 us scheduler slice, as the UART's comes out (4200 us at 2400 baud). Sending works like the UART's
+shift register: an idle line takes one byte, which leaves (reaches the `SerialLink`) one byte time
+later; a byte offered within 2 ms of the last one leaving was waiting for it, so its byte time starts
+then. Any host-link call sends a byte whose time is over; a BREAK, a rate change and close send it at
+once. Pacing is the default. `INN_LINK_PACING=0` makes the link unpaced.
 
 ### Files
 
@@ -535,6 +551,15 @@ TSNEXEC starts every program through EXEC. In native mode its native EXEC (`nati
 
 Lifted game code (CGENN, DARKSTRT, TWGENN, FATES, RB) runs in mixed mode exactly as in the hybrid build,
 through hooks.
+
+**A game that exits from its lifted code.** A lifted exit routine (GOLF's fatal-error exit, for one)
+ends the process with a guest call to the game's own exit code, which never returns. In the hybrid
+build the CPU then simply runs TSNEXEC on from inside that nested call. In native mode TSNEXEC is C
+further up the host stack, so the terminate hook leaves the lifted frames with the same `longjmp` a
+native child uses, whenever the lifted nesting is deeper than it was when the child started, and the
+devices come back on that path too. Without it the nested call runs TSNEXEC's original code from
+the resume address the terminate wrote, with a code segment that does not fit it, and soon reaches an
+invalid opcode in freed memory.
 
 **The hand-off, as implemented** (`native_handoff_to_emulator` / `native_handoff_from_emulator` in
 `native_exec.c`, `native_irq_to_pic` / `native_irq_from_pic` in `native_irq.c`; only when INN runs

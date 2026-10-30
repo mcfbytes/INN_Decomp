@@ -12,9 +12,11 @@
 # any other value is used as the file name.
 # INN_SYNTH=<call lists> adds synthetic calls (docs/lifting.md, "Synthetic calls"); the environment passes it.
 # Runs repeat: the emulated clock starts at INN_EPOCH (default 750000000, 8 Oct 1993) in UTC, unless
-# INN_EPOCH= (empty) asks for the host clock.
+# INN_EPOCH= (empty) asks for the host clock. The server link settles (docs/runtime.md, "Link
+# settling"): INN_LINK_SETTLE_MS (default 40) of server quiet before a reply is released;
+# INN_LINK_SETTLE_MS=0 turns it off.
 set -euo pipefail
-export INN_EPOCH=${INN_EPOCH-750000000} TZ=UTC
+export INN_EPOCH=${INN_EPOCH-750000000} TZ=UTC INN_LINK_SETTLE_MS=${INN_LINK_SETTLE_MS-40}
 BUILD=$1
 PORT=$2
 RUN_MS=${3:-95000}

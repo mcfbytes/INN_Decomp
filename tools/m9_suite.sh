@@ -3,7 +3,8 @@
 # that is killed before it finishes leaves no status and is done again next time.
 # usage: m9_suite.sh <build> <first_port> <out_dir> <list> [calls=20]
 set -euo pipefail
-export LC_ALL=C
+# Runs repeat only with the settled server link (docs/runtime.md, "Link settling").
+export LC_ALL=C INN_LINK_SETTLE_MS=${INN_LINK_SETTLE_MS-40}
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 PRIVATE=$ROOT/private/lifted
@@ -18,7 +19,8 @@ tools/verify_lifted.sh on ports first_port .. first_port+4, at most five at a
 time. <list> lines are: <name> <drive> <run_ms|auto> [VAR=value ...]
 (# comments). auto is the script's largest time plus 15000 (logon: 95000).
 @PRIVATE@ in a value becomes the private/lifted directory; underscores in
-INN_PROGRAM and INN_ARGS become spaces. Stops starting new runs after 500s and prints
+INN_PROGRAM and INN_ARGS become spaces. The server link settles (INN_LINK_SETTLE_MS,
+default 40; 0 turns it off). Stops starting new runs after 500s and prints
 "suite complete: N ok, M failed" or "suite incomplete: K left".
 EOF
 }
@@ -222,6 +224,8 @@ run_queue() {
         fi
         finished=""
         wait -n -p finished || true
+        # wait -n also reports other children (the sort's process substitution above): not a run.
+        [[ -n $finished && -n ${slot_of[$finished]+x} ]] || continue
         slot=${slot_of[$finished]}
         unset 'slot_of[$finished]'
         free+=("$slot")

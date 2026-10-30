@@ -116,7 +116,8 @@ static void test_pipe(void)
     machine_destroy(m);
 }
 
-/* 10000 baud is 1000 us per byte; the line carries one byte per byte time each way. */
+/* 10000 baud is 1000 us per byte; the line carries one byte per byte time each way. A sent byte leaves
+ * one byte time after the line took it. */
 static void test_pacing(void)
 {
     enum { BAUD = 10000, BYTE_US = 1000 };
@@ -129,13 +130,20 @@ static void test_pacing(void)
 
     m->virtual_us = 100000;
     CHECK(host_link_send(m, (const uint8_t *)"abcde", 5) == 1, "an idle line takes one byte");
+    CHECK(p.out_len == 0, "it leaves after its byte time, as from a shift register");
     CHECK(host_link_send(m, (const uint8_t *)"bcde", 4) == 0, "the line is busy for a byte time");
     m->virtual_us += BYTE_US;
     CHECK(host_link_send(m, (const uint8_t *)"bcde", 4) == 1, "one more a byte time later");
+    CHECK(p.out_len == 1 && p.out[0] == 'a', "the first byte has left");
     m->virtual_us += 3 * BYTE_US;
     CHECK(host_link_send(m, (const uint8_t *)"cde", 3) == 3, "credit for the byte times that passed");
+    CHECK(p.out_len == 4 && !memcmp(p.out, "abcd", 4), "the bytes whose time is over have left");
     m->virtual_us += 1000000;
+    CHECK(host_link_carrier(m) && p.out_len == 5, "any call sends the byte whose time is over");
     CHECK(host_link_send(m, (const uint8_t *)"abcde", 5) == 1, "an idle line gives no burst");
+    host_link_set_rate(m, 9600);
+    CHECK(p.out_len == 6, "a new rate sends the held byte");
+    host_link_set_rate(m, BAUD);
 
     memcpy(p.in, "OK\r\n", 4);
     p.in_len = 4;
@@ -145,8 +153,10 @@ static void test_pacing(void)
     CHECK(host_link_recv(m, buf, sizeof buf) == 1 && buf[0] == 'K', "then the next");
 
     p.out_len = 0;
+    m->virtual_us += 1000000;
+    host_link_send(m, (const uint8_t *)"x", 1);
     host_link_break(m);
-    CHECK(p.out_len == 1, "a break needs no line time");
+    CHECK(p.out_len == 2 && p.out[0] == 'x' && p.out[1] == '\r', "a break needs no line time and goes after the held byte");
 
     host_link_set_rate(m, 0);
     CHECK(host_link_send(m, (const uint8_t *)"abcde", 5) == 5, "rate 0 is unpaced");

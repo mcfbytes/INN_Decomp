@@ -297,6 +297,57 @@ static void test_nested(void)
     finish(m);
 }
 
+/* An emulated child whose lifted code ends the process from a nested guest call, as a game's lifted
+ * exit routine does: the C frame is left (as for a native child) instead of running the caller's code. */
+enum { NESTED_ENTRY = 0x10, NESTED_EXIT = 0x20, NESTED_CODE = 3 };
+
+static int nested_exit_after;
+
+static void lifted_nested_exit(Machine *m)
+{
+    guest_call_near(m, 0x100 + NESTED_EXIT); /* exits: never returns here */
+    nested_exit_after++;
+}
+
+static void test_exit_in_nested_call(void)
+{
+    make_root("nested_exit");
+    uint8_t file[COM_SIZE];
+    memset(file, 0x90, sizeof file);
+    static const uint8_t start[] = { 0xE8, NESTED_ENTRY - 3, 0x00, 0xB8, 0x01, 0x4C, 0xCD, 0x21 }; /* call; exit 1 */
+    static const uint8_t entry[] = { 0xB8, 0x02, 0x4C, 0xCD, 0x21 };                            /* exit 2 */
+    static const uint8_t done[] = { 0xB8, NESTED_CODE, 0x4C, 0xCD, 0x21 };                       /* exit 3 */
+    memcpy(file, start, sizeof start);
+    memcpy(file + NESTED_ENTRY, entry, sizeof entry);
+    memcpy(file + NESTED_EXIT, done, sizeof done);
+    write_host("CHILD.COM", file, sizeof file);
+    Machine *m = machine_create();
+    table[0] = (LiftedEntry){ .module = "CHILD.COM", .seg = 0, .off = NESTED_ENTRY, .fn = lifted_nested_exit,
+                              .name = "nested_exit", .near_return = true, .scratch_regs = LIFT_REG_AX };
+    memcpy(table[0].signature, file + NESTED_ENTRY, LIFT_SIGNATURE_LEN);
+    lift_add_table(m, table, 1);
+    dos_init(m, root);
+    static const uint8_t tail[2] = { 0, '\r' };
+    Chain before = read_chain(m);
+    uint16_t cur = dos_state(m)->cur_psp;
+    LiftState *s = lift_state(m);
+    s->c_depth = 1;
+    set_caller_state(m);
+    nested_exit_after = 0;
+    s->nested_budget = m->cpu.instructions + 100000; /* without the unwind the caller's code would run on */
+    uint16_t err = 0;
+    CHECK(native_exec(m, "C:\\CHILD.COM", tail, 0, &err) == NESTED_CODE);
+    s->nested_budget = 0;
+    CHECK(nested_exit_after == 0);
+    CHECK(!s->nested_abort);
+    CHECK(s->c_depth == 1 && s->nesting == 0);
+    CHECK(chain_unchanged(m, &before));
+    CHECK(dos_state(m)->cur_psp == cur && dos_state(m)->depth == 0);
+    check_caller_state(m);
+    s->c_depth = 0;
+    finish(m);
+}
+
 static void test_run_top(void)
 {
     make_root("top");
@@ -409,6 +460,7 @@ int main(void)
     test_emulated_child();
     test_native_child();
     test_nested();
+    test_exit_in_nested_call();
     test_run_top();
     test_arming();
     test_dumps();
