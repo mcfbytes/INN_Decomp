@@ -240,7 +240,7 @@ class ModuleData:
             raise CaseError(f'no index.tsv entry for {case.addr}')
         if len(sizes) > 1:
             raise CaseError(f'ambiguous index sizes {sorted(sizes)} for {case.addr}')
-        return key, sizes.pop()
+        return key, next(iter(sizes))
 
     def original(self, case):
         """Original bytes and a 1-per-comparable-byte mask."""

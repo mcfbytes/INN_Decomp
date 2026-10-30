@@ -41,8 +41,9 @@ saves SI before DI. Neither binary contains Microsoft's runtime strings (`R6000`
 
   The compiler, media trees and private tree default to the local installs (`--bcpp`, `--media`,
   `--private` override them).
-- First corpus (2026-10-29): all 837 `easy` leaf candidates across the six Ybarra programs. 790
-  compiled; **682 exact (86.3 %)**, 24 same-length diffs, 84 length mismatches, 47 rows with no
-  standalone C case. Under the default `-O2` alone 605 are exact; the union over `-O2`, `-O1`,
-  `-O`, `-Od` and `-Od -Z` gives 682 because the shipped programs mix optimisation levels.
+- First two corpus waves (2026-10-29): all 837 `easy` and 230 `medium` leaf candidates across the six
+  Ybarra programs. 1,016 cases compiled; **739 exact (72.7 %)**, 48 same-length diffs, 229 length
+  mismatches, 51 rows with no standalone C case. The easy wave alone is 682/790 exact (86.3 %); the
+  medium wave is 57/226. Under the default `-O2` alone 646 cases are exact; the union over `-O2`,
+  `-O1`, `-O`, `-Od` and `-Od -Z` gives 739 because the shipped programs mix optimisation levels.
   Report: `private/lifted/matching/MATCH-REPORT.md`.
