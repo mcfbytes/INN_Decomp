@@ -346,12 +346,11 @@ address with `ws` turned into `http` (same host and port). With no providers (an
 list) nothing changes: phone, then dial. With providers, the flow below runs (contract in the next section).
 
 1. *Who's calling.* Clicking the telephone (or Game, Dial) with the disks loaded makes the operator ask
-   "Operator. How can I connect you?". The narrator box offers a row of calling cards: a painted card per provider
-   with its configured name as lettering (no logos or brand marks; see "Calling cards" below), plus a dashed
-   "PRIVATE LINE" card, "I have my own number", which is the classic path: no sign-in, the account already in the
-   install (left out when the server requires sign-in). Game, "Sign in..." offers the provider cards only, and
-   works without disks.
-2. *On hold.* A card opens the login in a popup (`window.open` straight from the click) and the narrator says the
+   "Operator. How can I connect you?". The narrator box offers the providers' own sign-in buttons (see "Sign-in
+   buttons" below), plus "I have my own number" in the same shape with a dashed frame, which is the classic path: no
+   sign-in, the account already in the install (left out when the server requires sign-in). Game, "Sign in..."
+   offers the provider buttons only, and works without disks.
+2. *On hold.* A button opens the login in a popup (`window.open` straight from the click) and the narrator says the
    operator has put you on hold (tiny hold-music notes; "Hang up on the operator" closes the popup). If the popup
    is blocked, the page redirects in the same window instead and takes the result from the address fragment.
 3. *The card.* On success a calling-card icon joins the disk icon in the inventory and the score gains 5. Each
@@ -370,46 +369,36 @@ list) nothing changes: phone, then dial. With providers, the flow below runs (co
    `AT+CARD=<provider id>` line before `ATDT`.
 5. *Errors* are narrator boxes, the facts first: the popup closed without signing in, the provider's Deny
    (`access_denied`) or failure (`provider_error`, `server_error`), an expired session (401: the token is dropped
-   and the cards come back), closed enrolment, a new line refused for today's limit (429), an age and terms
+   and the buttons come back), closed enrolment, a new line refused for today's limit (429), an age and terms
    answer the server wants again (403 `attest_required`: the notice is shown again and the call repeated once),
-   a busy server (503) and an unreachable one. The table in the next section lists each. Everything is reachable by keyboard: F10, Game, "Sign in...", Enter on a card, the
+   a busy server (503) and an unreachable one. The table in the next section lists each. Everything is reachable by keyboard: F10, Game, "Sign in...", Enter on a sign-in button, the
    buttons of the narrator box (Left and Right move between them), the dialog.
 
-**Calling cards.** Each card is a `<button class="ccard">` in `adv.js` (`callingCard`): real lettering over a
-face painted with the scenes' kit (`InnScenes.paintSmall` in `scene.js`: the same brush helpers, paper texture,
-median-cut palette and ordered dither as the backdrops, at 2 CSS pixels a painted pixel). The face has two parts:
+**Sign-in buttons.** The providers' brand guidelines require their own mark and wording on a "Sign in with ..."
+button (Google makes it a condition of its OAuth app verification), so the choices are their buttons, not the game's
+art. `signin.js` (`InnSignIn.button`) makes one for the narrator box (`adv.js`, a `<button>`) and for the classic
+layout's list (`page.js`, an `<a>` to the login):
 
-- *The provider's design*, the same on every scene, keyed by the provider `id` (the `CARDS` table): a band colour
-  and a made-up series name in the band, a motif at the lower right, and a fine-print gag under the name.
+- *Marks and labels*, by provider `id`: `google` "Sign in with Google" with Google's gradient G, `microsoft` "Sign in
+  with Microsoft" with the four-square logo, `discord` "Sign in with Discord" with the Discord symbol (Blurple, white
+  at dusk), `github` "Sign in with GitHub" with the GitHub mark (black, white at dusk). Any other id shows "Sign in
+  with <name>" (its `name` from `/auth/providers`) and a plain key. The marks are the providers' published files,
+  embedded as `data:` images (`docs/third_party.md` lists the sources); none is redrawn, recoloured or combined with
+  other art.
+- *One shape for all*, so the set reads as one: Google's button specification (40 px high, 4 px corners, 12 px padding,
+  a 20 px mark at the left, the label centred in Roboto or the system sans at 14 px medium), in its light shell
+  (white, `#747775` stroke, `#1f1f1f` text) by day and its dark one (`#131314`, `#8e918f`, `#e3e3e3`) at dusk, following
+  the page's theme in CSS (`.sib` in `shell.html`). Microsoft's own redlines differ by a pixel or two in height and
+  grey; its guidelines are recommendations, Google's a requirement, so Google's win. The panels' offset shadow sits
+  outside each button, and hover lays an 8% veil of the text colour over it, as Google's states do.
+- *Layout*: two columns in the narrator box (one at 520 px and below), with the scene's line under the row (harbour
+  "Waterproof to a depth of one (1) small splash.", diner "Good for one call or one slice of pie, not both.", tower
+  "Not redeemable for newts, or by them.", town "Postmarked a quarter past something.", valley "Fireproof up to one
+  (1) polite rumble."), which changes with the scene; one column in the classic list. Each button's accessible name is
+  its label, and the narrator's buttons point `aria-describedby` at the scene's line.
 
-  | id | series (band) | motif | fine print |
-  |---|---|---|---|
-  | `microsoft` | LAMP ROOM EXCHANGE | a lighthouse lamp on its rock | Do not fold, spindle or feed to serpents. |
-  | `google` | PIGEON POST & CO. | a carrier pigeon with a tiny satchel | Delivered by pigeon. Tip in crumbs only. |
-  | `discord` | UP & AWAY PARTY LINE | a hot-air balloon | Altitude may vary. Ballast is not refundable. |
-  | `github` | PATCH CORD SOCIETY | a brass switchboard plug on its way to a jack | Valid for one (1) identity. Pointy end in. |
-  | `dev` | CACTUS JUNCTION | a cactus wearing a headset | Test line. The cactus is not a real operator. |
-  | any other id | one of four, by a stable hash of the id | tin-can telephone, pocket watch, rotary dial, rubber stamp | one each |
-  | own number | PRIVATE LINE (dashed frame) | a latchkey with a luggage tag | Unlisted. The operator pretends not to know you. |
-
-- *The scene's flourish* (the `POST` table): the paper and the postmark ink follow the scene, a postmark (two rings,
-  worn lettering, a 7 x 7 picture: anchor, slice of pie, moon, clock, volcano, and three wavy cancel lines) sits
-  over the motif, and one line goes under the row: harbour "Waterproof to a depth of one (1) small splash.", diner
-  "Good for one call or one slice of pie, not both.", tower "Not redeemable for newts, or by them.", town
-  "Postmarked a quarter past something.", valley "Fireproof up to one (1) polite rumble." At dusk the card grades
-  its own colours (a lamp-lit paper, the motif toned toward the scene's night) so the lettering stays readable.
-
-The faces repaint when a card changes size (a `ResizeObserver`; at 700 px and below the cards are full width), when
-the scene is painted again (another scene, or the Time of day option) and are cached per design, scene, mode and
-size. The canvas is `aria-hidden`; the button keeps the accessible name "Calling card: <name>" and points
-`aria-describedby` at its fine print and the scene's line, both real text. Nothing moves except the hover lift,
-which reduced motion turns off. No image is fetched: everything is drawn in code, so the packaged CSP holds.
-
-*No logos.* A card never shows a provider's logo, mark, mascot or trade dress, not redrawn and not "inspired by",
-and not in its brand colours: the motifs and colours are unrelated to the companies, and the provider is only its
-`name` from `/auth/providers`, as plain text. Providers' brand guidelines forbid altered or re-coloured logos, and
-the name is used nominatively, to say which sign-in a card opens. The humour is about calling cards, operators and
-the scene, never about the companies.
+The story keeps its calling cards: the operator's lines and the inventory still speak of the card in your hand.
+Those are the game's words; the buttons themselves are the providers'.
 
 Game, "Sign out" calls `POST /auth/logout`, forgets the token and has the narrator say goodbye; Help, About names
 the signed-in identity.
@@ -420,7 +409,7 @@ other; nothing is matched by email, and no email is asked for. Game, "Sign-in me
 narrator list the cards that reach these lines, by provider name and link date ("Sign-in methods. These cards reach
 your lines: GitHub (since 2026-10-17), the one in your hand; Pigeon Post (since 2026-10-18)."), with a "Remove <name>"
 button for each card but the one in use, "Add another sign-in method" and OK. A single card cannot be removed, and
-the box says so. Add shows the calling cards; picking one opens the login popup straight from the click while the page
+the box says so. Add shows the sign-in buttons; picking one opens the login popup straight from the click while the page
 fetches a link ticket (`POST /auth/identities/ticket`), then sends the popup on with `&link=<ticket>`. The popup
 answers with a proof instead of a session, and the page redeems it with its own token (`POST /auth/identities`):
 "Linked." and the list again. Remove asks once ("It will no longer reach these lines, and any sign-in with it ends
@@ -480,7 +469,7 @@ What the page does with the answers it does not just show:
 
 | Answer | The page |
 |---|---|
-| 401 from any call | drops the token, brings the calling cards back ("Your sign-in has expired (the server answered 401)") |
+| 401 from any call | drops the token, brings the sign-in buttons back ("Your sign-in has expired (the server answered 401)") |
 | 403 `attest_required` on `POST /auth/accounts` (or the credential) | asks the age and terms notice again whatever this browser remembers, sends `POST /auth/attest`, and repeats the call once; a second refusal is shown as a failure |
 | 429 `rate_limited` on a new line | says the card has reached its limit for the day (429), marks `canCreate` false and offers the lines it has |
 | 404 `no_such_account` on a credential | says the line is not on this card (404) and offers the list again |
@@ -682,7 +671,7 @@ CasinoLand and SierraLand pairs follow the same views, but only the hub's was ex
 (`docs/legal.md` is the checklist). Fields: `siteName`, `operatorName`, `contactEmail`, `privacyEmail` (optional,
 falls back to `contactEmail`), `dmcaAgent` `{name, address, email, phone}`, `governingLaw`, `serverLocation`,
 `effectiveDate`, `termsVersion` (an integer, starting at 1), `minimumAge` (18). Optional extras: `auditRetentionDays`
-(shown in the privacy notice, default 90), `telemetryRetentionDays` (shown in the privacy notice, default 365, the
+(shown in the privacy notice, default 90), `telemetryRetentionDays` (shown in the privacy notice, default 90, the
 Log Analytics workspace's retention), `siteUrl` (see "Search and link previews"), `telemetry` `{connectionString}`
 (see "Diagnostics"), `authServer` (overrides `AUTH_SERVER`) and `gameServer`. The game line
 the page dials is `gameServer` when set, else the sign-in server's origin as `ws(s)` (innkeeperd serves both on one
@@ -1119,15 +1108,20 @@ under GPC or DNT; stored as `inn.diag` in `localStorage`, inside try/catch like 
 
 | What | Envelope | Fields |
 |---|---|---|
-| page view | `PageviewData` | `name` and `url` = the path only (no query string, no hash), `duration` = load time |
-| runtime started | `EventData` `runtime_started` | measurements `runtimeDownloadMs` (request to the wasm arriving) and `runtimeStartMs` |
-| errors | `ExceptionData` | `typeName`, `message` (1 KB at most), `stack` (2 KB at most) |
-| online session | `EventData` `connect` | `result` = `ok`, `failed` or `closed`; `duration` bucket (`under-2s`, `2-5s`, `5-15s`, `15-60s`, `1-5min`, `5-30min`, `over-30min`) |
+| page view | `PageviewData` | `id` (the trace's root span), `name` and `url` = the path only (no query string, no hash), `duration` = load time |
+| page starts the runtime | `RemoteDependencyData` `start dosrt` | type `Runtime`, target `dosrt`, `duration` = download and start, `resultCode` `ok` |
+| runtime start | `RequestData` `start` (role `dosrt`) | `duration` = start; property `runtime` = `dosbox` or `native`; measurement `downloadMs` |
+| runtime started | `EventData` `runtime_started` (role `dosrt`) | measurements `runtimeDownloadMs` (request to the wasm arriving) and `runtimeStartMs` |
+| errors | `ExceptionData` | `typeName`, `message` (1 KB at most), `stack` (2 KB at most); role `dosrt` when the stack is in the wasm or the runtime's loader, else `web` |
+| online session | `EventData` `connect` (role `dosrt`) | `result` = `ok`, `failed` or `closed`; `duration` bucket (`under-2s`, `2-5s`, `5-15s`, `15-60s`, `1-5min`, `5-30min`, `over-30min`) |
+| the connect | `RemoteDependencyData` `WS connect` (role `dosrt`) | type `WebSocket`, target `innkeeperd` (never the address), `duration` from dialling until the line opens or fails, `resultCode` `ok`, `failed`, or at `pagehide` while still dialling `dialing`; sent at once, not when the line ends |
+| an /auth call | `RemoteDependencyData` `<METHOD> <route>` | type `Fetch`, target `innkeeperd`, the route with numbers as `{id}` and long values as `{value}` (no query), `resultCode` = the HTTP status (`0`: no answer) |
 | display filter | `EventData` `display_filter` | `filter` (an id from the fixed list), when the visitor picks one |
 | capabilities | `EventData` `capabilities` | `webgl2`, `jspi` (true or false) |
 
 Every envelope has `iKey`, `time`, and the tags `ai.session.id` (random per page load, kept in memory only),
-`ai.operation.name` (the path) and `ai.internal.sdkVersion`. There is no user, device or location tag: Application
+`ai.operation.name` (the path), `ai.operation.id` (the trace, random per page load, in memory only), `ai.cloud.role`
+(`web` or `dosrt`), `ai.operation.parentId` (except the page view) and `ai.internal.sdkVersion`. There is no user, device or location tag: Application
 Insights derives browser and OS from the User-Agent header and masks the IP address (coarse location only). No
 cookie is set and no persistent ID exists. Error text is scrubbed first: web addresses become file names (no host,
 directory, query or hash), `ws:`, `wss:` and any other address become `[address]`, bare `host:port` and IPv4
@@ -1138,9 +1132,31 @@ installation, server addresses. An example envelope:
 ```
 {"name":"Microsoft.ApplicationInsights.00000000111122223333444444444444.Event","time":"2026-10-18T02:12:43.361Z",
  "iKey":"00000000-1111-2222-3333-444444444444",
- "tags":{"ai.session.id":"521bf2e6c3900bf4","ai.operation.name":"/","ai.internal.sdkVersion":"web-diag:1"},
+ "tags":{"ai.session.id":"521bf2e6c3900bf4","ai.operation.name":"/","ai.operation.id":"6f1c0b3e9a2d47c58e0f1a2b3c4d5e6f",
+  "ai.cloud.role":"dosrt","ai.operation.parentId":"a4c2e8f01b3d5769","ai.internal.sdkVersion":"web-diag:2"},
  "data":{"baseType":"EventData","baseData":{"ver":2,"name":"connect","properties":{"result":"ok","duration":"5-15s"},"measurements":{}}}}
 ```
+
+#### The trace
+
+One page load is one trace (one `ai.operation.id`), so the portal's transaction view and Application Map show the
+page, the runtime and the server together:
+
+```
+web  page view ─ start dosrt ─▶ dosrt  start ─ WS connect ─▶ innkeeperd  WS line ─ <message kind> ─▶ <land>
+web  page view ─ GET /auth/session ─▶ innkeeperd  GET /auth/session
+```
+
+The dosrt -> innkeeperd edge is the wait to connect (`WS connect`, sent as soon as the line opens or fails); how
+long a session lasted, and how it ended, is innkeeperd's `WS line` request, so Application Map's average on the edge
+is not a session length. The server joins it only when asked: with diagnostics on, the line's WebSocket address carries
+`traceparent=00-<trace>-<WS connect span>-01` (beside `session=`) and each `/auth` fetch the header `traceparent`
+(W3C trace context; innkeeperd allows the header in CORS). Both hold only the two random IDs. With diagnostics off,
+under GPC or DNT, or without a connection string, neither is added and the server sends nothing for that line or
+call; turning the switch off mid-session stops the page at once and the server from the next connection. What
+innkeeperd then sends (the line's result and length, one item per client message with its kind, land and result,
+one per save request and per `/auth` call, never an account, name, identity, address or content) is in the server
+repo's `docs/server/innkeeperd.md`, section 10, and `docs/server/privacy.md`.
 
 The privacy notice (`legal/privacy.html`) says all of this to visitors. Local test: put a dummy string whose
 `IngestionEndpoint` is `http://127.0.0.1:<port>/` in `site.json` (loopback http is accepted for that) and run a fake
@@ -1260,7 +1276,7 @@ to test the generator.
 
 The values must equal what the servers run with, since the page states them to visitors: `termsVersion` is the server's
 `--terms-version`, `minimumAge` its `--minimum-age`, `auditRetentionDays` its `--audit-retention-days`, and
-`telemetryRetentionDays` the retention of the diagnostics workspace (the generator writes 90 when the variable is blank; a site.json without the field shows 365). `docs/legal.md` describes each field and what
+`telemetryRetentionDays` the retention of the diagnostics workspace (the generator writes 90 when the variable is blank; a site.json without the field shows 90). `docs/legal.md` describes each field and what
 the legal pages do with it. `SITE_URL`, `SITE_AUTH_SERVER` and `SITE_GAME_SERVER` also feed the CSP, so change them
 only together with the servers' `--page-origin`.
 

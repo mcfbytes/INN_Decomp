@@ -51,25 +51,54 @@ assert.equal(T.label('a b/c?d=e'), 'a_b_c_d_e');
 
 // ---- envelopes ----
 const conn = { iKey: KEY, url: 'https://x.test/v2/track' };
-const at = new Date('2026-01-02T03:04:05.678Z');
-const pv = T.envelope(conn, 'abcd', '/', 'PageviewData', T.pageviewBase('/', 1234), at);
+const when = new Date('2026-01-02T03:04:05.678Z');
+const OP = '0123456789abcdef0123456789abcdef';
+const page = { sessionId: 'abcd', path: '/', operationId: OP, role: 'web', parentId: '' };
+const pv = T.envelope(conn, page, 'PageviewData', T.pageviewBase('/', 1234, '1111222233334444'), when);
 assert.deepEqual(pv, {
   name: 'Microsoft.ApplicationInsights.00000000111122223333444444444444.Pageview',
   time: '2026-01-02T03:04:05.678Z', iKey: KEY,
-  tags: { 'ai.session.id': 'abcd', 'ai.operation.name': '/', 'ai.internal.sdkVersion': 'web-diag:1' },
-  data: { baseType: 'PageviewData', baseData: { ver: 2, name: '/', url: '/', duration: '00:00:01.234' } },
+  tags: { 'ai.session.id': 'abcd', 'ai.operation.name': '/', 'ai.operation.id': OP, 'ai.cloud.role': 'web', 'ai.internal.sdkVersion': 'web-diag:2' },
+  data: { baseType: 'PageviewData', baseData: { ver: 2, id: '1111222233334444', name: '/', url: '/', duration: '00:00:01.234' } },
 });
-const ev = T.envelope(conn, 'abcd', '/', 'EventData', T.eventBase('connect', { result: 'ok', duration: '2-5s' }, { n: 1 }), at);
+const child = { sessionId: 'abcd', path: '/', operationId: OP, role: 'dosrt', parentId: '1111222233334444' };
+const ev = T.envelope(conn, child, 'EventData', T.eventBase('connect', { result: 'ok', duration: '2-5s' }, { n: 1 }), when);
 assert.equal(ev.name.split('.').pop(), 'Event');
+assert.equal(ev.tags['ai.operation.parentId'], '1111222233334444');
+assert.equal(ev.tags['ai.cloud.role'], 'dosrt');
 assert.deepEqual(ev.data.baseData, { ver: 2, name: 'connect', properties: { result: 'ok', duration: '2-5s' }, measurements: { n: 1 } });
-const ex = T.envelope(conn, 'abcd', '/', 'ExceptionData', T.exceptionBase(Object.assign(new Error('boom at wss://h.test:1/x'), { stack: stack })), at);
+const ex = T.envelope(conn, page, 'ExceptionData', T.exceptionBase(Object.assign(new Error('boom at wss://h.test:1/x'), { stack: stack })), when);
 const d = ex.data.baseData.exceptions[0];
 assert.equal(ex.name.split('.').pop(), 'Exception');
 assert.equal(d.typeName, 'Error');
 assert.equal(d.message, 'boom at [address]');
 assert.ok(d.hasFullStack && d.stack.length <= 2048 && !/play\.example/.test(d.stack));
 assert.equal(T.exceptionBase('just a string').exceptions[0].message, 'just a string');
-// No user, device or location tag ever goes out.
-for (const e of [pv, ev, ex]) assert.deepEqual(Object.keys(e.tags).sort(), ['ai.internal.sdkVersion', 'ai.operation.name', 'ai.session.id']);
+
+// ---- the trace ----
+const rq = T.envelope(conn, child, 'RequestData', T.requestBase('5555666677778888', 'start', 2500, 'ok', true, { runtime: 'dosbox' }, { downloadMs: 900 }), when);
+assert.equal(rq.name.split('.').pop(), 'Request');
+assert.deepEqual(rq.data.baseData, { ver: 2, id: '5555666677778888', name: 'start', duration: '00:00:02.500', responseCode: 'ok', success: true,
+  properties: { runtime: 'dosbox' }, measurements: { downloadMs: 900 } });
+const dep = T.envelope(conn, child, 'RemoteDependencyData', T.dependencyBase('9999aaaabbbbcccc', 'WS connect', 'WebSocket', 'innkeeperd', 60000, 'failed', false), when);
+assert.equal(dep.name.split('.').pop(), 'RemoteDependency');
+assert.deepEqual(dep.data.baseData, { ver: 2, id: '9999aaaabbbbcccc', name: 'WS connect', type: 'WebSocket', target: 'innkeeperd', duration: '00:01:00.000',
+  resultCode: 'failed', success: false, properties: {} });
+assert.equal(T.traceparent(OP, '9999aaaabbbbcccc'), `00-${OP}-9999aaaabbbbcccc-01`);
+assert.match(T.traceparent(OP, '9999aaaabbbbcccc'), /^00-[0-9a-f]{32}-[0-9a-f]{16}-01$/);
+assert.equal(T.routeOf('/auth/accounts/123456/credential'), '/auth/accounts/{id}/credential', 'an account number never goes out');
+assert.equal(T.routeOf('/auth/accounts/7/saves?path=PLAYER%2FFOO.DTA'), '/auth/accounts/{id}/saves', 'nor a query (a save file name)');
+assert.equal(T.routeOf(`/auth/x/${'z'.repeat(40)}`), '/auth/x/{value}');
+assert.equal(T.routeOf('/auth/identities/unlink'), '/auth/identities/unlink');
+assert.equal(T.roleOfError({ stack: 'RuntimeError: unreachable\n    at wasm://wasm/0a1b:wasm-function[3]:0x10' }), 'dosrt');
+assert.equal(T.roleOfError({ stack: 'Error: x\n    at f (https://h.test/inn.js:1:2)' }), 'dosrt');
+assert.equal(T.roleOfError({ stack: 'Error: x\n    at f (https://h.test/page.js:1:2)' }), 'web');
+assert.equal(T.roleOfError({ stack: 'Error: x\n    at f (https://h.test/assets/inn.0123abcd.js:1:2)' }), 'dosrt', 'the packaged loader');
+assert.equal(T.roleOfError({ stack: 'Error: x\n    at f (https://h.test/assets/app.0123abcd.js:1:2)' }), 'web');
+assert.equal(T.roleOfError('a string'), 'web');
+// No user, device or location tag ever goes out; the trace tags are the only additions.
+const allowed = ['ai.cloud.role', 'ai.internal.sdkVersion', 'ai.operation.id', 'ai.operation.name', 'ai.operation.parentId', 'ai.session.id'];
+for (const e of [pv, ev, ex, rq, dep]) for (const k of Object.keys(e.tags)) assert.ok(allowed.includes(k), k);
+assert.ok(!('ai.operation.parentId' in pv.tags), 'the page view is the root');
 
 console.log('telemetry: ok');

@@ -2,17 +2,20 @@
 // builds the v2 envelopes and posts them to <IngestionEndpoint>/v2/track itself. It is on only when site.json
 // has telemetry.connectionString, and off when the browser says Global Privacy Control or Do Not Track, or the
 // visitor turned the Settings switch off. It sends the things listed in docs/web.md ("Diagnostics") and nothing
-// else: no cookie, no persistent ID (the session ID is random per page load and lives in memory), no query
-// string or hash, no server address, account number, handle, chat or file name. The scrubbing and the envelope
-// building are plain functions so tools/test_telemetry.js can run them under Node. Loaded before everything else.
+// else: no cookie, no persistent ID (the session and trace IDs are random per page load and live in memory), no
+// query string or hash, no server address, account number, handle, chat or file name. One page load is one trace:
+// the page (role web), the runtime (role dosrt) and, through a traceparent on the line and on /auth calls, the
+// server's handling of them (docs/web.md, "Diagnostics", "The trace"). The scrubbing and the envelope building are
+// plain functions so tools/test_telemetry.js can run them under Node. Loaded before everything else.
 'use strict';
 
 const Telemetry = (() => {
   const PREF_KEY = 'inn.diag';           // '0' = the visitor turned diagnostics off; anything else = on
-  const SDK = 'web-diag:1';
+  const SDK = 'web-diag:2';
   const FLUSH_MS = 5000, BATCH_MAX = 20, QUEUE_MAX = 60, BODY_MAX = 56000;   // fetch keepalive bodies may not pass 64 KB
   const STACK_MAX = 2048, MESSAGE_MAX = 1024, NAME_MAX = 64, PROP_MAX = 64;
   const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const SERVER = 'innkeeperd';           // the dependency target and the server's role on the map; never its address
 
   // ---- pure helpers ----
 
@@ -94,19 +97,37 @@ const Telemetry = (() => {
   }
 
   // One Application Insights v2 envelope. No user, device or location tags: the service derives browser and OS
-  // from the User-Agent header itself, and the session ID is the random in-memory one.
-  function envelope(conn, sessionId, path, type, base, now = new Date()) {
-    const names = { EventData: 'Event', PageviewData: 'Pageview', ExceptionData: 'Exception' };
+  // from the User-Agent header itself. `at` places it in the trace: { sessionId, path, operationId, role, parentId }.
+  function envelope(conn, at, type, base, now = new Date()) {
+    const names = { EventData: 'Event', PageviewData: 'Pageview', ExceptionData: 'Exception', RequestData: 'Request', RemoteDependencyData: 'RemoteDependency' };
+    const tags = { 'ai.session.id': at.sessionId, 'ai.operation.name': at.path, 'ai.operation.id': at.operationId, 'ai.cloud.role': at.role, 'ai.internal.sdkVersion': SDK };
+    if (at.parentId) tags['ai.operation.parentId'] = at.parentId;
     return {
       name: `Microsoft.ApplicationInsights.${conn.iKey.replace(/-/g, '')}.${names[type]}`,
       time: now.toISOString(),
       iKey: conn.iKey,
-      tags: { 'ai.session.id': sessionId, 'ai.operation.name': path, 'ai.internal.sdkVersion': SDK },
+      tags,
       data: { baseType: type, baseData: Object.assign({ ver: 2 }, base) },
     };
   }
 
-  const pageviewBase = (path, ms) => ({ name: path, url: path, duration: duration(ms) });   // the path is the whole address we send
+  const pageviewBase = (path, ms, id) => ({ id, name: path, url: path, duration: duration(ms) });   // the path is the whole address we send
+  const requestBase = (id, name, ms, code, success, props, measures) =>
+    ({ id, name: label(name), duration: duration(ms), responseCode: label(code), success: !!success, properties: props || {}, measurements: measures || {} });
+  const dependencyBase = (id, name, type, target, ms, code, success) =>
+    ({ id, name, type, target, duration: duration(ms), resultCode: label(code), success: !!success, properties: {} });
+
+  // `00-<trace>-<parent>-01`: what the line's address and the /auth calls carry so the server can join the trace.
+  const traceparent = (operationId, parentId) => `00-${operationId}-${parentId}-01`;
+
+  // An /auth path as a route: no query or hash, and numbers (account numbers) or long values become placeholders.
+  function routeOf(path) {
+    const bare = String(path == null ? '' : path).replace(/[?#].*$/, '');
+    return bare.split('/').map((seg) => (/^\d+$/.test(seg) ? '{id}' : seg.length > 32 || /[^\w.-]/.test(seg) ? '{value}' : seg)).join('/') || '/';
+  }
+
+  // Errors from inside the runtime (its wasm frames or its loader, inn.js or packaged inn.<hash>.js) belong to dosrt.
+  const roleOfError = (error) => (/wasm:|\binn(\.[0-9a-f]+)?\.js\b/.test(error && typeof error.stack === 'string' ? error.stack : '') ? 'dosrt' : 'web');
   const eventBase = (name, props, measures) => ({ name: label(name).slice(0, NAME_MAX), properties: props || {}, measurements: measures || {} });
   function exceptionBase(error, extra) {
     const isErr = error && typeof error === 'object';
@@ -116,13 +137,15 @@ const Telemetry = (() => {
     return { exceptions: [{ typeName: type, message: msg || type, hasFullStack: !!stack, stack }], severityLevel: 3, properties: extra || {} };
   }
 
-  const randomId = () => {
-    const b = new Uint8Array(8);
+  const randomHex = (bytes) => {
+    const b = new Uint8Array(bytes);
     (typeof crypto !== 'undefined' && crypto.getRandomValues ? crypto : { getRandomValues: (a) => a.map(() => Math.floor(Math.random() * 256)) }).getRandomValues(b);
     return Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
   };
+  const spanId = () => randomHex(8);
 
-  const pure = { parseConnectionString, scrubText, scrubMessage, scrubStack, label, pathOf, duration, bucket, envelope, pageviewBase, eventBase, exceptionBase };
+  const pure = { parseConnectionString, scrubText, scrubMessage, scrubStack, label, pathOf, duration, bucket, envelope, pageviewBase, eventBase, exceptionBase,
+    requestBase, dependencyBase, traceparent, routeOf, roleOfError };
 
   // ---- the live module (browser only) ----
 
@@ -131,7 +154,12 @@ const Telemetry = (() => {
     return pure;
   }
 
-  const sessionId = randomId();   // per page load, in memory only
+  const sessionId = spanId();     // per page load, in memory only
+  // The trace's fixed spans: page view, the page starting the runtime, the runtime's start, and its connect.
+  const trace = { operationId: randomHex(16), page: spanId(), start: spanId(), runtime: spanId(), line: spanId() };
+  const WEB = { role: 'web', parentId: trace.page };
+  const DOSRT = { role: 'dosrt', parentId: trace.runtime };
+  const line = { armed: false, sent: false, t0: 0 };
   let conn = null;                // set by init() when site.json has a usable connection string
   let started = false;           // init() has run
   let on = false;                 // diagnostics are being sent
@@ -161,10 +189,12 @@ const Telemetry = (() => {
     if (!on) { queue = []; clearTimeout(timer); timer = 0; }
   }
 
-  function add(type, base) {
-    if (!started) { if (early.length < QUEUE_MAX) early.push([type, base, new Date()]); return; }
+  const at = (scope) => ({ sessionId, path: pathOf(location), operationId: trace.operationId, role: scope.role, parentId: scope.parentId });
+
+  function add(type, base, scope = WEB) {
+    if (!started) { if (early.length < QUEUE_MAX) early.push([type, base, scope, new Date()]); return; }
     if (!on) return;
-    queue.push(envelope(conn, sessionId, pathOf(location), type, base));
+    queue.push(envelope(conn, at(scope), type, base));
     if (queue.length >= BATCH_MAX) flush();
     else if (!timer) timer = setTimeout(flush, FLUSH_MS);
   }
@@ -213,7 +243,7 @@ const Telemetry = (() => {
       refresh();
       const held = early.splice(0);
       if (!on) return;
-      for (const [type, base, when] of held) queue.push(envelope(conn, sessionId, pathOf(location), type, base, when));
+      for (const [type, base, scope, when] of held) queue.push(envelope(conn, at(scope), type, base, when));
       api.pageView();
       if (queue.length >= BATCH_MAX) flush();
       else if (queue.length && !timer) timer = setTimeout(flush, FLUSH_MS);
@@ -221,7 +251,7 @@ const Telemetry = (() => {
     pageView() {
       const nav = performance.getEntriesByType && performance.getEntriesByType('navigation')[0];
       const done = (nav && nav.loadEventEnd > 0) ? nav.loadEventEnd : null;
-      const send = (ms) => add('PageviewData', pageviewBase(pathOf(location), ms));
+      const send = (ms) => add('PageviewData', pageviewBase(pathOf(location), ms, trace.page), { role: 'web', parentId: '' });
       if (done !== null) return send(done);
       // The page is still loading: send once it has, so the duration is the real load time.
       const after = () => setTimeout(() => {
@@ -230,17 +260,45 @@ const Telemetry = (() => {
       }, 0);
       if (document.readyState === 'complete') after(); else addEventListener('load', after, { once: true });
     },
-    event(name, props, measures) {
+    event(name, props, measures, scope = WEB) {
       const p = {};
       for (const k of Object.keys(props || {})) p[label(k)] = label(props[k]);
       const m = {};
       for (const k of Object.keys(measures || {})) if (Number.isFinite(measures[k])) m[label(k)] = Math.round(measures[k]);
-      add('EventData', eventBase(name, p, m));
+      add('EventData', eventBase(name, p, m), scope);
     },
-    error(error) { add('ExceptionData', exceptionBase(error)); },
+    error(error) { add('ExceptionData', exceptionBase(error), roleOfError(error) === 'dosrt' ? DOSRT : WEB); },
+    // The runtime came up: the page's call to it and the runtime's own start, then the event the dashboards know.
+    // kind is dosbox or native.
+    runtimeStarted(downloadMs, startMs, kind) {
+      add('RemoteDependencyData', dependencyBase(trace.start, 'start dosrt', 'Runtime', 'dosrt', downloadMs + startMs, 'ok', true));
+      add('RequestData', requestBase(trace.runtime, 'start', startMs, 'ok', true, { runtime: label(kind) }, { downloadMs: Math.round(downloadMs) }),
+        { role: 'dosrt', parentId: trace.start });
+      api.event('runtime_started', {}, { runtimeDownloadMs: downloadMs, runtimeStartMs: startMs }, DOSRT);
+    },
+    // What the line's address carries so the server joins this trace; empty, and nothing reaches the server, when off.
+    lineTraceparent() {
+      if (!on) return '';
+      Object.assign(line, { armed: true, sent: false, t0: performance.now() });
+      return traceparent(trace.operationId, trace.line);
+    },
     // The online-session result: ok (the line opened), failed (it did not), closed (an open line ended).
-    // Only the result and a coarse duration; never the address.
-    connect(result, ms) { api.event('connect', { result, duration: bucket(ms) }); },
+    // Only the result and a coarse duration; never the address. The connect span ends when the line opens or fails:
+    // the session's length is the server's WS line request, so App Map's edge shows the wait to connect.
+    connect(result, ms) {
+      api.event('connect', { result, duration: bucket(ms) }, {}, DOSRT);
+      if (result !== 'closed') endConnect(result);
+    },
+    // An /auth call: the header to add (or null when off) and done(status) once it answered (0: no answer).
+    traceFetch(method, path) {
+      if (!on) return null;
+      const id = spanId(), t = performance.now();
+      return {
+        header: traceparent(trace.operationId, id),
+        done: (status) => add('RemoteDependencyData', dependencyBase(id, `${label(method)} ${routeOf(path)}`, 'Fetch', SERVER,
+          performance.now() - t, String(status || 0), status > 0 && status < 500)),
+      };
+    },
     capabilities(info) { api.event('capabilities', { webgl2: !!info.webgl2, jspi: !!info.jspi }); },
     available, preference, setPreference, blockedBy,
     enabled: () => on,
@@ -255,8 +313,14 @@ const Telemetry = (() => {
     api.error(e.error || e.message);
   });
   addEventListener('unhandledrejection', (e) => api.error(e.reason));
+
+  function endConnect(result) {
+    if (!line.armed || line.sent) return;
+    line.sent = true;
+    add('RemoteDependencyData', dependencyBase(trace.line, 'WS connect', 'WebSocket', SERVER, performance.now() - line.t0, result, result !== 'failed'), DOSRT);
+  }
   // pagehide is the last reliable moment on every browser; hidden covers a tab that is switched away from and killed.
-  addEventListener('pagehide', () => flush(true));
+  addEventListener('pagehide', () => { endConnect('dialing'); flush(true); });
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flush(true); });
 
   return api;

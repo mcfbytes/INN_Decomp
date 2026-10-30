@@ -125,25 +125,26 @@
 <p>The hosting provider (the company whose computers the service runs on) may keep its own network logs under its own policy, which we do not control.</p>
 
 <h2>4. Anonymous diagnostics</h2>
-<p>If the operator has switched it on, the page sends a few anonymous diagnostics to the operator&rsquo;s Microsoft Azure Application Insights, so that we can find errors and keep the service working. It is our own small piece of code, not a third-party tracking script.</p>
+<p>If the operator has switched it on, the page, and the server for your online session, send a few anonymous diagnostics to the operator&rsquo;s Microsoft Azure Application Insights, so that we can find errors and keep the service working. On the page it is our own small piece of code, not a third-party tracking script.</p>
 <h3>What is sent</h3>
 <ul>
 <li><strong>A page view:</strong> the page path only (for example &ldquo;/&rdquo; or &ldquo;/legal/privacy.html&rdquo;), never a query string or the part after a &ldquo;#&rdquo;.</li>
 <li><strong>Load timings:</strong> how long the page took to load, and how long the game runtime took to download and start.</li>
 <li><strong>Errors:</strong> uncaught errors and failed promises in the page: the message and a stack trace cut to about 2 KB. Web addresses in them are reduced to file names, and any server address, account number or path on your install is removed before sending.</li>
 <li><strong>A few events:</strong> that the runtime started; whether an online session connected, failed to connect, or ended (with a rough duration such as &ldquo;5-15s&rdquo;, never the server address); which display filter you chose; and whether your browser has WebGL 2 and JSPI.</li>
+<li><strong>How the server handled your session:</strong> the page gives the server the two random numbers of this page load&rsquo;s diagnostics (below), and only then does the server record, for that connection: when it started, how long it lasted and how it ended; for each request the game client made, its kind (for example &ldquo;Login&rdquo; or &ldquo;Mail&rdquo;), which part of the world it was made in (for example &ldquo;SierraLand&rdquo;), how long the server took and whether it worked; the same for save-sync requests; and for the page&rsquo;s requests to the sign-in server, the address with any account number removed, how long it took and the answer&rsquo;s status code. Busy kinds of request are counted from a sample.</li>
 <li>Your browser and operating system, which Application Insights works out from the usual User-Agent header your browser sends with every request. We add nothing to identify your device.</li>
 </ul>
 <h3>What is never sent</h3>
-<p>No account number, persona name, chat, mail or post, no file names from your installation, no server address, no sign-in details, no cookie and no persistent ID. Each page load makes up a random session number that is kept in memory only and is gone when you close or reload the page, so two visits cannot be linked to each other.</p>
+<p>No account number, persona name, chat, mail or post, no file names from your installation, no server address, no sign-in details, no cookie and no persistent ID, from the page or from the server. The server&rsquo;s part also holds no IP address and nothing of what a request contained. Each page load makes up a random session number and a random trace number, kept in memory only and gone when you close or reload the page; the trace number ties the page&rsquo;s and the server&rsquo;s diagnostics of that one page load together. The server keeps no record of which account a trace belongs to, so a trace cannot be linked to your account, and two visits cannot be linked to each other.</p>
 <h3>Why, and our legal basis</h3>
 <p>To find and fix errors and to keep the service working. Our legal basis is legitimate interests (Article 6(1)(f) of the GDPR and UK GDPR): the data is small, anonymous in practice and not used for anything else, and you can opt out at any time (below).</p>
 <h3>Who processes it, and IP addresses</h3>
 <p>Microsoft Azure Application Insights stores and processes it as our processor, in the Azure region the operator chose (section 13). Your IP address reaches Application Insights because it is part of any connection, but it is <strong>not stored</strong>: Application Insights uses it to work out a coarse location (country, region and city) and then masks it. We do not combine this data with account data.</p>
 <h3>How long</h3>
-<p>The diagnostics are kept for <strong><span data-f="telemetryRetentionDays" data-default="365"></span> days</strong> in the operator&rsquo;s Azure Log Analytics workspace, and then deleted automatically.</p>
+<p>The diagnostics are kept for <strong><span data-f="telemetryRetentionDays" data-default="90"></span> days</strong> in the operator&rsquo;s Azure Log Analytics workspace, and then deleted automatically.</p>
 <h3>Turning it off</h3>
-<p>Switch off &ldquo;Send anonymous diagnostics&rdquo; in Settings (or the Options menu on the landing scene). The page then sends nothing, and remembers your choice on this device. It also sends nothing, and the switch is off and cannot be turned on, when your browser sends <strong>Global Privacy Control</strong> or <strong>Do Not Track</strong>. Diagnostics already sent cannot be tied back to you, because we hold nothing that identifies you in them.</p>
+<p>Switch off &ldquo;Send anonymous diagnostics&rdquo; in Settings (or the Options menu on the landing scene). The page then sends nothing, no longer asks the server to record your sessions, and remembers your choice on this device; a connection already open when you switch it off is recorded by the server until it ends. It also sends nothing, and the switch is off and cannot be turned on, when your browser sends <strong>Global Privacy Control</strong> or <strong>Do Not Track</strong>. Diagnostics already sent cannot be tied back to you, because we hold nothing that identifies you in them.</p>
 
 <h2>5. Cookies and storage on your device</h2>
 <p>We set <strong>no cookies</strong>. The page uses your browser&rsquo;s own storage for the items below. Each is either strictly necessary to give you what you asked for, or a preference you set yourself. That is why there is no cookie banner: storage of this kind is exempt from consent under Article 5(3) of the ePrivacy Directive. No analytics cookies or advertising identifiers are stored. None of this is sent to anyone but you, except that the sign-in token goes to the server to show that you are signed in. You can clear it all with your browser&rsquo;s site-data controls, or Forget in Settings for the installation.</p>
@@ -186,7 +187,7 @@
 <tr><td>Sealed connection records and the sealed sign-in identifier</td><td><span data-f="auditRetentionDays" data-default="90"></span> days by default, then purged automatically</td></tr>
 <tr><td>Expired sign-in sessions</td><td>Erased after 30 days</td></tr>
 <tr><td>A sign-in method you remove, or a sign-in that never opened an account</td><td>Erased once no sign-in session of it is left: about 30 days after its last session ended</td></tr>
-<tr><td>Anonymous diagnostics (section 4)</td><td><span data-f="telemetryRetentionDays" data-default="365"></span> days, then deleted automatically</td></tr>
+<tr><td>Anonymous diagnostics (section 4)</td><td><span data-f="telemetryRetentionDays" data-default="90"></span> days, then deleted automatically</td></tr>
 <tr><td>Readable server logs in public mode</td><td>They contain no personal data</td></tr>
 </tbody>
 </table>
@@ -199,8 +200,9 @@
 <ul>
 <li><strong>Microsoft Azure</strong> hosts the service, its database and its backups (section 13).</li>
 <li><strong>Microsoft Azure Application Insights</strong> receives the anonymous diagnostics (section 4).</li>
-<li><strong>The sign-in provider you choose</strong> (for example Microsoft) confirms who you are to us. It is a separate controller for its own accounts; its own notice applies to what it does. We receive only the identifier described in section 1.</li>
+<li><strong>The sign-in provider you choose</strong> confirms who you are to us: Microsoft, Google, Discord or GitHub, whichever of them this service offers on its sign-in screen. Each is a separate controller for its own accounts; its own notice applies to what it does. We receive only the identifier described in section 1.</li>
 </ul>
+<p><strong>Google.</strong> If you sign in with Google, we receive from Google only the sign-in token for the <code>openid</code> scope, and we use only the account identifier in it, which becomes the keyed hash described in section 1. We do not request your email address, name, profile or any other Google data, and we do not use Google data for advertising, sell it, or let anyone read it. Our use of information received from Google APIs adheres to the <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>, including the Limited Use requirements.</p>
 <p>We disclose information only when the law requires it: a valid subpoena, court order or warrant; or to report apparent child sexual exploitation to the National Center for Missing &amp; Exploited Children (NCMEC), as US law requires. When that happens, only the named account&rsquo;s records are opened. We do not sell or share data otherwise.</p>
 
 <h2>9. Your choices and rights</h2>

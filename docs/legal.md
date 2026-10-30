@@ -6,7 +6,8 @@ point, not a guarantee, and laws differ by place.
 
 The design goal is to hold as little personal information as possible: sign-in asks only for the `openid` scope,
 the server stores a keyed hash of the identity (not an email, name or profile), there are no cookies, no advertising
-and no cross-site tracking, the page sends only a few anonymous diagnostics (which a visitor can turn off, and which
+and no cross-site tracking, the page (and the server, for a session the page traces) sends only a few anonymous
+diagnostics (which a visitor can turn off, and which
 Global Privacy Control and Do Not Track turn off by themselves), and the only record that holds an IP address is
 sealed. The age notice is a self-declaration, not
 verification (docs/web.md, "Legal pages and the age notice").
@@ -16,7 +17,7 @@ verification (docs/web.md, "Legal pages and the age notice").
 The repo ships it empty on purpose. Set: `siteName`, `operatorName`, `contactEmail`, `privacyEmail` (optional),
 `dmcaAgent` (`name`, `address`, `email`, `phone`), `governingLaw` (a US state or a country), `serverLocation`
 (for example "United States (Azure)"), `effectiveDate`, `termsVersion` and `minimumAge`. Optional: `auditRetentionDays`
-(matches the server setting below), `telemetryRetentionDays` (matches the Log Analytics workspace, default 365),
+(matches the server setting below), `telemetryRetentionDays` (matches the Log Analytics workspace, default 90),
 `siteUrl` (the public origin, for canonical links, `robots.txt` and the sitemap), `telemetry.connectionString` (the
 Application Insights string for diagnostics; leave it empty to send none), `authServer` and `gameServer` (see
 docs/web.md). Do not commit your real values to the public repo; keep them
@@ -27,7 +28,8 @@ Raise `termsVersion` whenever the terms or privacy notice change in a way that m
 again to confirm their age and accept. The privacy notice gained its diagnostics, storage-key table, processors,
 transfers and rights sections along with the diagnostics feature: if the site was already open to the public under
 version 1, raise `termsVersion` (and the server's `--terms-version`) with that release; a site opening for the first
-time can keep 1.
+time can keep 1. The same goes for the release in which section 4 gained the server's part of the trace
+(docs/web.md, "The trace"): a site already public raises `termsVersion` with it.
 
 If you turn the diagnostics on, check the privacy notice against your deployment: the retention number (section 4 and
 the table), the Azure region (section 13), the sign-in providers you enable (section 8), and that the infrastructure
@@ -88,7 +90,7 @@ unless you have registered a designated agent and posted the agent's details.
 | complaints and abuse reports | 365 days |
 | sealed connection records | 90 days (`--audit-retention-days`) |
 | expired sign-in sessions | 30 days |
-| anonymous diagnostics (Application Insights) | 365 days (the workspace retention; `telemetryRetentionDays`) |
+| anonymous diagnostics (Application Insights: the page's and, for a traced session, the server's) | 90 days (the workspace retention; `telemetryRetentionDays`) |
 | backups | rotate within 30 days |
 
 Anything under a legal hold is kept until the hold ends, then the normal clock applies. Access requests include

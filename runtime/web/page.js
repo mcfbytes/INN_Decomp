@@ -158,7 +158,10 @@ async function loadProviders() {
   let found = [], required = false;
   try {
     if (base) {
-      const res = await fetch(`${base}/auth/providers`, { headers: { accept: 'application/json' } });
+      const traced = Telemetry.traceFetch('GET', '/auth/providers');
+      const res = await fetch(`${base}/auth/providers`, { headers: Object.assign({ accept: 'application/json' }, traced ? { traceparent: traced.header } : {}) })
+        .catch((error) => { if (traced) traced.done(0); throw error; });
+      if (traced) traced.done(res.status);
       // {signInRequired, providers}; a bare list is an older server's answer, where sign-in was optional.
       if (res.ok) {
         const answer = await res.json();
@@ -176,12 +179,10 @@ async function loadProviders() {
     try { href = new URL(p.url, base).href; } catch { continue; }
     // The login must live on the auth server's origin: the popup's message is accepted only from there.
     if (!/^https?:/.test(href) || new URL(href).origin !== new URL(base).origin) continue;
-    const a = document.createElement('a');
-    a.className = 'btn';
-    a.href = InnAuth.loginUrl(href, 'redirect');
+    // The provider's own sign-in button (signin.js), as a link.
+    const a = InnSignIn.button({ id: typeof p.id === 'string' ? p.id : '', name: p.name }, { href: InnAuth.loginUrl(href, 'redirect') });
     // The attestation is added when the age notice has been answered, so refresh the address on use.
     a.addEventListener('click', () => { a.href = InnAuth.loginUrl(href, 'redirect'); });
-    a.textContent = `Sign in with ${p.name}`;
     list.append(a);
     usable.push({ id: typeof p.id === 'string' ? p.id : p.name, name: p.name, href });
   }
@@ -656,12 +657,14 @@ function showDriveState() {
 // ---- running ----
 
 function runtimeArgs(server) {
-  // The session token rides on the WebSocket address as ?session= (docs/web.md, Sign-in). page.server,
-  // the modem lines and the status text keep the plain address.
+  // The session token rides on the WebSocket address as ?session= (docs/web.md, Sign-in), and with diagnostics on
+  // the trace as ?traceparent= ("Diagnostics"). page.server, the modem lines and the status text keep the plain address.
   let spec = server;
-  if (page.session) {
+  const traceparent = Telemetry.lineTraceparent();
+  if (page.session || traceparent) {
     const url = new URL(server);
-    url.searchParams.set('session', page.session);
+    if (page.session) url.searchParams.set('session', page.session);
+    if (traceparent) url.searchParams.set('traceparent', traceparent);
     spec = url.href;
   }
   const args = ['--com1', spec];
@@ -891,7 +894,7 @@ async function start(session) {
 function reportRuntime() {
   const wasm = performance.getEntriesByType('resource').find((e) => /\.wasm$/.test(e.name.split(/[?#]/)[0]));
   const got = wasm && wasm.responseEnd > 0 ? wasm.responseEnd : (rt.scriptAt || performance.now());
-  Telemetry.event('runtime_started', {}, { runtimeDownloadMs: got - rt.t0, runtimeStartMs: Math.max(0, performance.now() - got) });
+  Telemetry.runtimeStarted(got - rt.t0, Math.max(0, performance.now() - got), Module.innNative ? 'native' : 'dosbox');
 }
 
 async function onRuntimeReady() {

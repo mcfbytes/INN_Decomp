@@ -178,26 +178,36 @@
   .dlg .hint { margin: 0 0 10px; font: 400 21px/1.15 var(--pixel); color: var(--muted); }
   .dlg .err { margin: 6px 0 0; font: 400 21px/1.15 var(--pixel); color: var(--bad); }
   .dlg .err:empty { display: none; }
-  /* calling cards in the narrator box: lettering over a face adv.js paints with the scenes' kit (2 CSS px a pixel);
-     the band holds the card's series, the motif and the scene's postmark sit at the right (names in lettering only) */
-  #narr .cards { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
+  /* sign-in buttons (signin.js): the providers' own marks and wording, one shape for all. The shell is Google's
+     specification (fill, stroke, text, 4 px corners, 12 px padding, 20 px mark), light by day and dark at dusk; the
+     offset shadow outside it is the panels' own. The narrator box lays them out two by two, one column on a phone. */
+  #narr .cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 10px; }
   #narr:has(.cards:not([hidden])) { max-height: 76vh; }
   #narr .cards[hidden] { display: none; }
-  .ccard { position: relative; display: flex; flex-direction: column; width: 200px; min-height: 120px; padding: 0 0 12px; text-align: left; cursor: pointer; color: #2a1e12;
-           background: #f6f0dc; border: 2px solid var(--border); box-shadow: 3px 3px 0 rgba(0, 0, 0, .35); overflow: hidden;
-           font: 400 21px/1 var(--pixel); letter-spacing: .03em; }
-  .ccard canvas { position: absolute; left: 0; top: 0; width: 100%; height: 100%; image-rendering: pixelated; pointer-events: none; }
-  .ccard span { position: relative; display: block; }
-  .ccard .ct { height: 20px; padding: 3px 7px 0; color: #fff8ec; font-size: 16px; letter-spacing: .1em; white-space: nowrap; overflow: hidden;
-               text-shadow: 1px 1px 0 rgba(0, 0, 0, .4); }
-  .ccard .cn { margin-right: 66px; padding: 5px 7px 0; font-size: 22px; line-height: 1; overflow-wrap: anywhere;
-               text-shadow: 1px 0 0 rgba(255, 250, 236, .75), -1px 0 0 rgba(255, 250, 236, .75), 0 1px 0 rgba(255, 250, 236, .75); }
-  .ccard .cf { margin-right: 74px; padding: 5px 7px 0; font-size: 16px; line-height: .95; color: #4a3a28; }
-  .ccard.own { border-style: dashed; }
-  #narr .cline { flex-basis: 100%; margin: 0; font-size: 19px; line-height: 1.05; color: var(--muted); }
-  .ccard:hover { transform: translateY(-2px); }
-  .ccard:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
-  @media (max-width: 700px) { .ccard { width: 100%; min-height: 84px; } }
+  #narr .cline { grid-column: 1 / -1; margin: 0; font-size: 19px; line-height: 1.05; color: var(--muted); }
+  @media (max-width: 520px) { #narr .cards { grid-template-columns: minmax(0, 1fr); } }
+  .sib { --sib-bg: #131314; --sib-line: #8e918f; --sib-ink: #e3e3e3;
+         display: flex; align-items: center; gap: 10px; width: 100%; height: 40px; padding: 0 12px; box-sizing: border-box;
+         background: var(--sib-bg); color: var(--sib-ink); border: 1px solid var(--sib-line); border-radius: 4px;
+         box-shadow: 3px 3px 0 rgba(0, 0, 0, .35); cursor: pointer; text-decoration: none;
+         font: 500 14px/20px Roboto, "Segoe UI", system-ui, -apple-system, sans-serif; letter-spacing: .25px; }
+  .sib img, .sib svg { flex: none; width: 20px; height: 20px; }
+  .sib span { flex: 1; min-width: 0; margin-right: 20px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sib .lt { display: none; }
+  .sib.own { border-style: dashed; }
+  .sib:hover { background-image: linear-gradient(rgba(227, 227, 227, .08), rgba(227, 227, 227, .08)); }
+  .sib:active { transform: translate(1px, 1px); box-shadow: 2px 2px 0 rgba(0, 0, 0, .35); }
+  .sib:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) .sib { --sib-bg: #ffffff; --sib-line: #747775; --sib-ink: #1f1f1f; }
+    :root:not([data-theme="dark"]) .sib:hover { background-image: linear-gradient(rgba(31, 31, 31, .08), rgba(31, 31, 31, .08)); }
+    :root:not([data-theme="dark"]) .sib .lt { display: block; }
+    :root:not([data-theme="dark"]) .sib .dk { display: none; }
+  }
+  :root[data-theme="light"] .sib { --sib-bg: #ffffff; --sib-line: #747775; --sib-ink: #1f1f1f; }
+  :root[data-theme="light"] .sib:hover { background-image: linear-gradient(rgba(31, 31, 31, .08), rgba(31, 31, 31, .08)); }
+  :root[data-theme="light"] .sib .lt { display: block; }
+  :root[data-theme="light"] .sib .dk { display: none; }
   #narr .hold { display: flex; gap: 8px; margin-top: 6px; height: 22px; align-items: flex-end; }
   #narr .hold[hidden] { display: none; }
   #narr .hold svg { width: 14px; height: 18px; fill: var(--accent); animation: bob 1.2s steps(4) infinite; }
@@ -205,7 +215,7 @@
   #narr .hold svg:nth-child(3) { animation-delay: .6s; }
   @keyframes bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
   body.still #narr .hold svg { animation: none; }
-  @media (prefers-reduced-motion: reduce) { #narr .hold svg { animation: none; } .ccard:hover { transform: none; } }
+  @media (prefers-reduced-motion: reduce) { #narr .hold svg { animation: none; } .sib:active { transform: none; } }
 
   /* ---- fine print: always visible on the landing, never under the narrator box ---- */
   #fineprint { position: fixed; right: 8px; bottom: 6px; z-index: 9; display: flex; align-items: center; gap: 6px; padding: 2px 9px 3px;
@@ -306,7 +316,6 @@
   #providers { margin-top: 16px; padding-top: 12px; border-top: 2px dotted var(--faint); }
   #providers h2 { margin: 0 0 8px; font: 400 19px/1.2 var(--pixel); letter-spacing: .04em; color: var(--muted); }
   #provider-list { display: flex; flex-direction: column; gap: 8px; }
-  #provider-list .btn { justify-content: center; width: 100%; }
 
   /* dial-up panel */
   .modem { margin: 0; padding: 12px 14px; min-height: 148px; border-radius: 4px; border: 2px solid var(--border);
@@ -564,6 +573,7 @@
 <script src="zip.js"></script>
 <script src="saves.js"></script>
 <script src="auth.js"></script>
+<script src="signin.js"></script>
 <script src="music.js"></script>
 <script src="filters.js"></script>
 <script src="adv.js"></script>

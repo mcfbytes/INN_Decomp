@@ -150,7 +150,7 @@ def make_handler(state):
                 self.send_header("Access-Control-Allow-Origin", origin)
                 self.send_header("Vary", "Origin")
                 self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-                self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type")
+                self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type, traceparent")
                 self.send_header("Access-Control-Max-Age", "600")
 
         def reply(self, status, body=b"", ctype="application/json", headers=()):

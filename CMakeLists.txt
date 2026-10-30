@@ -115,7 +115,7 @@ if(EMSCRIPTEN)
     target_link_options(inn PRIVATE --pre-js ${CMAKE_SOURCE_DIR}/runtime/web/native-pre.js)
     set_property(TARGET inn APPEND PROPERTY LINK_DEPENDS ${CMAKE_SOURCE_DIR}/runtime/web/native-pre.js)
   endif()
-  foreach(script page.js site.js site.json og.png icons/favicon.ico icons/icon.svg icons/apple-touch-icon.png icons/icon-192.png icons/icon-512.png icons/manifest.webmanifest telemetry.js audio-worklet.js legal/terms.html legal/privacy.html legal/copyright.html legal/legal.js zip.js saves.js auth.js music.js filters.js adv.js scene.js
+  foreach(script page.js site.js site.json og.png icons/favicon.ico icons/icon.svg icons/apple-touch-icon.png icons/icon-192.png icons/icon-512.png icons/manifest.webmanifest telemetry.js audio-worklet.js legal/terms.html legal/privacy.html legal/copyright.html legal/legal.js zip.js saves.js auth.js signin.js music.js filters.js adv.js scene.js
           scenes/valley.js scenes/diner.js scenes/tower.js scenes/harbor.js scenes/town.js
           music/valley.js music/diner.js music/tower.js music/harbor.js music/town.js)
     configure_file(runtime/web/${script} ${CMAKE_BINARY_DIR}/${script} COPYONLY)
