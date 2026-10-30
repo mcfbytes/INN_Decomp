@@ -409,7 +409,7 @@ void lift_far_call_probe(Machine *m)
 void lift_module_loaded(Machine *m, const char *module, uint16_t load_seg, uint32_t image_bytes)
 {
     LiftState *s = lift_state(m);
-    if (!s)
+    if (!s || s->in_shadow)
         return;
     remember_module(s, module, load_seg);
     set_module_build(s, module, load_seg, true);
@@ -431,7 +431,7 @@ bool lift_module_loaded_image(Machine *m, const char *module, uint16_t load_seg,
                               uint32_t image_bytes)
 {
     LiftState *s = lift_state(m);
-    if (!s)
+    if (!s || s->in_shadow)
         return false;
     uint64_t hash = image_hash(image, image_bytes);
     if (module_has_meta(s, module) && !module_image_matches(s, module, image_bytes, hash)) {
