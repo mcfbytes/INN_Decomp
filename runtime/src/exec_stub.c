@@ -19,6 +19,18 @@ typedef struct ExecMsg {
     uint8_t bytes[MSG_MAX];
 } ExecMsg;
 
+/* What the host stand-in did at each Send of the original half of a shadow run (the messages its hook
+ * delivered), so that the lifted half's Send does the same to the queue without asking the host again.
+ * Not part of the saved state: it is the record that the two halves share. */
+#define REPLAY_SENDS 8
+#define REPLAY_MSGS 16
+typedef struct ExecReplay {
+    int sends, msgs, play_send, play_msg;
+    int per_send[REPLAY_SENDS];
+    bool overflow;
+    ExecMsg queued[REPLAY_MSGS];
+} ExecReplay;
+
 typedef struct ExecStub {
     ExecSendHook on_send;
     void *user;
@@ -33,6 +45,7 @@ typedef struct ExecStub {
     uint32_t pending_free[PENDING_FREE_MAX];
     int pending_count;
     char next_program[64];
+    ExecReplay *replay;
 } ExecStub;
 
 static ExecStub *stub(Machine *m) { return m->exec_stub; }
@@ -138,7 +151,19 @@ static CallbackResult x_send(Machine *m)
         return CB_DONE;
     }
     if (m->io_mode == IO_REPLAY) {
-        /* The lifted half of a shadow run: the host already saw this message from the original half. */
+        /* The lifted half of a shadow run: the host already saw this message from the original half.
+         * The handle is still freed at the next Poll, as the original half frees it, or the two halves
+         * end with different heaps. */
+        if (t->pending_count < PENDING_FREE_MAX - 1)
+            t->pending_free[t->pending_count++] = handle;
+        ExecReplay *r = t->replay;
+        if (r && r->play_send < r->sends) {
+            for (int i = 0; i < r->per_send[r->play_send]; i++) {
+                ExecMsg *q = &r->queued[r->play_msg++];
+                exec_stub_deliver(m, q->bytes, q->len);
+            }
+            r->play_send++;
+        }
         ret16(m, 1);
         return CB_DONE;
     }
@@ -148,8 +173,20 @@ static CallbackResult x_send(Machine *m)
         buf[i] = mem_rd8(m, far_linear(p) + i);
     if (t->pending_count < PENDING_FREE_MAX - 1)
         t->pending_free[t->pending_count++] = handle;
+    int queued_before = t->q_count;
     if (t->on_send)
         t->on_send(m, buf, len, t->user);
+    if (m->io_mode == IO_RECORD && t->replay) {
+        ExecReplay *r = t->replay;
+        int added = t->q_count - queued_before;
+        if (r->sends < REPLAY_SENDS && r->msgs + added <= REPLAY_MSGS && added >= 0) {
+            for (int i = 0; i < added; i++)
+                r->queued[r->msgs++] = t->queue[(t->q_head + queued_before + i) % QUEUE_MAX];
+            r->per_send[r->sends++] = added;
+        } else {
+            r->overflow = true;
+        }
+    }
     ret16(m, 1);
     return CB_DONE;
 }
@@ -263,6 +300,9 @@ void exec_stub_install(Machine *m, ExecSendHook on_send, void *user)
     if (!t)
         fatal("out of memory");
     m->exec_stub = t;
+    t->replay = calloc(1, sizeof *t->replay);
+    if (!t->replay)
+        fatal("out of memory");
     t->on_send = on_send;
     t->user = user;
     uint8_t table[EXPORTS * 4];
@@ -308,8 +348,21 @@ void exec_stub_set_poll_hook(Machine *m, ExecPollHook on_poll, void *user)
     stub(m)->poll_user = user;
 }
 
+void exec_stub_replay_rewind(Machine *m, bool record)
+{
+    ExecStub *t = m->exec_stub;
+    if (!t || !t->replay)
+        return;
+    if (record)
+        memset(t->replay, 0, sizeof *t->replay);
+    else
+        t->replay->play_send = t->replay->play_msg = 0;
+}
+
 void exec_stub_shutdown(Machine *m)
 {
+    if (m->exec_stub)
+        free(((ExecStub *)m->exec_stub)->replay);
     free(m->exec_stub);
     m->exec_stub = NULL;
 }

@@ -3,6 +3,7 @@
 #ifndef EXEC_STUB_H
 #define EXEC_STUB_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "machine.h"
@@ -32,5 +33,10 @@ void exec_stub_deliver(Machine *m, const uint8_t *msg, uint16_t len);
 size_t exec_stub_state_size(void);
 void exec_stub_state_save(Machine *m, void *dst);
 void exec_stub_state_load(Machine *m, const void *src);
+
+/* Shadow verification: the original half records what the host did at each Send (`record`), and the
+ * lifted half's Send plays it back (`!record`), so both halves end with the same queue. Called where the
+ * runtime switches the I/O mode. */
+void exec_stub_replay_rewind(Machine *m, bool record);
 
 #endif

@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "exec_stub.h"
+
 #include "audio.h"
 #include "devices.h"
 #include "dos.h"
@@ -222,6 +224,7 @@ static void run_original(Machine *m, ActiveHook *h)
     lift_set_hook_bit(m, ret, true);
     s->hooks_off = true; /* lifted callees run original too, so the whole call tree is compared */
     m->io_mode = IO_RECORD;
+    exec_stub_replay_rewind(m, true);
     lift_run_nested(m, ret, m->cpu.r[R_SP].w, true);
     m->io_mode = IO_LIVE;
     s->hooks_off = false;
@@ -236,6 +239,7 @@ static void run_lifted(Machine *m, ActiveHook *h)
     if (v->semantic)
         semantic_begin(v);
     m->io_mode = IO_REPLAY;
+    exec_stub_replay_rewind(m, false);
     lift_call_c(m, h->entry->fn);
     m->io_mode = IO_LIVE;
     if (v->semantic) {
@@ -450,6 +454,7 @@ static bool run_original_to(Machine *m, const Cpu *exit)
     s->hooks_off = true;
     v->replay_pos = 0;
     m->io_mode = IO_REPLAY;
+    exec_stub_replay_rewind(m, false);
     NestedCall *n = &s->nested[s->nesting++];
     *n = (NestedCall){ .return_linear = at, .return_sp = exit->r[R_SP].w };
     uint64_t start = m->cpu.instructions;
@@ -484,6 +489,7 @@ static void verify_region(Machine *m, ActiveHook *h)
     VerifyState *v = verify(m);
     uint16_t entry_sp = m->cpu.r[R_SP].w;
     m->io_mode = IO_RECORD;
+    exec_stub_replay_rewind(m, true);
     lift_call_c(m, h->entry->fn);
     m->io_mode = IO_LIVE;
     save(m, &v->cpu_lifted, v->mem_lifted, v->vga_lifted, v->dos_lifted_end, v->snd_lifted);
@@ -524,6 +530,7 @@ static void verify_replayed(Machine *m, ActiveHook *h, uint16_t entry_sp)
     restore(m, &v->cpu_before, v->mem_before, v->vga_before, v->dos_before, v->snd_before);
     dos_journal_undo(m);
     m->io_mode = IO_REPLAY;
+    exec_stub_replay_rewind(m, false);
     bool same_events = lift_replay_play(m, h->entry->fn);
     m->io_mode = IO_LIVE;
     int before = v->mismatches;

@@ -34,6 +34,7 @@ void exec_stub_set_previous(Machine *m, const char *name) { (void)m, (void)name;
 size_t exec_stub_state_size(void) { return 0; }
 void exec_stub_state_save(Machine *m, void *dst) { (void)m, (void)dst; }
 void exec_stub_state_load(Machine *m, const void *src) { (void)m, (void)src; }
+void exec_stub_replay_rewind(Machine *m, bool record) { (void)m, (void)record; }
 
 static const char *RULES =
     "reply 01 => aa @1\n"
