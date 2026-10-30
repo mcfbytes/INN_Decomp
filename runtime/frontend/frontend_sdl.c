@@ -471,6 +471,13 @@ static uint64_t chunk_end(const Frontend *f, uint64_t now)
 
 /* A nested wait that outlasts the current chunk (a native start running inside the hybrid build)
  * gets the script at the chunk rate of the headless loop. */
+/* The script is applied on a fixed grid of HEADLESS_CHUNK_US, so a lift whose guest calls run past a
+ * chunk's end (applying the script from inside) does not move the later events against the program. */
+static uint64_t headless_chunk_end(uint64_t now_us)
+{
+    return (now_us / HEADLESS_CHUNK_US + 1) * HEADLESS_CHUNK_US;
+}
+
 static void headless_nested_yield(Machine *m)
 {
     Frontend *f = g_frontend;

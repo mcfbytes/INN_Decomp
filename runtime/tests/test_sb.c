@@ -119,6 +119,9 @@ static void test_commands(void)
           "OPL2 status at 220h and 228h");
 
     dsp(m, 0xF2);
+    uint8_t irr, isr, imr;
+    pic_get_state(m, 0, &irr, &isr, &imr);
+    CHECK(!(irr & 0x80), "F2's IRQ comes a few us after the command, not with it"); /* GOLF clears its flag after the OUT */
     run_ms(m, 1);
     CHECK(irqs(m) == 1, "F2 raises one IRQ, got %d", irqs(m));
     m->irq_hold = true; /* as during a shadow run */

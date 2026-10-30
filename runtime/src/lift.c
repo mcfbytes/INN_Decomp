@@ -38,8 +38,11 @@ void lift_init(Machine *m)
     lift_state(m)->return_callback = callback_register(m, "lift far return", far_return_reached, -1);
     lifted_register_all(m);
     lift_state(m)->only = getenv("INN_LIFT_ONLY");
+    lift_state(m)->except = getenv("INN_LIFT_EXCEPT");
     lift_state(m)->verify_skip = getenv("INN_VERIFY_SKIP");
     lift_state(m)->verify_replay = getenv("INN_VERIFY_REPLAY");
+    lift_state(m)->replay_late = getenv("INN_REPLAY_LATE");
+    lift_state(m)->replay_exact = getenv("INN_REPLAY_EXACT");
     const char *verify_calls = getenv("INN_VERIFY_LIFTED");
     if (verify_calls && atoi(verify_calls) > 0)
         lift_verify_enable(m, atoi(verify_calls));
@@ -83,6 +86,9 @@ static void log_verify_line(const LiftedEntry *e, const HookStats *st)
     else if (st->armed_once)
         log_msg("verify: %s %s: %d calls checked, %d mismatches", e->module, e->name, st->shadow_calls,
                 st->shadow_mismatches);
+    if (st->cost_original || st->cost_lifted)
+        log_msg("verify: cost %s: original %llu instructions, lifted %llu, %d calls differ", e->name,
+                (unsigned long long)st->cost_original, (unsigned long long)st->cost_lifted, st->cost_diffs);
     if (st->synth_calls && st->synth_result_diffs)
         log_msg("verify: %s %s: %d calls checked, %d mismatches, DX:AX differs in %d (synthetic)", e->module,
                 e->name, st->synth_calls, st->synth_mismatches, st->synth_result_diffs);
@@ -239,6 +245,8 @@ static void arm(Machine *m, const LiftedEntry *e, HookStats *stats, uint16_t loa
 {
     LiftState *s = lift_state(m);
     if (s->only && !lift_listed(s->only, e->name))
+        return;
+    if (s->except && lift_listed(s->except, e->name))
         return;
     if (m->native)
         s->native_seen = true;

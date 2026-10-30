@@ -16,6 +16,7 @@ enum {
     NS_PER_US = 1000,
     IRQ_TEST_DELAY_NS = 30000, /* F2h raises the IRQ about 30 us after the command */
     DEFAULT_TIME_CONSTANT = 0xD2, /* 22.7 kHz, a common default */
+    IRQ_TEST_NS = 10 * NS_PER_US, /* F2h: the DSP raises the IRQ a few us after the command, not at once */
 };
 
 enum {
@@ -44,7 +45,6 @@ typedef struct Sb {
     uint32_t left;      /* bytes still to fetch in this block */
     uint64_t next_ns;   /* when the next byte is fetched */
     uint64_t pause_left_ns;
-
     uint8_t prev, cur;  /* the output ramps from prev to cur over cur_period from cur_ns */
     uint64_t cur_ns, cur_period;
     double prev_in, prev_out; /* output coupling filter */
@@ -124,11 +124,20 @@ static void advance(Machine *m, Sb *s, uint64_t t)
     }
 }
 
+static void irq_test_due(Machine *m, Sb *s, uint64_t t)
+{
+    if (s->irq_test_ns && s->irq_test_ns <= t) {
+        s->irq_test_ns = 0;
+        raise_irq(m, s);
+    }
+}
+
 /* Renders what was due under the old state, then moves the DSP up to now. */
 static void catch_up(Machine *m)
 {
     audio_sync(m);
     advance(m, sb_state(m), machine_now_ns(m));
+    irq_test_due(m, sb_state(m), machine_now_ns(m));
 }
 
 static double level(const Sb *s, uint64_t t)
@@ -209,7 +218,7 @@ static void execute(Machine *m, Sb *s)
     case CMD_READ_TEST: push_out(s, s->test_reg); break;
     case CMD_IRQ_TEST:
         s->irq_test_due = true;
-        s->irq_test_ns = machine_now_ns(m) + IRQ_TEST_DELAY_NS;
+        s->irq_test_ns = machine_now_ns(m) + IRQ_TEST_NS;
         break;
     default: break;
     }
@@ -288,6 +297,7 @@ static void sb_tick(Machine *m)
     }
     if (s->active && !s->paused && s->next_ns + (s->left - 1) * s->period_ns <= machine_now_ns(m))
         catch_up(m);
+    irq_test_due(m, s, machine_now_ns(m));
 }
 
 static void sb_dma_sync(Machine *m)

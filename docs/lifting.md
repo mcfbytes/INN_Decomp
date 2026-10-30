@@ -173,9 +173,16 @@ shadow runs (device replay aside), so the VGA status register toggles vertical r
 waits for a timer tick still spins there; a shadow
 run still going after 200 million instructions is logged with the hook's name and CS:IP.
 `INN_LIFT_ONLY=name,name,...` hooks only the named functions, which checks functions that are
-otherwise only reached from other lifted code. `INN_VERIFY_SKIP=name,...` keeps the named functions
-hooked but never shadows them, for a call that only works with interrupts flowing (a driver init
-that finds its IRQ by waiting for one).
+otherwise only reached from other lifted code; `INN_LIFT_EXCEPT=name,...` hooks all but the named ones
+(for a scenario on a patched program whose patch lies in a lifted function's code past its signature).
+`INN_VERIFY_SKIP=name,...` keeps the named functions hooked but never shadows them, for a call that
+only works with interrupts flowing (a driver init that finds its IRQ by waiting for one).
+`INN_VERIFY_COST=1` adds, for every checked call, the instructions the original ran (its RET
+included) against what the lifted run ran and charged (nested instructions, `cpu.stall` and the one
+slot the dispatch counts): the first differences per entry and a total per entry, for lifts that
+keep the program's timing by charging the original's instruction counts (3-D Golf's
+`GOLF/unpack.c`, Shop's `rtl3_*`). `VERIFY_TIMEOUT=<seconds>` gives `tools/verify_lifted.sh` more
+than its default 900 s of wall time.
 
 Enable it with `INN_VERIFY_LIFTED=<calls per function>`; `tools/verify_lifted.sh` runs the logon
 scenario against a local server and prints the per-function summary. With `INN_TSN_HOST=<rules>` it
@@ -294,7 +301,21 @@ for a timer tick or a received byte never returns. Entries marked `LIFT_*_REPLAY
 Limits: an interrupt the original took during a stretch with IF clear in lifted C (C that emulates
 CLI/STI) is delivered at the lifted run's next chance instead, before or after reads of memory the ISR
 writes; code that polls memory for an ISR's result without any event in the loop is only taken by the
-unaligned fallback. Both show up as event or memory mismatches, not as false matches. The log holds at
+unaligned fallback. Both show up as event or memory mismatches, not as false matches.
+`INN_REPLAY_LATE=name,...` keeps the gap for the named entries: an interrupt the original took late
+(after 100000 instructions without an event) is delivered in the lifted run only once as many
+instructions, charged ones included, have passed there without an event (or before its next event in
+lifted C, or at its return). A wait that polls memory then sees the interrupt in the same loop as the
+original did (3-D Golf's sound driver starting a sound while another plays); lifted code whose waits
+run guest instructions or charge the original's counts needs it, other lifts keep the default.
+`INN_REPLAY_EXACT=name,...` goes further for code that polls memory a few thousand instructions long for an
+interrupt (a driver finding its IRQ): the original takes each interrupt as soon as it is due, not only after
+an event, and the log keeps how many instructions after the last event it came; the lifted run gets it once
+as many instructions, charged ones included, have passed (or before its next event in lifted C, or at its
+return). Lifted C that polls calls `lift_replay_poll(m)` before each read, having charged the original's
+instructions up to that read, so the handler's write lands before the same read as in the original. It
+logs each such interrupt that came at a different count (`interrupt NN taken ... instructions after the
+last event, the original's after ...`). 3-D Golf's `golf_drv_init` (the Blaster's IRQ probe) uses it. The log holds at
 most 16M entries. Synthetic calls never use replay.
 
 ## Synthetic calls

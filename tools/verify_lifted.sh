@@ -10,6 +10,8 @@
 # 'INN\TSNEXEC.EXE DEFAULT'); for Red Baron see docs/redbaron.md. The port then only names the run.
 # INN_COVERAGE=1 writes the call coverage (docs/lifting.md, "Coverage") to <output dir>/coverage.txt;
 # any other value is used as the file name.
+# VERIFY_TIMEOUT=<seconds> limits the client's wall time (default 900; long scenarios at 100000 calls
+# need more).
 # INN_SYNTH=<call lists> adds synthetic calls (docs/lifting.md, "Synthetic calls"); the environment passes it.
 # Runs repeat: the emulated clock starts at INN_EPOCH (default 750000000, 8 Oct 1993) in UTC, unless
 # INN_EPOCH= (empty) asks for the host clock. The server link settles (docs/runtime.md, "Link
@@ -51,7 +53,7 @@ else
 fi
 COVERAGE=${INN_COVERAGE:-}
 [ "$COVERAGE" = 1 ] && COVERAGE=$OUT/coverage.txt
-INN_COVERAGE=$COVERAGE INN_VERIFY_LIFTED=$CALLS timeout 900 "$BUILD/inn" ${INN_ARGS:-} --headless \
+INN_COVERAGE=$COVERAGE INN_VERIFY_LIFTED=$CALLS timeout "${VERIFY_TIMEOUT:-900}" "$BUILD/inn" ${INN_ARGS:-} --headless \
     --run-ms "$RUN_MS" --script "$OUT/play.txt" "${HOST_ARGS[@]}" "$DRIVE" "${PROGRAM[@]}" \
     2>&1 | { head -c 256M > "$OUT/client.log"; tail -c 64M > "$OUT/client.tail"; } || true
 # A run that logs without end (a mismatch on every call) keeps its first 256 MiB and last 64 MiB only.

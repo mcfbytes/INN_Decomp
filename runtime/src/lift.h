@@ -159,6 +159,10 @@ void lift_io_replay_out(Machine *m, uint16_t port, uint32_t value, int size);
 void lift_io_callback(Machine *m, int id);
 void lift_io_halt(Machine *m);
 void lift_irq_boundary(Machine *m);
+/* For lifted code that polls memory an interrupt handler writes, between two reads (after charging the
+ * original's instructions up to the next one): during a device replay of an INN_REPLAY_EXACT entry,
+ * takes the logged interrupts whose gap has passed. Does nothing otherwise. */
+void lift_replay_poll(Machine *m);
 
 /* ---- helpers for lifted code ---- */
 
