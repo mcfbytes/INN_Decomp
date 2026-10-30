@@ -112,10 +112,10 @@ Every place where the original waits becomes a call into the native core:
 the 4 ms clamp of nested `setTimeout` is avoided). While suspended, WebSocket messages, input events,
 `requestAnimationFrame` and WebAudio callbacks run. JSPI needs no instrumentation, so the deep native C
 stacks (VM, kernel, driver, nested InvokeMethod) and the indirect calls through lifted-entry tables are
-fine. The native web build requires JSPI (Chromium-based browsers today). Asyncify with
-`ASYNCIFY_IGNORE_INDIRECT` cannot work here (lifted code is entered through function pointers);
-full-instrumentation Asyncify, linked as a second variant from the same objects, is the fallback for
-other browsers ([asyncify.md](asyncify.md)).
+fine. The native web build links both variants by default (`INN_WEB_SUSPEND=BOTH`): JSPI for Chromium
+and full-instrumentation Asyncify for other browsers. Asyncify with `ASYNCIFY_IGNORE_INDIRECT` cannot
+work here because lifted code is entered through function pointers; the Asyncify variant uses full
+instrumentation ([asyncify.md](asyncify.md)).
 
 `setjmp`/`longjmp` (process exit unwinds the native C stack to the EXEC that started the program, and
 the VM's Restart kernel) must use WebAssembly exception handling (`-fwasm-exceptions
@@ -126,9 +126,9 @@ Proved 2026-10-15: `test_native` built with `-sJSPI -fwasm-exceptions -sSUPPORT_
 scope, then longjmps out and dispatches again (Node 24 with `--experimental-wasm-jspi`; the same
 pattern passes in headless Chromium 153).
 
-The native web build requires JSPI, so it runs in Chromium-based browsers (Chrome, Edge) and not in
-browsers that only have Asyncify, until the Asyncify variant is built. Its measurements, flags and
-page-level choice are in [asyncify.md](asyncify.md).
+The native web build now runs in Chromium-based browsers (JSPI) and in browsers without JSPI (Asyncify
+variant); the page picks with `typeof WebAssembly.Suspending`, or `?suspend=asyncify`. Its measurements,
+flags and page-level choice are in [asyncify.md](asyncify.md).
 
 **Natively (SDL2)** the same waits call `SDL_Delay` and pump SDL events. **Headless** runs use a
 deterministic virtual clock (section 5) and no platform at all: waits jump the clock, the input
@@ -512,7 +512,7 @@ probes, which run as the same lifted C in both builds, find neither.
 | hybrid-hw | `-DINN_NATIVE_HW=ON` | as hybrid, but drivers call the host APIs, device backend | emulated, driven in C | shadow-verifies each converted driver function with semantic port comparison (section 12) |
 | native | `-DINN_NATIVE=ON` (implies `INN_NATIVE_HW`) | native programs, no interpretation | host APIs; emulated devices only in mixed mode | the M9 product |
 | web hybrid | `emcmake`, `INN_WEB_SUSPEND=ASYNCIFY` or `JSPI` | as hybrid | emulated | today's browser build |
-| web native | `emcmake -DINN_NATIVE=ON` (requires `JSPI`) | as native | as native | the M9 browser build |
+| web native | `emcmake -DINN_NATIVE=ON` (`INN_WEB_SUSPEND=BOTH` default) | as native | as native | the M9 browser build |
 
 `INN_NATIVE` adds `runtime/src/native/*.c`, defines `INN_NATIVE=1` and `INN_NATIVE_HW=1` for the runtime
 and the lifted tree, links with `-fwasm-exceptions -sSUPPORT_LONGJMP=wasm` in the browser, and makes the
@@ -652,24 +652,24 @@ Detailed briefs are private. Order and groups (packages in one step touch disjoi
 ## Status
 
 Measured 2026-10-16. The INN client runs native. Games run on the emulator in mixed mode. Still open:
-Sound Blaster digital audio on the native path, and an Asyncify fallback for browsers without JSPI.
+Sound Blaster digital audio on the native path. Asyncify is now linked as the non-JSPI fallback.
 
 | Section | Where it stands |
 |---|---|
 | 1 Scope | In place for the INN client. Games are not lifted onto the host APIs. |
 | 2 Prototype | Historical. Direct calls are the hybrid default. |
 | 3 Execution model | Native programs run as C; the interpreter is the strict-mode fatal path and the game path. |
-| 4 Main loop | SDL and JSPI both drive the native loop. The native web build is JSPI only. |
+| 4 Main loop | SDL and JSPI both drive the native loop; the web build also carries the Asyncify variant. |
 | 5 Clock | Work charges, waits and pacing are in. `INN_EPOCH` fixes the headless clock. Hybrid and native differ by about 0.4 s at start-up. |
 | 6 Interrupts | IRQ 0 and the other lines are delivered at safe points. |
 | 7 Direct calls | On by default in the hybrid build. |
 | 8 Program control | TSNEXEC and LSCITV start and exit as C. A native run no longer falls back to the emulator for them. |
 | 9 Host APIs | Video, OPL music, the timer, input and the link are host calls. The link is paced unless `INN_LINK_PACING=0`. Digital Sound Blaster audio is not. |
-| 10 Builds | Hybrid, native and web native (`-DINN_WEB_SUSPEND=JSPI -DINN_NATIVE=ON`) all build. |
+| 10 Builds | Hybrid, native and web native (`-DINN_NATIVE=ON`, `INN_WEB_SUSPEND=BOTH` default) all build; JSPI and Asyncify native links are tested. |
 | 11 Mixed mode | Yserbius and Twinion scenarios reach their checkpoints from the native build and return. |
 | 12 Verification | Campaign below. |
 | 13 Prototype | Unchanged, on `m9-proto`. |
-| 14 Risks | The start-up dumps are not byte-identical (below). Timing-dependent scenarios are listed below. JSPI is in; Asyncify is not. |
+| 14 Risks | The start-up dumps are not byte-identical (below). Timing-dependent scenarios are listed below. JSPI and the Asyncify fallback are in. |
 | 15 Packages | 9a through 10b are merged. 9c is this measurement. |
 
 **Strict native.** All 30 scenarios in `M9-NATIVE.txt` finish with no fatal. Strict mode is the default (`INN_NATIVE_STRICT=0` is the fallback).

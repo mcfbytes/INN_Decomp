@@ -17,22 +17,23 @@ Output in `build-web/`: `inn.html` (from `runtime/web/shell.html`, which CMake f
 scripts `page.js`, `filters.js`, `saves.js`, `auth.js`, `adv.js`, `scene.js` (and `scenes/`) and `zip.js` copied from `runtime/web/`, and `shaders/` (the display filters' GLSL and lookup tables, flattened from `third_party/`). The default build type is `Release` (`-O3`).
 
 The native client (INN as C, games still on the emulator) is the same page with two cache variables.
-JSPI is required; Asyncify does not link this configuration:
+By default it links both the JSPI and the Asyncify variants:
 
 ```
 source /mnt/source/tools/emsdk/emsdk_env.sh
-emcmake cmake -S . -B build-web-native -G Ninja -DINN_WEB_SUSPEND=JSPI -DINN_NATIVE=ON
+emcmake cmake -S . -B build-web-native -G Ninja -DINN_NATIVE=ON
 cmake --build build-web-native
 ```
 
-Serve `build-web-native/` the same way as `build-web/`. Chromium-based browsers run it. A browser
-without JSPI does not; use the hybrid build above for that. When `private/lifted` is present it is
+Serve `build-web-native/` the same way as `build-web/`. The page loads `inn.js` where
+`WebAssembly.Suspending` exists and `inn-asyncify.js` otherwise; `?suspend=asyncify` forces the fallback
+for testing. `INN_WEB_SUSPEND=JSPI` or `ASYNCIFY` links only that variant. When `private/lifted` is present it is
 picked up (`INN_LIFTED_DIR`). Without lifted code the binary still builds, and the native boot reports
 that TSNEXEC has no native entry and runs it on the emulator.
 
 | CMake cache variable | Default | Effect |
 |---|---|---|
-| `INN_WEB_SUSPEND` | `ASYNCIFY` | How lifted code that waits inside a frame yields to the browser. `JSPI` (Chromium-based browsers: Edge, Chrome) suspends without instrumentation and leaves about 1.5x more headroom; `ASYNCIFY` works in every browser. |
+| `INN_WEB_SUSPEND` | `ASYNCIFY` (hybrid), `BOTH` (native) | How lifted code that waits inside a frame yields to the browser. `JSPI` (Chromium-based browsers: Edge, Chrome) suspends without instrumentation and leaves about 1.5x more headroom; `ASYNCIFY` works in every browser. Native defaults to `BOTH`, linking `inn.js` and `inn-asyncify.js`. |
 | `INN_WEB_PRELOAD_DIR` | empty | A local C: drive (for example `work/inn-c`) packed into `inn.data` and mounted at `/c`. Development only: that file holds the user's media, so a build made with it must never be published. Changes in the directory need a relink (`touch runtime/web/shell.html`). |
 
 Link settings worth knowing: `INVOKE_RUN=0` (the page calls `main` once the drive is ready),

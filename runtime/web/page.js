@@ -345,7 +345,9 @@ function wantRuntime(why = 'intent') {
   rt.promise = new Promise((resolve, reject) => { rt.done = resolve; rt.fail = reject; });
   rt.promise.catch(() => {});
   const s = document.createElement('script');
-  s.src = innAsset('inn.js');
+  const alt = document.documentElement.dataset.asyncify;
+  const useAlt = alt && (params.get('suspend') === 'asyncify' || typeof WebAssembly.Suspending !== 'function');
+  s.src = innAsset(useAlt ? alt : 'inn.js');
   s.async = true;
   if (why !== 'intent') s.fetchPriority = 'low';
   s.onload = () => { rt.scriptAt = performance.now(); };

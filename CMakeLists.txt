@@ -19,15 +19,18 @@ if(INN_NATIVE)
   set(INN_NATIVE_HW ON)
 endif()
 if(EMSCRIPTEN)
-  set(INN_WEB_SUSPEND "ASYNCIFY" CACHE STRING "How lifted code yields to the browser: ASYNCIFY or JSPI")
   if(INN_NATIVE)
-    # The native C stack is suspended whole (JSPI) and unwound by longjmp at process exit; JavaScript
-    # longjmp would put invoke_* frames on it, which JSPI cannot suspend across.
-    if(NOT INN_WEB_SUSPEND STREQUAL "JSPI")
-      message(FATAL_ERROR "INN_NATIVE in the browser requires -DINN_WEB_SUSPEND=JSPI")
+    set(INN_WEB_SUSPEND "BOTH" CACHE STRING "How the native client yields: BOTH, JSPI or ASYNCIFY")
+    if(NOT INN_WEB_SUSPEND MATCHES "^(BOTH|JSPI|ASYNCIFY)$")
+      message(FATAL_ERROR "INN_NATIVE in the browser needs -DINN_WEB_SUSPEND=BOTH, JSPI or ASYNCIFY")
     endif()
+    # The native C stack is suspended whole (JSPI) and unwound by longjmp at process exit; JavaScript
+    # longjmp would put invoke_* frames on it, which JSPI cannot suspend across. Asyncify instruments
+    # the same objects with the legacy wasm exception encoding.
     add_compile_options(-fwasm-exceptions -sSUPPORT_LONGJMP=wasm)
-    add_link_options(-fwasm-exceptions -sSUPPORT_LONGJMP=wasm)
+    add_link_options(-fwasm-exceptions -sSUPPORT_LONGJMP=wasm -sWASM_LEGACY_EXCEPTIONS=1)
+  else()
+    set(INN_WEB_SUSPEND "ASYNCIFY" CACHE STRING "How lifted code yields to the browser: ASYNCIFY or JSPI")
   endif()
 endif()
 
@@ -78,42 +81,57 @@ if(EMSCRIPTEN)
   # Browser build (docs/web.md). The preload directory bakes a local C: drive into inn.data for
   # development; leave it empty for anything published, since that drive holds the user's media.
   set(INN_WEB_PRELOAD_DIR "" CACHE PATH "Local C: drive directory to package as /c (dev only)")
-  add_executable(inn ${INN_FRONTEND_SOURCES})
-  set_target_properties(inn PROPERTIES SUFFIX ".html")
-  target_link_libraries(inn dosrt)
-  target_compile_options(inn PRIVATE -sUSE_SDL=2)
   # Lifted code can wait inside a frame (nested guest calls) and must yield to the browser there.
-  # JSPI suspends without instrumenting code (Chromium-based browsers); Asyncify works everywhere
-  # but instruments the call path. With Asyncify, indirect calls are ignored, so the functions that
-  # reach a sleep through one are listed; the interpreter loop is not on that path (lifted code is
-  # dispatched from machine_step, into which lift_dispatch may be inlined, so both are named).
-  target_compile_definitions(inn PRIVATE INN_ASYNCIFY=1)
-  target_link_options(inn PRIVATE -sSTACK_SIZE=1048576)
-  if(INN_WEB_SUSPEND STREQUAL "JSPI")
-    target_link_options(inn PRIVATE -sJSPI)
-  else()
-    target_link_options(inn PRIVATE -sASYNCIFY -sASYNCIFY_IGNORE_INDIRECT=1 -sASYNCIFY_STACK_SIZE=262144
-      "-sASYNCIFY_ADD=['lift_run_nested','lift_dispatch','machine_step','frontend_nested_yield']")
-  endif()
-  target_link_options(inn PRIVATE -sUSE_SDL=2 -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=64MB
-    -sINVOKE_RUN=0 -sEXIT_RUNTIME=0 -sFORCE_FILESYSTEM=1 -sENVIRONMENT=web
-    -sEXPORTED_RUNTIME_METHODS=callMain,FS -lidbfs.js -lwebsocket.js
-    --shell-file ${CMAKE_BINARY_DIR}/shell.html)
-  if(INN_WEB_PRELOAD_DIR)
-    get_filename_component(INN_WEB_PRELOAD_ABS "${INN_WEB_PRELOAD_DIR}" ABSOLUTE BASE_DIR ${CMAKE_SOURCE_DIR})
-    message(STATUS "inn: packaging ${INN_WEB_PRELOAD_ABS} as /c in inn.data (do not publish)")
-    target_link_options(inn PRIVATE --preload-file ${INN_WEB_PRELOAD_ABS}@/c)
-  endif()
-  # The page loads inn.js when it is wanted; a preload build knows its drive only once the runtime runs, so it loads at once.
+  # JSPI suspends without instrumenting code (Chromium-based browsers); Asyncify works everywhere but
+  # instruments the call path. Native builds link both from the same objects; the page picks at load.
+  set(INN_WEB_ASYNCIFY_JS "")
   set(INN_WEB_RUNTIME lazy)
   if(INN_WEB_PRELOAD_DIR)
     set(INN_WEB_RUNTIME eager)
   endif()
   configure_file(runtime/web/shell.html ${CMAKE_BINARY_DIR}/shell.html @ONLY)
-  set_property(TARGET inn APPEND PROPERTY LINK_DEPENDS ${CMAKE_BINARY_DIR}/shell.html)
-  if(INN_NATIVE)
-    target_link_options(inn PRIVATE --pre-js ${CMAKE_SOURCE_DIR}/runtime/web/native-pre.js)
-    set_property(TARGET inn APPEND PROPERTY LINK_DEPENDS ${CMAKE_SOURCE_DIR}/runtime/web/native-pre.js)
+
+  function(inn_web_target target suffix)
+    add_executable(${target} ${INN_FRONTEND_SOURCES})
+    set_target_properties(${target} PROPERTIES SUFFIX "${suffix}")
+    target_link_libraries(${target} dosrt)
+    target_compile_options(${target} PRIVATE -sUSE_SDL=2)
+    target_compile_definitions(${target} PRIVATE INN_ASYNCIFY=1)
+    target_link_options(${target} PRIVATE -sSTACK_SIZE=1048576 -sUSE_SDL=2 -sALLOW_MEMORY_GROWTH=1
+      -sINITIAL_MEMORY=64MB -sINVOKE_RUN=0 -sEXIT_RUNTIME=0 -sFORCE_FILESYSTEM=1 -sENVIRONMENT=web
+      -sEXPORTED_RUNTIME_METHODS=callMain,FS -lidbfs.js -lwebsocket.js)
+    if(suffix STREQUAL ".html")
+      target_link_options(${target} PRIVATE --shell-file ${CMAKE_BINARY_DIR}/shell.html)
+      set_property(TARGET ${target} APPEND PROPERTY LINK_DEPENDS ${CMAKE_BINARY_DIR}/shell.html)
+    endif()
+    if(target STREQUAL "inn-asyncify")
+      target_link_options(${target} PRIVATE -sASYNCIFY -sASYNCIFY_STACK_SIZE=262144)
+    elseif(INN_WEB_SUSPEND STREQUAL "JSPI")
+      target_link_options(${target} PRIVATE -sJSPI)
+    elseif(INN_WEB_SUSPEND STREQUAL "ASYNCIFY" AND INN_NATIVE)
+      target_link_options(${target} PRIVATE -sASYNCIFY -sASYNCIFY_STACK_SIZE=262144)
+    else()
+      target_link_options(${target} PRIVATE -sASYNCIFY -sASYNCIFY_IGNORE_INDIRECT=1 -sASYNCIFY_STACK_SIZE=262144
+        "-sASYNCIFY_ADD=['lift_run_nested','lift_dispatch','machine_step','frontend_nested_yield']")
+    endif()
+    if(INN_WEB_PRELOAD_DIR)
+      get_filename_component(INN_WEB_PRELOAD_ABS "${INN_WEB_PRELOAD_DIR}" ABSOLUTE BASE_DIR ${CMAKE_SOURCE_DIR})
+      message(STATUS "${target}: packaging ${INN_WEB_PRELOAD_ABS} as /c in inn.data (do not publish)")
+      target_link_options(${target} PRIVATE --preload-file ${INN_WEB_PRELOAD_ABS}@/c)
+    endif()
+    if(INN_NATIVE)
+      target_link_options(${target} PRIVATE --pre-js ${CMAKE_SOURCE_DIR}/runtime/web/native-pre.js)
+      set_property(TARGET ${target} APPEND PROPERTY LINK_DEPENDS ${CMAKE_SOURCE_DIR}/runtime/web/native-pre.js)
+    endif()
+  endfunction()
+
+  if(INN_NATIVE AND INN_WEB_SUSPEND STREQUAL "BOTH")
+    inn_web_target(inn ".html")
+    set(INN_WEB_ASYNCIFY_JS "inn-asyncify.js")
+    configure_file(runtime/web/shell.html ${CMAKE_BINARY_DIR}/shell.html @ONLY)
+    inn_web_target(inn-asyncify ".js")
+  else()
+    inn_web_target(inn ".html")
   endif()
   foreach(script page.js site.js site.json og.png icons/favicon.ico icons/icon.svg icons/apple-touch-icon.png icons/icon-192.png icons/icon-512.png icons/manifest.webmanifest telemetry.js audio-worklet.js legal/terms.html legal/privacy.html legal/copyright.html legal/legal.js zip.js saves.js auth.js signin.js music.js filters.js adv.js scene.js
           scenes/valley.js scenes/diner.js scenes/tower.js scenes/harbor.js scenes/town.js
@@ -161,6 +179,13 @@ if(EMSCRIPTEN)
       message(FATAL_ERROR "INN_NATIVE in the browser needs node for test_native")
     endif()
     add_test(NAME test_native COMMAND ${INN_NODE} --experimental-wasm-jspi ${CMAKE_BINARY_DIR}/test_native.js)
+    add_executable(test_native_asyncify runtime/tests/test_native.c)
+    target_link_libraries(test_native_asyncify dosrt)
+    target_compile_definitions(test_native_asyncify PRIVATE INN_TEST_ASYNCIFY=1)
+    target_link_options(test_native_asyncify PRIVATE -sASYNCIFY -sASYNCIFY_STACK_SIZE=262144
+      -sENVIRONMENT=node -sEXIT_RUNTIME=1 -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=64MB
+      -sSTACK_SIZE=1048576 -lwebsocket.js)
+    add_test(NAME test_native_asyncify COMMAND ${INN_NODE} ${CMAKE_BINARY_DIR}/test_native_asyncify.js)
   endif()
 else()
   find_package(SDL2 REQUIRED)

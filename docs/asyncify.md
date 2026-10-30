@@ -7,6 +7,10 @@ Node 24.15 (V8 13.6, JSPI off unless `--experimental-wasm-jspi`), Chromium 153 (
 
 ## Decision
 
+**Implemented** 2026-10-30: native web builds default to `INN_WEB_SUSPEND=BOTH`, link `inn.js`/`inn.wasm`
+(JSPI) and `inn-asyncify.js`/`inn-asyncify.wasm` (Asyncify), and `test_native_asyncify` passes under
+plain Node. The page picks with `typeof WebAssembly.Suspending` or `?suspend=asyncify`.
+
 **(A) Full-instrumentation Asyncify, linked as a second variant from the same objects. The page picks the
 variant with `typeof WebAssembly.Suspending`.**
 
