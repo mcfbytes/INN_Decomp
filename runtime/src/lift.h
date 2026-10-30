@@ -38,6 +38,7 @@ typedef struct LiftedEntry {
     bool native_only; /* from a directory whose module.txt says `native`: armed only for native control */
     uint16_t emu_mask; /* bit i: a floating-point emulator sequence (INT 34h-3Dh, or the x87 form an emulator
                         * patches it into) starts at signature byte i; either form matches there */
+    bool lower_sp;  /* LIFT_*_LOWSP: may return with SP below the one its RET implies (it moved its frame) */
 } LiftedEntry;
 
 /* reloc_mask bit 15: byte 0 is the high half of a relocated word starting before the entry. */
@@ -53,6 +54,9 @@ enum { LIFT_FAR_NOSHADOW = 3, LIFT_NEAR_NOSHADOW = 4 };
  * emulated time and interrupts flowing, the lifted run gets the same interrupts and port reads at the
  * same events. For functions that wait on the BIOS tick, a UART or another interrupt. */
 enum { LIFT_FAR_REPLAY = 5, LIFT_NEAR_REPLAY = 6 };
+/* As the kinds above, for a function whose callees may move its frame down, so it returns with SP lower
+ * than its RET implies (Borland C0's _setargv builds argv there): docs/lifting.md. */
+enum { LIFT_FAR_LOWSP = 7, LIFT_NEAR_LOWSP = 8, LIFT_FAR_REPLAY_LOWSP = 9, LIFT_NEAR_REPLAY_LOWSP = 10 };
 #define LIFTED(seg, off, fn, kind, scratch) void fn(Machine *m);
 /* As LIFTED, comparing only the first `bytes` of the signature (data the host fills follows the code). */
 #define LIFTED_PREFIX(seg, off, fn, kind, scratch, bytes) void fn(Machine *m);
@@ -178,6 +182,9 @@ void lift_idle(Machine *m);
 
 /* Runs original code at CS:off as a near call. */
 void guest_call_near(Machine *m, uint16_t off);
+/* As guest_call_near, pushing CS:ret_off (the original call's return address) and ending at the first
+ * return there at any SP: for a callee that keeps that address or moves its caller's frame (_LOWSP). */
+void guest_call_near_ret(Machine *m, uint16_t off, uint16_t ret_off);
 
 /* Direct calls (docs/lifting.md): a target that no lifted entry, service stub or trivial return
  * resolves is offered to this hook before the CPU runs it. Returning true means the hook ran it and

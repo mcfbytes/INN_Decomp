@@ -42,7 +42,7 @@ import borland_overlay  # noqa: E402
 # LIFTED_PREFIX(..., scratch, n) compares only the first n signature bytes: for an entry followed by data
 # the loader or the host fills in, which the file does not hold.
 MARKER = re.compile(
-    r'^LIFTED(?:_PREFIX)?\(\s*(0x[0-9A-Fa-f]+)\s*,\s*(0x[0-9A-Fa-f]+)\s*,\s*(\w+)\s*,\s*(LIFT_FAR_NOSHADOW|LIFT_NEAR_NOSHADOW|LIFT_FAR_REPLAY|LIFT_NEAR_REPLAY|LIFT_FAR|LIFT_NEAR|LIFT_REGION)\s*,'
+    r'^LIFTED(?:_PREFIX)?\(\s*(0x[0-9A-Fa-f]+)\s*,\s*(0x[0-9A-Fa-f]+)\s*,\s*(\w+)\s*,\s*(LIFT_FAR_NOSHADOW|LIFT_NEAR_NOSHADOW|LIFT_FAR_REPLAY_LOWSP|LIFT_NEAR_REPLAY_LOWSP|LIFT_FAR_REPLAY|LIFT_NEAR_REPLAY|LIFT_FAR_LOWSP|LIFT_NEAR_LOWSP|LIFT_FAR|LIFT_NEAR|LIFT_REGION)\s*,'
     r'\s*([\w|\s]+?)\s*(?:,\s*(\d+)\s*)?\)', re.M)
 SIGNATURE_LEN = 12
 IMAGE_HEAD_LEN = 32  # LIFT_IMAGE_HEAD_LEN
@@ -96,6 +96,9 @@ def read_module(module_dir):
     keywords = {' '.join(line.split()) for line in lines[2:] if line.strip()}
     for keyword in keywords - set(KEYWORDS):
         sys.exit(f'{module_dir}/module.txt: unknown keyword {keyword!r}')
+    if not exe_path.exists() and 'announce entry' in keywords:
+        print(f'warning: {module_dir}: image {exe_path} is absent; its lifts are not registered', file=sys.stderr)
+        return None
     return (name, keywords, *image_of(exe_path))
 
 
@@ -191,20 +194,21 @@ def entries_of(module_dir, name, native, image, relocs, overlays):
             emu, cut = emu_marks(source_code, start, unknown)
             unknown |= cut
             yield (module, seg, off, match[3], kind.startswith('LIFT_NEAR'), match[5], signature, mask,
-                   kind == 'LIFT_REGION', kind.endswith('_NOSHADOW'), unknown, kind.endswith('_REPLAY'), native,
-                   emu)
+                   kind == 'LIFT_REGION', kind.endswith('_NOSHADOW'), unknown, '_REPLAY' in kind, native,
+                   emu, kind.endswith('_LOWSP'))
 
 
 def emit_module(out, index, entries):
     for _, _, _, fn, *_ in entries:
         out.append(f'void {fn}(Machine *m);')
     out.append(f'static const LiftedEntry module_{index}[] = {{')
-    for module, seg, off, fn, near, scratch, signature, mask, region, no_shadow, unknown, replay, native, emu \
-            in entries:
+    for module, seg, off, fn, near, scratch, signature, mask, region, no_shadow, unknown, replay, native, emu, \
+            lower_sp in entries:
         sig = ', '.join(f'0x{b:02X}' for b in signature)
         out.append(f'    {{ "{module}", 0x{seg:04X}, 0x{off:04X}, {fn}, "{fn}", {str(near).lower()}, '
                    f'{scratch}, {{ {sig} }}, 0x{mask:04X}, {str(region).lower()}, {str(no_shadow).lower()}, '
-                   f'0x{unknown:04X}, {str(replay).lower()}, {str(native).lower()}, 0x{emu:04X} }},')
+                   f'0x{unknown:04X}, {str(replay).lower()}, {str(native).lower()}, 0x{emu:04X}, '
+                   f'{str(lower_sp).lower()} }},')
     out.append('};')
 
 
@@ -267,7 +271,10 @@ def main():
     images = []
     modules = []
     for module_dir in sorted(p for p in lifted_dir.iterdir() if (p / 'module.txt').exists()):
-        name, keywords, image, relocs, overlays = read_module(module_dir)
+        module = read_module(module_dir)
+        if module is None:
+            continue
+        name, keywords, image, relocs, overlays = module
         if 'announce entry' in keywords and name not in images:
             emit_image(out, len(images), name, image, relocs)
             images.append(name)

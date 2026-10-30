@@ -225,7 +225,10 @@ static void run_original(Machine *m, ActiveHook *h)
     s->hooks_off = true; /* lifted callees run original too, so the whole call tree is compared */
     m->io_mode = IO_RECORD;
     exec_stub_replay_rewind(m, true);
-    lift_run_nested(m, ret, m->cpu.r[R_SP].w, true);
+    if (h->entry->lower_sp)
+        lift_run_nested_any_sp(m, ret);
+    else
+        lift_run_nested(m, ret, m->cpu.r[R_SP].w, true);
     m->io_mode = IO_LIVE;
     s->hooks_off = false;
     if (!was_hooked)
@@ -381,6 +384,9 @@ void lift_verify_nested_entry(Machine *m)
 static void compare(Machine *m, ActiveHook *h, uint16_t lo_sp, uint16_t hi_sp)
 {
     VerifyState *v = verify(m);
+    /* A LIFT_*_LOWSP return below the entry SP left live words between the two (SPs are compared first). */
+    if (h->entry->lower_sp && m->cpu.r[R_SP].w < hi_sp)
+        lo_sp = hi_sp = m->cpu.r[R_SP].w;
     char why[160];
     bool semantic = v->sem_valid;
     v->sem_valid = false;
