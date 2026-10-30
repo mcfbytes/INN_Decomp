@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Function-level matching-decompilation check against the shipped Borland C++ 3.0 binaries.
 
-Each case is a C file under `matching/<MODULE>/<seg>_<off>.c` holding one function named `orig` and
+Each case is a C file under `private/lifted/matching/<MODULE>/<seg>_<off>.c` holding one function named `orig` and
 a header comment
 
     /* match: MODULE SEG:OFF */
@@ -419,7 +419,7 @@ def measure(case, modules, opts):
 
 def parse_args(argv):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument('--cases', default='matching', help='case tree (default: matching)')
+    ap.add_argument('--cases', default='private/lifted/matching', help='case tree (default: private/lifted/matching)')
     ap.add_argument('--out', required=True, help='TSV ledger to write')
     ap.add_argument('--only', help='only this module')
     ap.add_argument('--private', default=str(default_private()),
