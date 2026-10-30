@@ -29,3 +29,15 @@ saves SI before DI. Neither binary contains Microsoft's runtime strings (`R6000`
 - Matching decompilation is possible for the Borland titles: compile a lifted function with BCC 3.0
   (3.1 for a function-level check) under DOSBox-X or dosrt and compare bytes. This is a per-function
   check; the full link needs the BC++ 3.0 libraries.
+- `tools/match_compile.py` runs that check repeatably. A case is `matching/<MODULE>/<seg>_<off>.c`
+  with one function named `orig` and a `/* match: MODULE SEG:OFF */` header (an overlay case uses the
+  stub segment, as the lift reports print it). The tool cuts the original function out of the media
+  EXE (length from `private/ghidra/<MODULE>/index.tsv`, MZ relocation words and overlay fixups
+  masked), compiles the case with BC++ 3.0 in DOSBox 0.74 (`dpmiload`, then
+  `bcc -c -ml -O2 -IC:\INCLUDE`), cuts the `orig` public out of the OMF `_TEXT` segment with fixup
+  bytes masked, and writes a TSV ledger of `exact`, `diff`, `length` or `tool-error` per case:
+
+      tools/match_compile.py --cases matching --out match.tsv [--only MODULE]
+
+  The compiler, media trees and private tree default to the local installs (`--bcpp`, `--media`,
+  `--private` override them).
