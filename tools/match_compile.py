@@ -278,6 +278,11 @@ def find_module_file(directory, module):
     if not directory.is_dir():
         return None
     wanted = f'{module}.EXE'.upper()
+    if module == 'TWGENN-CAW':
+        # The Cawdor gallery ships under the plain name; do not pick Twinion's TWGENN.EXE.
+        if 'CAWDOR' not in str(directory).upper():
+            return None
+        wanted = 'TWGENN.EXE'
     for path in directory.iterdir():
         if path.is_file() and path.name.upper() == wanted:
             return path
