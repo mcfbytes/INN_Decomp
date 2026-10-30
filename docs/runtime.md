@@ -242,6 +242,9 @@ found; without `--xms-kb`, INT 2Fh AX=4300h returns AL=0 ("Conventional memory")
 13500 down 48                    # held until the matching "up" (flight controls)
 13900 up 48
 14000 type guybrush\n            # US layout, \n is Enter
+15000 signal ready               # creates $INN_SYNC_DIR/ready
+16000 await other 60000          # holds later events until $INN_SYNC_DIR/other exists
+17000 end                        # ends the run, closing the line, as --run-ms does
 ```
 
 The headless loop runs the machine in 10 ms chunks and applies the events due at each chunk's end.
@@ -249,6 +252,10 @@ The chunk ends keep a fixed grid from the start of the run, so a lifted call tha
 machine step can run `MT32.DRV`'s 4 s init) does not move the later ones, and an event lands at the
 same emulated time with or without lifted code. A nested wait (a guest call from lifted C) applies due
 events when it passes a chunk end of the grid.
+`signal` and `await` synchronize several clients (next section). `await NAME [timeout_ms]` is the same
+synchronization as `wait`: it holds the emulated clock until the file exists (default timeout 120000 ms),
+so later events keep their spacing. A timeout or a missing `INN_SYNC_DIR` fails the run. Names have no
+`/`. `end` stops the run at that time, so a client can hang up.
 
 `tools/ppm2png.py` converts screenshots. Example end-to-end run against the sibling server:
 
@@ -327,6 +334,44 @@ byte when it was offered and at the exact baud rate, the UART one byte time late
 byte (its line is checked once per 100 us slice). `host_link` now models the same shift register and
 byte time ([native.md](native.md) section 9), which brings the two builds to within about 3 ms of
 each other at that seed (it was 22 ms).
+## Several clients against one server
+
+`tools/multi_client.sh <build_dir> <port> <manifest> [run_ms_default]` starts one innkeeperd
+(`$INNKEEPERD`, with `--bind 127.0.0.1:<port> --no-int14h --data-dir OUT/data --capture-dir OUT/captures`)
+and one `inn --headless` per client, then checks the logs. `OUT` is `work/verify/<port>` (locked
+like `verify_lifted.sh`); each client gets `OUT/<tag>/client.log`, its screenshots as ppm and png, and
+the server writes `OUT/server.log`. Each client runs on an rsync copy of its drive at
+`work/verify-drive/<port>-<tag>` (default `work/srv-games-c`) whose `INN\LSCI.CFG` `id =` line is the
+client's account. Scripts see `@OUT@` as `OUT/<tag>` and `@SYNC@` as `OUT/sync`, and the clients get
+`INN_SYNC_DIR=OUT/sync` for `signal` and `await`. The environment passes through;
+`INN_VERIFY_LIFTED` (50 calls when unset) applies only to the tags in `INN_VERIFY_TAGS` (comma or space
+separated, or `all`), so the lift families can shadow-verify multiplayer paths.
+
+Manifest lines (`#` starts a comment; relative paths are relative to the manifest's directory):
+
+```
+server <extra innkeeperd args>
+client <tag> <account> <script> [start_delay_ms] [drive] [run_ms]   # '-' for the default drive
+command <tag> <shell command>      # started after the server, e.g. a Playwright driver;
+                                   # @OUT@, @SYNC@ and @PORT@ are substituted
+expect <tag|server> <ERE>          # matched in client.log or server.log after the run
+reject <tag|server> <ERE>          # (ANSI colour stripped)
+```
+
+The summary lists each process's exit status, the count of `not decoded` lines in `server.log` and every
+expect and reject result; the exit status is non-zero when any check fails. Example, two players in the
+SierraLand Waiting Room, the second hanging up first:
+
+```
+client ann 100001 ann.txt 0 - 190000
+client bob 100002 bob.txt 3000 - 190000
+expect server step=host GroupLeft
+reject server not decoded
+```
+
+Ann's script ends with `signal annin`, `await bobin` and a screenshot; Bob's mirrors it and finishes
+with `await annshot` and `end`. Run: `INNKEEPERD=... tools/multi_client.sh build 41020
+private/lifted/scenarios/srv/waiting2/manifest.txt` (the scenario is in the private repo).
 
 ## TSN host stand-in
 

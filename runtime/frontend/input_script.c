@@ -16,7 +16,7 @@
 enum { MAX_EVENTS = 4096, HOLD_US = 60000, TYPE_GAP_US = 120000, LINE_MAX = 4096, PATH_MAX_LEN = 256,
        SYNC_NAME_MAX = 64, WAIT_DEFAULT_MS = 120000, WAIT_POLL_US = 10000 };
 
-typedef enum { EV_KEY_DOWN, EV_KEY_UP, EV_MOVE, EV_BUTTON_DOWN, EV_BUTTON_UP, EV_SHOT, EV_SIGNAL, EV_WAIT } EventKind;
+typedef enum { EV_KEY_DOWN, EV_KEY_UP, EV_MOVE, EV_BUTTON_DOWN, EV_BUTTON_UP, EV_SHOT, EV_SIGNAL, EV_WAIT, EV_END } EventKind;
 
 typedef struct Event {
     uint64_t at_us;
@@ -30,6 +30,7 @@ struct InputScript {
     Event events[MAX_EVENTS];
     int count, next;
     bool failed;
+    bool ended;
     char sync_dir[PATH_MAX_LEN];
     void (*hold)(void *ctx);
     void *hold_ctx;
@@ -114,11 +115,11 @@ static int parse_line(InputScript *s, char *line)
         Event *e = add_event(s, at, EV_SHOT, 0, 0);
         if (e)
             snprintf(e->path, sizeof e->path, "%s", rest);
-    } else if (!strcmp(verb, "signal") || !strcmp(verb, "wait")) {
+    } else if (!strcmp(verb, "signal") || !strcmp(verb, "wait") || !strcmp(verb, "await")) {
         char name[SYNC_NAME_MAX + 1];
         unsigned long timeout_ms = WAIT_DEFAULT_MS;
         int end = 0, more = 0;
-        bool is_wait = verb[0] == 'w';
+        bool is_wait = verb[0] == 'w' || verb[0] == 'a';
         if (sscanf(rest, "%64s%n", name, &end) != 1)
             return -1;
         if (is_wait && sscanf(rest + end, "%lu%n", &timeout_ms, &more) == 1)
@@ -130,6 +131,8 @@ static int parse_line(InputScript *s, char *line)
         Event *e = add_event(s, at, is_wait ? EV_WAIT : EV_SIGNAL, (int)(timeout_ms > 0x7FFFFFFF ? 0x7FFFFFFF : timeout_ms), 0);
         if (e)
             snprintf(e->path, sizeof e->path, "%s", name);
+    } else if (!strcmp(verb, "end") && !*rest) {
+        add_event(s, at, EV_END, 0, 0);
     } else {
         return -1;
     }
@@ -251,14 +254,17 @@ static bool apply_event(InputScript *s, Machine *m, const Event *e)
         break;
     case EV_SIGNAL: return sync_signal(s, e);
     case EV_WAIT: return sync_wait(s, e);
+    case EV_END: s->ended = true; return true;
     }
     return true;
 }
 
 int input_script_apply(InputScript *s, Machine *m)
 {
-    while (!s->failed && s->next < s->count && s->events[s->next].at_us <= m->virtual_us)
+    while (!s->failed && !s->ended && s->next < s->count && s->events[s->next].at_us <= m->virtual_us)
         if (!apply_event(s, m, &s->events[s->next++]))
             s->failed = true;
     return s->failed ? -1 : 0;
 }
+
+bool input_script_ended(const InputScript *s) { return s->ended; }

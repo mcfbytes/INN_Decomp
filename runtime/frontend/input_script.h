@@ -21,5 +21,7 @@ int input_script_apply(InputScript *s, Machine *m);
  * between checks of the wall clock, with the emulated clock held. */
 void input_script_set_sync(InputScript *s, const char *dir, void (*hold)(void *ctx), void *ctx);
 bool input_script_failed(const InputScript *s);
+/* True after an "end" event: the caller should stop the run. */
+bool input_script_ended(const InputScript *s);
 
 #endif
