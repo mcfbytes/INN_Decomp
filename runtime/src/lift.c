@@ -207,6 +207,8 @@ static bool module_build_matches(const LiftState *s, const char *module, uint16_
     return true;
 }
 
+static void remember_module(LiftState *s, const char *module, uint16_t load_seg);
+
 static void set_module_build(LiftState *s, const char *module, uint16_t load_seg, bool matches)
 {
     for (int i = 0; i < s->module_count; i++)
@@ -258,6 +260,8 @@ static void arm_module(Machine *m, const char *module, uint16_t load_seg, uint32
 {
     LiftState *s = lift_state(m);
     lift_module_unloaded(m, load_seg, (image_bytes + 15) / 16);
+    remember_module(s, module, load_seg);
+    set_module_build(s, module, load_seg, true);
     for (int t = 0; t < s->table_count; t++)
         for (int i = 0; i < s->tables[t].count; i++)
             if (!strcmp(s->tables[t].entries[i].module, module))
@@ -384,6 +388,8 @@ void lift_far_call_probe(Machine *m)
         return;
     if (s->dump_far_calls)
         native_dump_far_call(m);
+    if (s->in_shadow)
+        return; /* arming a module is not part of the shadow snapshot */
     uint16_t seg = m->cpu.seg[S_CS];
     if ((m->cpu.eip & 0xFFFF) != 0 || s->image_count == 0 || is_module_start(s, seg))
         return;
@@ -409,11 +415,13 @@ void lift_module_loaded(Machine *m, const char *module, uint16_t load_seg, uint3
     set_module_build(s, module, load_seg, true);
     if (m->trace)
         log_msg("lift: module %s at %04X (%u bytes)", module, load_seg, image_bytes);
+    int image = image_index(s, module);
+    if (image >= 0 && s->images[image].load_seg && s->images[image].load_seg != load_seg)
+        disarm_module(m, module); /* the image moved: old hooks point into freed memory */
     arm_module(m, module, load_seg, image_bytes, load_seg, false);
     lift_coverage_module(m, module, load_seg, image_bytes, false);
     lift_synth_module(m, module, load_seg);
-    int image = image_index(s, module); /* a lifted loader may announce an image itself */
-    if (image >= 0) {
+    if (image >= 0) { /* a lifted loader may announce an image itself */
         s->images[image].load_seg = load_seg;
         lift_update_probe(m);
     }
@@ -430,9 +438,9 @@ bool lift_module_loaded_image(Machine *m, const char *module, uint16_t load_seg,
         if (module_build_matches(s, module, load_seg))
             log_msg("lift: %s at %04X is a different build (%u bytes, hash %016llX); running its original code",
                     module, load_seg, image_bytes, (unsigned long long)hash);
+        lift_module_unloaded(m, load_seg, (image_bytes + 15) / 16);
         remember_module(s, module, load_seg);
         set_module_build(s, module, load_seg, false);
-        lift_module_unloaded(m, load_seg, (image_bytes + 15) / 16);
         lift_coverage_module(m, module, load_seg, image_bytes, false);
         return false;
     }
@@ -483,6 +491,12 @@ void lift_module_unloaded(Machine *m, uint16_t load_seg, uint32_t paragraphs)
     }
     s->active_count = kept;
     lift_synth_unloaded(m, lo, hi);
+    for (int i = 0; i < s->module_count; i++)
+        if (s->modules[i].load_seg && real_addr(s->modules[i].load_seg, 0) >= lo &&
+            real_addr(s->modules[i].load_seg, 0) < hi) {
+            s->modules[i].load_seg = 0; /* the segment is free; a later load there is new */
+            s->modules[i].build_matches = true;
+        }
     bool images_gone = false;
     for (int i = 0; i < s->image_count; i++) {
         uint32_t at = real_addr(s->images[i].load_seg, 0);

@@ -16,8 +16,9 @@ startup module. Borland C++ 3.1 lives in `/mnt/source/tools/borlandcpp/BCPP31.ZI
 
 The Ybarra startup is a BC++ 3.0 `C0L.OBJ`; the +38 divergence from 3.1 is not an overlay flag but a
 different C0 version. BC++ 3.1 reproduces individual lifted functions byte-identically (two test
-functions in `private/lifted/COMPILER-FORENSICS.md`), but startup/link bytes need BC++ 3.0 media, which
-is not on this machine. Microsoft C 6.0a/6.00ax/7.0 is not used by these programs.
+functions in `private/lifted/COMPILER-FORENSICS.md`). The BC++ 3.0 media used for the matching corpus is at
+`../tools/borlandcpp/bcpp30` (see its `PROOF.md`), and `tools/match_compile.py` uses it by default.
+Microsoft C 6.0a/6.00ax/7.0 is not used by these programs.
 
 Register-save order is a heuristic: Microsoft C saves DI before SI after `push bp/mov bp,sp`, Borland
 saves SI before DI. Neither binary contains Microsoft's runtime strings (`R6000`, `_C_FILE_INFO`).

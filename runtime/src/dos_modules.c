@@ -153,6 +153,7 @@ void dos_note_module_read(Machine *m, const DosFile *f, off_t file_pos, uint16_t
     if (image && pread(f->fd, image, image_bytes, start) == (ssize_t)image_bytes)
         lift_module_loaded_image(m, name, (uint16_t)(image_linear / PARAGRAPH), image, image_bytes);
     else
-        lift_module_loaded(m, name, (uint16_t)(image_linear / PARAGRAPH), image_bytes);
+        log_msg("lift: %s at %04X: cannot read its image; running its original code",
+                name, (uint16_t)(image_linear / PARAGRAPH));
     free(image);
 }
