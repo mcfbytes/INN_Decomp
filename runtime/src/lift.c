@@ -479,6 +479,8 @@ void lift_module_unloaded(Machine *m, uint16_t load_seg, uint32_t paragraphs)
     LiftState *s = lift_state(m);
     if (!s)
         return;
+    if (s->in_shadow)
+        return; /* the original's free is inside the shadow snapshot; hook state must not move */
     lift_coverage_unloaded(m, load_seg, paragraphs);
     uint32_t lo = real_addr(load_seg, 0), hi = lo + paragraphs * 16;
     int kept = 0;
