@@ -54,6 +54,11 @@ walls, movement and AdLib music. Twinion takes the same path (second choice in t
 opcodes. The overlay manager behaves like a program reading its own file, which dosrt already served;
 lifted overlay code is armed per overlay as it is read ([lifting.md](lifting.md), "Overlays").
 
+Cawdor is the same path in the 1995 client: its hub lists The Ruins of Cawdor, the gallery's Play starts
+`RUINS.EXE`, and the ruins gate renders. The 2.4.46 client needs its own unpacked `TSNEXEC`/`LSCITV` and
+the image-build check for DLLs and drivers (`runtime/src/dos_modules.c`); the scenario is
+`private/lifted/scenarios/caw_gate.txt` with the `work/cawdor-latest` drive.
+
 ## Host requirements found on the way
 
 `innkeeperd` meets all of these since 2026-10-14 (sibling repo, `docs/protocol/yserbius.md`); a stock

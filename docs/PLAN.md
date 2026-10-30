@@ -77,10 +77,13 @@ produces the game.
       and 8237 DMA done (2026-10-14): `SNDBLAST.DRV` initialises, plays FM and, called directly, plays a
       sound's digital track. LSCITV never asks the driver for digital tracks, so in INN only Golf's
       `SOUND.SFX` remains to hear (needs the M8 game launch); browser check of SB output open.
-- [ ] **M7** Yserbius and Twinion (lift the shared engine; overlays need per-overlay module registration).
-      Status 2026-10-14: from the INN map, `CGENN` and `DARKSTRT` run under the interpreter to the town and
-      the dungeon with music, `TWGENN` and `FATES` to the town, given three host additions ([yserbius.md](yserbius.md)). Per-overlay
-      registration done ([lifting.md](lifting.md), "Overlays").
+- [ ] **M7** Yserbius, Twinion and Cawdor (lift the shared engine; overlays need per-overlay module registration).
+      Status 2026-10-29: all three run; the 1995 Cawdor client reaches the Fall Map, the Cawdor gallery and its
+      ruins gate. The lift campaign on `lift-integration` has 1,647 registered entries across CGENN, DARKSTRT,
+      FATES and TWGENN, plus Cawdor's TWGENN and RUINS. Cawdor's RUINS lifts are staged pending a byte-level
+      recheck; its gallery lifts are shadow-verified. Remaining FATES package work is listed in the private
+      `YSERBIUS-PLAN.md`; the interpreter still runs the un-lifted functions ([yserbius.md](yserbius.md),
+      private `CAWDOR-PLAN.md`). Per-overlay registration done ([lifting.md](lifting.md), "Overlays").
 - [ ] **M8** Golf, Red Baron, Shoppers Advantage. Status 2026-10-14: the interpreter has a 387
       ([runtime.md](runtime.md), "FPU"; Red Baron turned out to have no floating point, GOLF's Borland
       emulator patches itself into x87 code and runs either way). `--tsn-host` runs a game client without
