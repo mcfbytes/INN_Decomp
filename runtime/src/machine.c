@@ -318,9 +318,6 @@ void machine_step(Machine *m)
     uint64_t done = cpu_run(m, m->slice_left);
     if (m->cpu.hook_pending) {
         m->cpu.hook_pending = false;
-        /* The slice is current before the lift runs: its guest calls step machine_step themselves. */
-        m->slice_left -= done < m->slice_left ? done : m->slice_left;
-        done = 0;
         uint32_t linear = m->cpu.seg_base[S_CS] + (m->cpu.eip & 0xFFFF);
         if (lift_dispatch(m, linear)) {
             done++;
