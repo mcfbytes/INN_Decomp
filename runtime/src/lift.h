@@ -115,6 +115,8 @@ static inline void lift_far_call_landed(Machine *m)
 
 /* Deactivates every hook inside [load_seg, load_seg + paragraphs). */
 void lift_module_unloaded(Machine *m, uint16_t load_seg, uint32_t paragraphs);
+/* A DOS block was freed: forget modules that started in it, then drop their hooks. */
+void lift_module_freed(Machine *m, uint16_t load_seg, uint32_t paragraphs);
 
 /* Whether the code running now is lifted C rather than interpreted guest code. */
 bool lift_in_c(const Machine *m);

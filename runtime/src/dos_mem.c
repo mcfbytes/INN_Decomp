@@ -130,7 +130,7 @@ int dos_mem_alloc(Machine *m, uint16_t paras, uint16_t owner, uint16_t *seg, uin
 
 int dos_mem_free(Machine *m, uint16_t seg)
 {
-    lift_module_unloaded(m, seg, mcb_size(m, (uint16_t)(seg - 1)));
+    lift_module_freed(m, seg, mcb_size(m, (uint16_t)(seg - 1)));
     uint16_t mcb = (uint16_t)(seg - 1);
     if (!mcb_valid(m, mcb))
         return DE_INVALID_BLOCK;

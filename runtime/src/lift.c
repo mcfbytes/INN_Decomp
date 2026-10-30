@@ -482,6 +482,13 @@ void lift_overlay_loaded(Machine *m, const char *module, uint16_t load_seg, uint
     lift_synth_module(m, module, load_seg);
 }
 
+void lift_module_freed(Machine *m, uint16_t load_seg, uint32_t paragraphs)
+{
+    /* A module's recorded segment is not cleared here: DOS may free a parent block that still covers
+     * the program's own paragraph, and clearing it would make every later direct lifted call fatal. */
+    lift_module_unloaded(m, load_seg, paragraphs);
+}
+
 void lift_module_unloaded(Machine *m, uint16_t load_seg, uint32_t paragraphs)
 {
     LiftState *s = lift_state(m);
@@ -501,12 +508,6 @@ void lift_module_unloaded(Machine *m, uint16_t load_seg, uint32_t paragraphs)
     }
     s->active_count = kept;
     lift_synth_unloaded(m, lo, hi);
-    for (int i = 0; i < s->module_count; i++)
-        if (s->modules[i].load_seg && real_addr(s->modules[i].load_seg, 0) >= lo &&
-            real_addr(s->modules[i].load_seg, 0) < hi) {
-            s->modules[i].load_seg = 0; /* the segment is free; a later load there is new */
-            s->modules[i].build_matches = true;
-        }
     bool images_gone = false;
     for (int i = 0; i < s->image_count; i++) {
         uint32_t at = real_addr(s->images[i].load_seg, 0);
