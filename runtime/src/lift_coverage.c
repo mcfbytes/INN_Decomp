@@ -76,6 +76,13 @@ void lift_coverage_module(Machine *m, const char *module, uint16_t load_seg, uin
         return;
     uint32_t lo = real_addr(load_seg, 0), hi = lo + bytes;
     drop_range(c, lo, hi);
+    for (int i = 0; overlay && i < c->extent_count;) { /* code read over part of another overlay evicts it */
+        const CovExtent *e = &c->extents[i];
+        if (e->overlay && e->lo < hi && e->hi > lo)
+            c->extents[i] = c->extents[--c->extent_count];
+        else
+            i++;
+    }
     for (int i = 0; i < c->extent_count; i++) /* an overlay's previous home, a module's previous load */
         if (!strcmp(c->names[c->extents[i].name], module))
             c->extents[i] = c->extents[--c->extent_count];

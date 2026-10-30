@@ -81,6 +81,27 @@ int main(void)
     const char *body = strchr(got, '\n');
     CHECK(got[0] == '#' && body && !strcmp(body + 1, want), "coverage file:\n%s", got);
     unlink(path);
+
+    /* An overlay read over part of another evicts it: a target in the overlap belongs to the newcomer even
+     * when the stale extent is the smaller one. */
+    char path2[] = "/tmp/inn_coverage_XXXXXX";
+    fd = mkstemp(path2);
+    CHECK(fd >= 0, "temporary file");
+    close(fd);
+    setenv("INN_COVERAGE", path2, 1);
+    m = machine_create();
+    unsetenv("INN_COVERAGE");
+    lift_module_loaded(m, "TEST.EXE", LOAD_SEG, 0x1000);
+    lift_overlay_loaded(m, "TEST.EXE#0043", 0x1100, 0x100, LOAD_SEG);
+    lift_overlay_loaded(m, "TEST.EXE#0044", 0x10F0, 0x180, LOAD_SEG);
+    cpu_set_seg(&m->cpu, S_CS, 0x1100);
+    m->cpu.eip = 0x10;
+    lift_coverage_hit(m, LIFT_COVERAGE_CALL);
+    machine_destroy(m);
+    got = slurp(path2);
+    body = strchr(got, '\n');
+    CHECK(got[0] == '#' && body && !strcmp(body + 1, "TEST.EXE#0044:0110\t1\tcall\n"), "evicted overlay:\n%s", got);
+    unlink(path2);
     if (failures)
         fprintf(stderr, "%d check(s) failed\n", failures);
     return failures != 0;
