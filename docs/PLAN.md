@@ -79,7 +79,7 @@ produces the game.
       `SOUND.SFX` remains to hear (needs the M8 game launch); browser check of SB output open.
 - [ ] **M7** Yserbius, Twinion and Cawdor (lift the shared engine; overlays need per-overlay module registration).
       Status 2026-10-29: all three run; the 1995 Cawdor client reaches the Fall Map, the Cawdor gallery and its
-      ruins gate. The lift campaign on `lift-integration` has 3,253 registered entries across CGENN, DARKSTRT,
+      ruins gate. The lift campaign on `lift-integration` has 3,256 registered entries across CGENN, DARKSTRT,
       FATES, TWGENN, TWGENN-CAW and RUINS. The RUINS lifts are promoted; the Cawdor gate run checks 50 entries
       with no mismatch or fatal, and its gallery lifts are shadow-verified. Remaining FATES package work is listed in the private
       `YSERBIUS-PLAN.md`; the interpreter still runs the un-lifted functions ([yserbius.md](yserbius.md),
