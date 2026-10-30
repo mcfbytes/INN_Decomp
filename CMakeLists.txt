@@ -46,6 +46,8 @@ endif()
 set(INN_LIFTED_DIR "${CMAKE_SOURCE_DIR}/private/lifted" CACHE PATH "Lifted sources (private tree)")
 if(EXISTS "${INN_LIFTED_DIR}")
   file(GLOB_RECURSE INN_LIFTED_SOURCES FOLLOW_SYMLINKS CONFIGURE_DEPENDS "${INN_LIFTED_DIR}/*.c")
+  # Matching-decompilation cases are standalone comparisons, not runtime lifts.
+  list(FILTER INN_LIFTED_SOURCES EXCLUDE REGEX "/matching/")
   file(GLOB_RECURSE INN_LIFTED_MODULES FOLLOW_SYMLINKS CONFIGURE_DEPENDS "${INN_LIFTED_DIR}/*/module.txt")
   set(INN_LIFTED_TABLE "${CMAKE_BINARY_DIR}/lifted_table.c")
   set(INN_LIFTED_ENTRIES "${CMAKE_BINARY_DIR}/lifted_entries.h")
