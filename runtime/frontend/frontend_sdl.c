@@ -25,6 +25,7 @@
 #include "machine.h"
 #if __has_include("dos.h")
 #include "dos.h"
+#include "emsxms.h"
 #define HAVE_DOS 1
 #endif
 #ifdef INN_NATIVE
@@ -61,6 +62,7 @@ typedef struct Options {
     const char *sync_dir;
     const char *wav;
     unsigned conv_kb;
+    unsigned ems_kb, xms_kb; /* 0: none, as without these options */
     bool no_fpu, no_idle_skip;
     const char *host_rules;
     const char *c_dir, *program;
@@ -708,7 +710,7 @@ static int run_native(Frontend *f)
 
 static void usage(void)
 {
-    fprintf(stderr, "usage: inn [--trace N] [--ips N] [--com1 host:port|ws://host:port] [--perf] [--audiotap] [--wav out.wav] [--conv-kb N] [--no-fpu] [--no-idle-skip] [--tsn-host rules.txt] "
+    fprintf(stderr, "usage: inn [--trace N] [--ips N] [--com1 host:port|ws://host:port] [--perf] [--audiotap] [--wav out.wav] [--conv-kb N] [--ems-kb N] [--xms-kb N] [--no-fpu] [--no-idle-skip] [--tsn-host rules.txt] "
                     "[--headless --run-ms N --screenshot out.ppm --script input.txt [--sync-dir dir]] <c-drive-dir> <program> [args]\n");
 }
 
@@ -735,6 +737,8 @@ static int parse_args(int argc, char **argv, Options *o)
         else if (!strcmp(a, "--wav")) o->wav = next;
         else if (!strcmp(a, "--tsn-host")) o->host_rules = next;
         else if (!strcmp(a, "--conv-kb")) o->conv_kb = (unsigned)strtoul(next, NULL, 10);
+        else if (!strcmp(a, "--ems-kb")) o->ems_kb = (unsigned)strtoul(next, NULL, 10);
+        else if (!strcmp(a, "--xms-kb")) o->xms_kb = (unsigned)strtoul(next, NULL, 10);
         else return -1;
         i++;
     }
@@ -791,6 +795,15 @@ static int boot(Machine *m, const Options *o)
     dos_init(m, o->c_dir);
     if (o->conv_kb)
         dos_limit_memory(m, o->conv_kb);
+#ifdef INN_NATIVE
+    if (o->ems_kb || o->xms_kb) /* the native client answers its EMS and XMS probes with "none" */
+        log_msg("native build: --ems-kb and --xms-kb are ignored");
+#else
+    if (!emsxms_init(m, o->ems_kb, o->xms_kb)) {
+        fprintf(stderr, "--ems-kb %u --xms-kb %u do not fit in 16 MB\n", o->ems_kb, o->xms_kb);
+        return -1;
+    }
+#endif
     /* Start in the program's directory, as if launched from a prompt there. */
     char cwd[256];
     snprintf(cwd, sizeof cwd, "\\%s", o->program);

@@ -19,7 +19,7 @@ typedef char Component[COMPONENT_MAX];
 static const struct { const char *name; DosDevice dev; } device_names[] = {
     {"CON", DEV_CON},   {"NUL", DEV_NUL},   {"AUX", DEV_AUX},   {"PRN", DEV_PRN},
     {"CLOCK$", DEV_CLOCK}, {"COM1", DEV_AUX}, {"COM2", DEV_AUX}, {"LPT1", DEV_PRN},
-    {"LPT2", DEV_PRN},  {"LPT3", DEV_PRN},
+    {"LPT2", DEV_PRN},  {"LPT3", DEV_PRN},  {"EMMXXXX0", DEV_EMM},
 };
 
 void dos_read_name(Machine *m, uint16_t seg, uint16_t off, char *dst)
@@ -150,8 +150,11 @@ int dos_resolve(Machine *m, const char *name, DosPath *out)
     }
     if (count == 0)
         strcat(out->dos, "\\");
-    if (count > 0 && (out->dev = device_of(comps[count - 1])) != DEV_NONE)
-        return DE_OK;
+    if (count > 0 && (out->dev = device_of(comps[count - 1])) != DEV_NONE) {
+        if (out->dev != DEV_EMM || m->ems)
+            return DE_OK;
+        out->dev = DEV_NONE; /* the EMS driver's device exists only when EMS is on */
+    }
     return map_to_host(d, comps, count, out);
 }
 

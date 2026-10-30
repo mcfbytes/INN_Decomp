@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "dos_int.h"
+#include "emsxms.h"
 
 /* How the dispatcher finds a function's file name argument, for tracing. */
 typedef enum NameArg { NAME_NONE, NAME_DS_DX, NAME_DS_SI } NameArg;
@@ -165,7 +166,7 @@ static CallbackResult int28_idle(Machine *m) { return CB_DONE; }
 
 /* ---- INT 2Fh multiplex ---- */
 
-enum { MUX_WINDOWS = 0x1600, MUX_XMS = 0x4300, MUX_IDLE = 0x1680 };
+enum { MUX_WINDOWS = 0x1600, MUX_XMS = 0x4300, MUX_XMS_ENTRY = 0x4310, MUX_IDLE = 0x1680 };
 
 static CallbackResult int2f(Machine *m)
 {
@@ -174,6 +175,9 @@ static CallbackResult int2f(Machine *m)
         AL = 0; /* no enhanced-mode Windows */
         break;
     case MUX_XMS:
+    case MUX_XMS_ENTRY:
+        if (m->xms)
+            return xms_int2f(m);
         AL = 0; /* XMS driver not installed */
         break;
     case MUX_IDLE:
@@ -187,12 +191,14 @@ static CallbackResult int2f(Machine *m)
     return CB_DONE;
 }
 
-/* ---- INT 67h: no expanded memory ---- */
+/* ---- INT 67h: expanded memory when --ems-kb turned it on ---- */
 
 enum { EMS_NOT_SUPPORTED = 0x84 };
 
 static CallbackResult int67(Machine *m)
 {
+    if (m->ems)
+        return ems_int67(m);
     if (m->trace)
         log_msg("dos: INT 67h AH=%02X (no EMS)", AH);
     AH = EMS_NOT_SUPPORTED;

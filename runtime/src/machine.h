@@ -13,6 +13,7 @@ enum {
     MEM_CONVENTIONAL_END = 0xA0000,
     MEM_VGA_BASE = 0xA0000,
     MEM_ONE_MEG = 0x100000,
+    MEM_EMS_FRAME = 0xE0000, MEM_EMS_FRAME_BYTES = 0x10000, /* writable RAM when EMS is on (emsxms.h) */
     MEM_SIZE = 0x1000000 + 0x10000, /* 16 MB for XMS plus wrap-around slack */
 };
 
@@ -132,6 +133,9 @@ struct Machine {
     int trace; /* 0 off, 1 interrupts and DOS calls, 2 every instruction */
     IdleState idle;
     bool fpu_present; /* a 387 answers escape opcodes; otherwise they decode and do nothing */
+    /* Guest memory that snapshots (shadow verification, synthetic calls) cover: [0, snapshot_bytes).
+     * 1 MB + 64 KB, and up to the end of EMS/XMS memory when emsxms_init turned them on. */
+    uint32_t snapshot_bytes;
 };
 
 /* ---- memory ---- */

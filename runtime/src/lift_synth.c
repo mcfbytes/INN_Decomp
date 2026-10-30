@@ -14,7 +14,7 @@
 #include "lift_internal.h"
 
 enum {
-    SNAPSHOT_BYTES = MEM_ONE_MEG + 0x10000,
+    SNAPSHOT_CAP = MEM_SIZE, /* Machine.snapshot_bytes of it are used */
     HMA_SEG = 0xFFFF,
     HMA_LO = MEM_ONE_MEG,           /* FFFF:0010 */
     HMA_HI = MEM_ONE_MEG + 0xFFF0,  /* FFFF:FFFF + 1 */
@@ -231,7 +231,7 @@ void lift_synth_load(Machine *m, const char *paths)
     const char *check = getenv("INN_SYNTH_CHECK"), *verbose = getenv("INN_SYNTH_LOG");
     y->check = check && *check && *check != '0';
     y->log = verbose && *verbose && *verbose != '0';
-    y->mem = malloc(SNAPSHOT_BYTES);
+    y->mem = malloc(SNAPSHOT_CAP);
     y->vga = malloc(vga_snapshot_size());
     y->dos = malloc(dos_snapshot_size());
     y->vga_after = malloc(vga_snapshot_size());
@@ -807,7 +807,7 @@ static void poke(Eval *ev)
     if (*ev->p)
         fail(ev, "one value list per poke");
     uint32_t at = real_addr(seg, off);
-    if (at + len > SNAPSHOT_BYTES)
+    if (at + len > (ev->m ? ev->m->snapshot_bytes : SNAPSHOT_CAP))
         fail(ev, "poke past the end of memory");
     for (size_t i = 0; ev->m && i < len; i++) /* below 1 MB through the bus, so VGA memory works */
         if (at + i < MEM_ONE_MEG)
@@ -883,7 +883,7 @@ static bool validate(Machine *m, Synth *y)
 static void save_trigger(Machine *m, Synth *y)
 {
     y->cpu = m->cpu;
-    memcpy(y->mem, m->mem, SNAPSHOT_BYTES);
+    memcpy(y->mem, m->mem, m->snapshot_bytes);
     vga_snapshot_save(m, y->vga);
     dos_snapshot_save(m, y->dos);
     sound_snapshot_save(m, y->snd);
@@ -900,7 +900,7 @@ static void save_trigger(Machine *m, Synth *y)
 static void restore_trigger(Machine *m, Synth *y)
 {
     m->cpu = y->cpu;
-    memcpy(m->mem, y->mem, SNAPSHOT_BYTES);
+    memcpy(m->mem, y->mem, m->snapshot_bytes);
     vga_snapshot_load(m, y->vga);
     dos_snapshot_load(m, y->dos);
     sound_snapshot_load(m, y->snd);
@@ -922,7 +922,7 @@ static void check_restored(Machine *m, Synth *y, const char *label)
     sound_snapshot_save(m, y->snd_after);
     if (memcmp(&m->cpu, &y->cpu, sizeof m->cpu) != 0)
         what = "CPU";
-    else if (memcmp(m->mem, y->mem, SNAPSHOT_BYTES) != 0)
+    else if (memcmp(m->mem, y->mem, m->snapshot_bytes) != 0)
         what = "memory";
     else if (memcmp(y->vga_after, y->vga, vga_snapshot_size()) != 0)
         what = "VGA";

@@ -23,8 +23,10 @@ void mem_wr8_slow(Machine *m, uint32_t linear, uint8_t v)
     else if (mem_is_vga(linear)) {
         m->idle.activity = true;
         vga_mem_write(m, linear, v);
+    } else if (m->ems && linear - MEM_EMS_FRAME < MEM_EMS_FRAME_BYTES) {
+        m->mem[linear] = v; /* the EMS page frame */
     }
-    /* Option ROM and BIOS space is read-only. */
+    /* Otherwise option ROM and BIOS space is read-only. */
 }
 
 void mem_read_block(Machine *m, uint32_t linear, void *dst, size_t len)
@@ -219,6 +221,7 @@ Machine *machine_create(void)
     m->ips = 20000000;
     m->io_cost_ns = 1000;
     m->fpu_present = true;
+    m->snapshot_bytes = MEM_ONE_MEG + 0x10000;
     cpu_reset(m);
     native_init(m, NULL);
     lift_init(m);

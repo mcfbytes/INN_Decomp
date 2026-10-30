@@ -350,8 +350,8 @@ chain PROG.EXE queue_get e                     # starts where the call before it
   chained state satisfies; without `!` such an entry is a list error. Region entries cannot be called.
   The summary reports their synthetic calls as for any entry.
 - **Buffers** live in the HMA (FFFF:0010 to FFFF:FFFF, 16-byte aligned, 16 zero bytes after each), with
-  A20 enabled for the call: no DOS program here uses the HMA and the runtime has no XMS, so the area is
-  free and inside the snapshot. They are compared like any memory, so what a function writes into its
+  A20 enabled for the call: no DOS program here uses the HMA and the runtime's XMS (off by default) never
+  hands it out, so the area is free and inside the snapshot. They are compared like any memory, so what a function writes into its
   buffers is checked, including writes past their end (into the gaps).
 - **Restoring.** The trigger state is saved (CPU, the first 1 MB + 64 KB of memory, VGA, the Sound
   Blaster DSP and the DMA controller, DOS handles, hook bitmap, emulated time and pending interrupts, A20).
