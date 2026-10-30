@@ -1,5 +1,6 @@
 /* TSNEXEC stand-in: the INT 14h export table as callbacks, messages passed whole; the client's memory
  * callbacks run as nested guest calls (sibling docs/protocol/int14h-api.md, docs/runtime.md). */
+#include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -49,6 +50,26 @@ typedef struct ExecStub {
 } ExecStub;
 
 static ExecStub *stub(Machine *m) { return m->exec_stub; }
+
+/* From the client callbacks to the pending frees: everything a Send, Receive or SetCallbacks changes. */
+#define STATE_FROM offsetof(ExecStub, alloc_cb)
+#define STATE_TO offsetof(ExecStub, next_program)
+
+size_t exec_stub_state_size(void) { return STATE_TO - STATE_FROM; }
+
+void exec_stub_state_save(Machine *m, void *dst)
+{
+    if (m->exec_stub)
+        memcpy(dst, (uint8_t *)m->exec_stub + STATE_FROM, STATE_TO - STATE_FROM);
+    else
+        memset(dst, 0, STATE_TO - STATE_FROM); /* snapshots are memcmp'd whole */
+}
+
+void exec_stub_state_load(Machine *m, const void *src)
+{
+    if (m->exec_stub)
+        memcpy((uint8_t *)m->exec_stub + STATE_FROM, src, STATE_TO - STATE_FROM);
+}
 
 static uint16_t arg16(Machine *m, int index) /* far cdecl: args after the 4-byte return address */
 {
@@ -324,22 +345,6 @@ void exec_stub_set_send_hook(Machine *m, ExecSendHook on_send, void *user)
 {
     stub(m)->on_send = on_send;
     stub(m)->user = user;
-}
-
-size_t exec_stub_state_size(void) { return sizeof(ExecStub); }
-
-void exec_stub_state_save(Machine *m, void *dst)
-{
-    if (m->exec_stub)
-        memcpy(dst, m->exec_stub, sizeof(ExecStub));
-    else
-        memset(dst, 0, sizeof(ExecStub));
-}
-
-void exec_stub_state_load(Machine *m, const void *src)
-{
-    if (m->exec_stub)
-        memcpy(m->exec_stub, src, sizeof(ExecStub));
 }
 
 void exec_stub_set_poll_hook(Machine *m, ExecPollHook on_poll, void *user)

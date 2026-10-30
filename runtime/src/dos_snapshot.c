@@ -15,6 +15,8 @@ typedef struct DosSnapshot {
     off_t positions[DOS_SFT_MAX];
 } DosSnapshot;
 
+/* The TSN stand-in's host-side queues (exec_stub.c) follow the DOS state: a shadowed Send would otherwise
+ * queue the host's reply once per run. */
 size_t dos_snapshot_size(void) { return sizeof(DosSnapshot) + exec_stub_state_size(); }
 
 static void *stub_state(void *snap) { return (uint8_t *)snap + sizeof(DosSnapshot); }
