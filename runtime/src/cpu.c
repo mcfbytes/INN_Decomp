@@ -1,6 +1,7 @@
 /* 386 real-mode interpreter, the reference semantics for every execution tier. Escapes go to the 387
  * (fpu.c); with Machine.fpu_present off they only decode their operand, so probes find no FPU. */
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "lift.h"
@@ -448,9 +449,27 @@ static void raise_fault(Machine *m, const Insn *in, uint8_t vector)
     cpu_interrupt(m, vector);
 }
 
+/* TEMP DIAG: ring of the last guest instructions, dumped when one faults. */
+static struct { uint16_t cs; uint32_t ip; } diag_ring[128];
+static unsigned diag_pos;
+static void diag_dump(void)
+{
+    static int dumped;
+    if (dumped)
+        return;
+    dumped = 1;
+    for (unsigned n = 0; n < 128; n++) {
+        unsigned i = (diag_pos + n) % 128;
+        fprintf(stderr, "diag: %04X:%04X\n", diag_ring[i].cs, (unsigned)diag_ring[i].ip);
+    }
+}
+
 static void invalid_opcode(Machine *m, const Insn *in, unsigned opcode)
 {
     log_msg("cpu: invalid opcode %02X at %04X:%04X", opcode, m->cpu.seg[S_CS], in->start_eip);
+    diag_dump();
+    if (getenv("INN_ABORT_INVALID"))
+        fatal("invalid opcode %02X at %04X:%04X", opcode, m->cpu.seg[S_CS], in->start_eip);
     raise_fault(m, in, 6);
 }
 
@@ -1105,6 +1124,15 @@ static int op_size(const Insn *in) { return in->op32 ? 4 : 2; }
 static void exec_one(Machine *m)
 {
     Cpu *c = &m->cpu;
+    if (getenv("INN_DBG_SENT") && c->seg[S_CS] == 0xF000 && (c->eip & 0xFFFF) == 0x1000)
+        log_msg("dbg sentinel exec bytes %02X %02X %02X %02X SP=%04X", mem_rd8(m, real_addr(0xF000, 0x1000)),
+                mem_rd8(m, real_addr(0xF000, 0x1001)), mem_rd8(m, real_addr(0xF000, 0x1002)),
+                mem_rd8(m, real_addr(0xF000, 0x1003)), c->r[R_SP].w);
+    {
+        unsigned slot = diag_pos++ & 127;
+        diag_ring[slot].cs = c->seg[S_CS];
+        diag_ring[slot].ip = c->eip;
+    }
     Insn in = {.start_eip = c->eip, .seg = S_NONE};
     uint8_t opcode;
     Operand op;

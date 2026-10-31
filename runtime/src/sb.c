@@ -128,6 +128,7 @@ static void irq_test_due(Machine *m, Sb *s, uint64_t t)
 {
     if (s->irq_test_ns && s->irq_test_ns <= t) {
         s->irq_test_ns = 0;
+        s->irq_test_due = false;
         raise_irq(m, s);
     }
 }

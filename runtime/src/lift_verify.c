@@ -596,7 +596,7 @@ static void note_cost(Machine *m, ActiveHook *h, uint64_t original, uint64_t lif
                 st->shadow_calls, (unsigned long long)original, (unsigned long long)lifted);
 }
 
-bool lift_verify_call(Machine *m, ActiveHook *h)
+bool lift_verify_call(Machine *m, ActiveHook *h, bool dispatched)
 {
     LiftState *s = lift_state(m);
     VerifyState *v = s->verify;
@@ -607,6 +607,10 @@ bool lift_verify_call(Machine *m, ActiveHook *h)
     if (s->verify_skip && lift_listed(s->verify_skip, h->entry->name))
         return false;
     h->stats->shadow_calls++;
+    if (h->stats->shadow_calls >= 15)
+        log_msg("verifydbg: begin %s %s call %d at %04X:%04X SP %04X", h->entry->module, h->entry->name,
+                h->stats->shadow_calls, m->cpu.seg[S_CS], (unsigned)(m->cpu.eip & 0xFFFF),
+                m->cpu.r[R_SP].w);
     /* Loading an overlay during the runs re-sorts the active hooks under h. */
     ActiveHook hook = *h;
     h = &hook;
@@ -663,11 +667,12 @@ bool lift_verify_call(Machine *m, ActiveHook *h)
     vga_snapshot_save(m, v->vga_original);
     dos_snapshot_save(m, v->dos_original);
     sound_snapshot_save(m, v->snd_original);
-    if (v->keep_time) { /* the dispatch counts one instruction for the call and one for reaching the return
-                          * address, which the original's run and the caller's next instruction count already */
-        v->cpu_original.instructions -= 2;
-        m->cpu.instructions -= 2;
-        m->slice_left += 2;
+    if (v->keep_time) { /* the return hook's slot; the dispatcher's slot is taken back only when
+                          * machine_step will add it */
+        int slots = dispatched ? 2 : 1;
+        v->cpu_original.instructions -= slots;
+        m->cpu.instructions -= slots;
+        m->slice_left += slots;
     }
     if (v->keep_time && (m->irqs_taken != irqs || m->input_points != inputs)) {
         h->stats->shadow_calls--;
@@ -688,10 +693,14 @@ bool lift_verify_call(Machine *m, ActiveHook *h)
     if (v->keep_time)
         m->tickers_still = true;
     run_lifted(m, h);
-    note_cost(m, h, cost_original, m->cpu.instructions + m->cpu.stall - cost_start + 1);
+    note_cost(m, h, cost_original, m->cpu.instructions + m->cpu.stall - cost_start + (dispatched ? 1 : 0));
     compare(m, h, entry_sp, entry_sp);
 
     restore(m, &v->cpu_original, v->mem_original, v->vga_original, v->dos_original, v->snd_original);
+    if (h->stats->shadow_calls >= 15)
+        log_msg("verifydbg: restored %04X:%04X SP %04X stack %04X %04X %04X %04X", m->cpu.seg[S_CS],
+                (unsigned)(m->cpu.eip & 0xFFFF), m->cpu.r[R_SP].w, stack_arg16(m, 0), stack_arg16(m, 2),
+                stack_arg16(m, 4), stack_arg16(m, 6));
     if (v->keep_time) {
         m->tickers_still = false;
         m->virtual_us = at_us;

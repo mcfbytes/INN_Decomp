@@ -23,6 +23,10 @@ void lift_set_hook_bit(Machine *m, uint32_t linear, bool on)
 static CallbackResult far_return_reached(Machine *m)
 {
     LiftState *s = lift_state(m);
+    if (getenv("INN_DBG_FAR"))
+        log_msg("dbg far_return nesting=%d in_shadow=%d io=%d CS:IP=%04X:%04X SP=%04X", s->nesting,
+                s->in_shadow, (int)m->io_mode, m->cpu.seg[S_CS], (unsigned)(m->cpu.eip & 0xFFFF),
+                m->cpu.r[R_SP].w);
     if (s->nesting > 0)
         s->nested[s->nesting - 1].returned = true;
     m->cpu.stop = true;
@@ -656,6 +660,9 @@ static bool nested_return_reached(Machine *m, LiftState *s, uint32_t linear)
 bool lift_dispatch(Machine *m, uint32_t linear)
 {
     LiftState *s = lift_state(m);
+    if (getenv("INN_DBG_SENT") && linear == real_addr(0xF000, 0x1000))
+        log_msg("dbg sentinel dispatch nesting=%d in_shadow=%d io=%d SP=%04X hooks_off=%d", s->nesting,
+                s->in_shadow, (int)m->io_mode, m->cpu.r[R_SP].w, s->hooks_off);
     if (nested_return_reached(m, s, linear))
         return true;
     if (s->hooks_off)
@@ -665,7 +672,7 @@ bool lift_dispatch(Machine *m, uint32_t linear)
     ActiveHook *h = find_hook(s, linear);
     if (!h || !signature_matches(m, h))
         return false;
-    if (!lift_verify_call(m, h)) {
+    if (!lift_verify_call(m, h, true)) {
         if (s->in_shadow)
             lift_verify_nested_entry(m);
         lift_call_c(m, h->entry->fn);
@@ -761,7 +768,7 @@ static bool call_lifted_direct(Machine *m, LiftState *s, uint32_t linear)
         return false;
     s->direct_calls++;
     charge_direct(m);
-    if (!lift_verify_call(m, h)) {
+    if (!lift_verify_call(m, h, false)) {
         if (s->in_shadow)
             lift_verify_nested_entry(m);
         lift_call_c(m, h->entry->fn);
@@ -955,6 +962,10 @@ void lift_set_unresolved(Machine *m, LiftUnresolvedFn fn)
 void lift_dispatch_far_at(Machine *m, uint16_t seg, uint16_t off)
 {
     LiftState *s = lift_state(m);
+    if (getenv("INN_DBG_FAR"))
+        log_msg("dbg far_at %04X:%04X nesting=%d in_shadow=%d io=%d from %04X:%04X SP=%04X", seg, off,
+                s->nesting, s->in_shadow, (int)m->io_mode, m->cpu.seg[S_CS],
+                (unsigned)(m->cpu.eip & 0xFFFF), m->cpu.r[R_SP].w);
     uint32_t stub = callback_stub_addr(s->return_callback);
     uint16_t stub_off = (uint16_t)(stub - real_addr(CALLBACK_SEG, 0));
     cpu_push16(m, CALLBACK_SEG);

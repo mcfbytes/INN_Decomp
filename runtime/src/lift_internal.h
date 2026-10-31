@@ -104,7 +104,7 @@ bool lift_listed(const char *list, const char *name);
 /* Runs a lifted function, marking lifted C as running for port-time accounting. */
 void lift_call_c(Machine *m, LiftedFn fn);
 /* Shadow-verifies one call of h; returns false when verification does not apply. */
-bool lift_verify_call(Machine *m, ActiveHook *h);
+bool lift_verify_call(Machine *m, ActiveHook *h, bool dispatched);
 /* Called as a lifted entry starts inside a shadow run's lifted half: an entry on another stack than the
  * verified call's makes the memory just below its SP dead stack for the comparison. */
 void lift_verify_nested_entry(Machine *m);
