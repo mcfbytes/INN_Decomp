@@ -18,11 +18,14 @@ int pic_acknowledge(Machine *m) { return -1; }
 void pic_raise_irq(Machine *m, int irq) {}
 void pic_lower_irq(Machine *m, int irq) {}
 bool lift_dispatch(Machine *m, uint32_t linear) { return false; } /* no hooks: exec_hooks stays NULL */
+void lift_coverage_note(Machine *m, uint32_t linear) {}
 void lift_io_callback(Machine *m, int id) {}
 void lift_io_halt(Machine *m) {}
 void lift_irq_boundary(Machine *m) {}
 void lift_far_call_probe(Machine *m) {} /* far_call_probe is never set here */
 void native_cpu_entry(Machine *m) {} /* m->native is never set here */
+uint32_t dosrt_dbg_watch_lo = 0xFFFFFFFFu, dosrt_dbg_watch_hi;
+void dosrt_dbg_watch_write(Machine *m, uint32_t linear, uint32_t value, int size) {}
 void log_msg(const char *fmt, ...) {}
 void fatal(const char *fmt, ...)
 {
